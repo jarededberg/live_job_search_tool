@@ -77,6 +77,39 @@
           </select>
         </div>
 
+        <div class="range-filters-row">
+          <div class="range-filter" id="salary-filter">
+            <div class="range-filter-header">
+              <span class="range-filter-label">Salary</span>
+              <span class="range-filter-value" id="salary-range-value">Any</span>
+            </div>
+            <div class="range-slider" id="salary-slider">
+              <div class="range-slider-track"></div>
+              <div class="range-slider-fill" id="salary-slider-fill"></div>
+              <div class="range-slider-thumb" id="salary-thumb-min" tabindex="0" role="slider"
+                aria-label="Minimum salary"></div>
+              <div class="range-slider-thumb" id="salary-thumb-max" tabindex="0" role="slider"
+                aria-label="Maximum salary"></div>
+            </div>
+            <span class="range-filter-hint">Only applies to postings with a disclosed salary</span>
+          </div>
+          <div class="range-filter" id="yoe-filter">
+            <div class="range-filter-header">
+              <span class="range-filter-label">Years of experience</span>
+              <span class="range-filter-value" id="yoe-range-value">Any</span>
+            </div>
+            <div class="range-slider" id="yoe-slider">
+              <div class="range-slider-track"></div>
+              <div class="range-slider-fill" id="yoe-slider-fill"></div>
+              <div class="range-slider-thumb" id="yoe-thumb-min" tabindex="0" role="slider"
+                aria-label="Minimum years of experience"></div>
+              <div class="range-slider-thumb" id="yoe-thumb-max" tabindex="0" role="slider"
+                aria-label="Maximum years of experience"></div>
+            </div>
+            <span class="range-filter-hint">Only applies to postings with a disclosed YOE requirement</span>
+          </div>
+        </div>
+
         <label for="resume-input" class="resume-dropzone" id="resume-dropzone">
           <span class="resume-icon">↑</span>
           <span><strong>Upload your resume</strong> to auto-fill search terms — .pdf, .docx, or .txt</span>

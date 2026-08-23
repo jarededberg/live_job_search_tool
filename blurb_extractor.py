@@ -79,6 +79,32 @@ def extract_years_experience(text):
     return m.group(3)
 
 
+_YEARS_RANGE_PARSE_RE = re.compile(r"^(\d+)\+?(?:\s*-\s*(\d+)\+?)?$")
+
+
+def parse_years_range(value):
+    """Parses a years_experience badge string (as produced by
+    extract_years_experience above -- "5", "5+", or "3-5") into a
+    (lo, hi) int tuple for numeric range-filter comparisons (see db.py's
+    salary/YOE range slider filtering).
+
+    "3-5" -> (3, 5). "5+" -> (5, None) -- open-ended, no known upper
+    bound, since the posting only said "5+ years," not an actual ceiling.
+    A bare "5" -> (5, 5). Missing/unparseable input -> (None, None).
+    """
+    if not value:
+        return None, None
+    m = _YEARS_RANGE_PARSE_RE.match(value.strip())
+    if not m:
+        return None, None
+    lo = int(m.group(1))
+    if m.group(2):
+        return lo, int(m.group(2))
+    if value.strip().endswith("+"):
+        return lo, None
+    return lo, lo
+
+
 def _context_window(text, start, end, before_words=10, after_words=14):
     """Whole preceding/following WORDS (not a fixed character count) around
     text[start:end], so the returned blurb never starts or ends mid-word."""

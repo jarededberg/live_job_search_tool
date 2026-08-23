@@ -101,6 +101,65 @@ plain-text chips are. Group chips render in a darker color in both the
 dropdown (pinned at the top, marked with a ★) and as selected chips, so
 they're visually distinct from a raw scraped-location chip.
 
+### Salary and YOE range filters
+
+Two dual-thumb "min-max bar" sliders — Salary and Years of experience — sit
+below the location/department/commitment row. Custom-built with plain
+pointer events rather than two overlapping native `<input type="range">`
+elements: overlapping range inputs have real quirks around which thumb
+grabs a click when both sit at the same position, and this app already
+avoids pulling in a slider library for the rest of its UI. `createRangeSlider()`
+in `app.js` is the reusable factory both sliders are built from — drag via
+`pointerdown`/`pointermove`/`pointerup` with `setPointerCapture`, arrow-key
+nudging for keyboard users, click-on-track to jump the nearer handle, and a
+live label that reads "Any" untouched, "$150k+" when only the floor moved,
+"Up to $150k" when only the ceiling moved, or "$120k – $150k" once both
+handles are off their endpoints.
+
+The sliders' own endpoints aren't hardcoded — `GET /api/facets` now also
+returns `salary_bounds`/`yoe_bounds`, computed from what's actually in the
+dataset (`db.salary_bounds()` / `db.years_bounds()`) rather than an
+arbitrary guess, so the floor/ceiling always reflect real postings. Salary
+bounds round outward to the nearest $5k for clean slider endpoints;
+`years_bounds()` has to fetch the distinct `years_experience` strings and
+parse each one (`blurb_extractor.parse_years_range()`), since that column
+is free text ("5+", "3-5"), not a number SQL can `MIN`/`MAX` directly —
+including a fix where an open-ended "10+" posting has no parsed upper
+bound at all, but still needs to push the slider's ceiling up to at least
+10 so that posting is ever reachable (otherwise the ceiling would silently
+cap out at whatever the highest *bounded*-range posting happened to be).
+
+A filter is "active" only once a handle has actually moved off its
+starting endpoint — dragging just the salary floor sends `salary_min` but
+no `salary_max` (no ceiling requested), and touching neither slider sends
+neither param at all, same as leaving a dropdown on "Any." `db.search_jobs()`
+takes the new params through as a range-overlap test: a job passes if its
+*own* posted range overlaps the requested range at all (a job posted
+"$140k–$180k" still shows up under a "$150k+" filter, since $180k clears
+the floor), not a strict containment check. Salary overlap runs in SQL
+against the real `salary_min`/`salary_max` columns; YOE overlap runs in
+Python post-fetch against the parsed `years_experience` text, using the
+same `parse_years_range()` helper.
+
+One deliberate departure from how this app treats missing data everywhere
+else: the location filter gives jobs with no reported location the benefit
+of the doubt and still shows them (see "Location filter" above), but a job
+with no salary or YOE data gets *excluded* once the corresponding slider
+filter is actually touched — most job boards handle salary filters this
+way, and the reasoning holds here too: a candidate who deliberately
+narrowed a $150k+ range wants confirmed matches, not unknowns padding the
+count. Untouched sliders don't filter at all, so this only kicks in once
+the user has opted in.
+
+Verified against a small synthetic DB covering the edge cases: a job with
+no salary data excluded once a salary filter is active; a job with no YOE
+data excluded once a YOE filter is active; a job with an open-ended YOE
+requirement ("10+") correctly excluded from a `[5, 8]` filter (no overlap)
+while another open-ended posting ("8+") correctly passes the same filter
+(8 is within `[5, 8]`); and `salary_bounds()`/`years_bounds()` both
+reflecting the true min/max across the seeded rows, including the
+open-ended-YOE ceiling fix above.
+
 ### Salary data
 
 None of Greenhouse, Lever, or Ashby expose salary as a clean structured

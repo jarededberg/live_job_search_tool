@@ -327,6 +327,94 @@ main {
 .location-option-group { font-weight: 600; }
 .location-option-group::before { content: "★ "; color: var(--accent); }
 
+/* ---------- Salary / YOE dual-range sliders ---------- */
+
+.range-filters-row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.range-filter {
+  flex: 1;
+  min-width: 220px;
+}
+
+.range-filter-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.range-filter-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.range-filter-value {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.range-filter-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.72rem;
+  color: var(--muted-light);
+}
+
+.range-slider {
+  position: relative;
+  height: 16px;
+  display: flex;
+  align-items: center;
+}
+
+.range-slider-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.range-slider-fill {
+  position: absolute;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.range-slider-thumb {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--accent);
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  touch-action: none;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.12s, border-color 0.12s;
+}
+.range-slider-thumb:hover { box-shadow: var(--shadow-md); }
+.range-slider-thumb:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.range-slider-thumb.dragging {
+  cursor: grabbing;
+  border-color: var(--ink);
+}
+
 .resume-dropzone {
   margin-top: 12px;
   display: flex;

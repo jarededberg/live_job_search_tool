@@ -89,6 +89,15 @@ def api_jobs():
     resume_title_terms = [t.lower() for t in request.args.getlist("resume_title_term") if t.strip()]
     resume_skill_terms = [t.lower() for t in request.args.getlist("resume_skill_term") if t.strip()]
     resume_us_based = request.args.get("resume_us_based") == "1"
+
+    def _int_or_none(name):
+        v = request.args.get(name, "")
+        return int(v) if v.strip().lstrip("-").isdigit() else None
+
+    salary_min = _int_or_none("salary_min")
+    salary_max = _int_or_none("salary_max")
+    yoe_min = _int_or_none("yoe_min")
+    yoe_max = _int_or_none("yoe_max")
     page = max(1, int(request.args.get("page", 1) or 1))
     per_page = min(100, max(1, int(request.args.get("per_page", 25) or 25)))
 
@@ -100,6 +109,8 @@ def api_jobs():
                                       resume_title_terms=resume_title_terms,
                                       resume_skill_terms=resume_skill_terms,
                                       resume_us_based=resume_us_based,
+                                      salary_min=salary_min, salary_max=salary_max,
+                                      yoe_min=yoe_min, yoe_max=yoe_max,
                                       page=page, per_page=per_page)
     except Exception as e:
         return jsonify({"error": f"Couldn't parse that search: {e}"}), 400
@@ -114,9 +125,16 @@ def api_jobs():
 
 @app.route("/api/facets")
 def api_facets():
+    salary_lo, salary_hi = db.salary_bounds()
+    yoe_lo, yoe_hi = db.years_bounds()
     return jsonify({
         "departments": db.distinct_facet_values("department", limit=40),
         "commitments": db.distinct_facet_values("commitment", limit=10),
+        # Used to size the min/max endpoints of the salary + years-of-
+        # experience dual-range sliders on the frontend -- see
+        # db.salary_bounds()/years_bounds() for how these are derived.
+        "salary_bounds": {"min": salary_lo, "max": salary_hi},
+        "yoe_bounds": {"min": yoe_lo, "max": yoe_hi},
     })
 
 

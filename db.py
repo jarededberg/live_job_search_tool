@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from boolean_search import parse_query, evaluate, leaf_terms
 from location_groups import matches_group, is_clearly_non_us
+from blurb_extractor import parse_years_range
 
 DB_PATH = os.environ.get("JOBS_DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "jobs.db"))
 MAX_CANDIDATES = 50000  # cap on rows pulled from SQLite before Python-side boolean evaluation
@@ -276,6 +277,7 @@ def _match_info(job, title_terms, skill_terms, us_based=False):
 def search_jobs(query="", location="", locations=None, location_groups=None, days=None,
                  department="", commitment="", sort=DEFAULT_SORT,
                  resume_title_terms=None, resume_skill_terms=None, resume_us_based=False,
+                 salary_min=None, salary_max=None, yoe_min=None, yoe_max=None,
                  page=1, per_page=25):
     """Boolean keyword search against title (AND/OR/NOT/quotes/parens via
     boolean_search.py), plus facet filters for location substring, days-back,
@@ -318,6 +320,24 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     sent whenever the resume parser couldn't confidently place the
     candidate in the US) leaves location out of scoring entirely, same as
     before this param existed.
+
+    `salary_min`/`salary_max` and `yoe_min`/`yoe_max` are range-slider
+    filters (see the frontend's dual-thumb sliders, sized against
+    `salary_bounds()`/`years_bounds()`). Each pair is independently
+    optional -- `None` on one side means "no ceiling"/"no floor" on that
+    side, and `None` on both means the filter isn't active at all (the
+    common case: most searches never touch the sliders). A job only
+    passes a filter that IS active if it actually reports the relevant
+    data AND that data's own range overlaps the requested range --
+    salary via the real `salary_min`/`salary_max` columns in SQL, YOE via
+    parsing the free-text `years_experience` column in Python (same
+    `parse_years_range()` used to compute `years_bounds()`). Jobs with no
+    salary/YOE data are excluded once the corresponding filter is active,
+    on the theory that a candidate who deliberately narrowed the range
+    wants confirmed matches, not unknowns padding the count -- this
+    mirrors how most job boards handle salary filters, and is a
+    deliberate departure from the "benefit of the doubt" treatment given
+    to missing location data elsewhere in this file.
     """
     ast = parse_query(query)
     order_sql = SORT_OPTIONS.get(sort, SORT_OPTIONS[DEFAULT_SORT])
@@ -357,6 +377,24 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     if commitment.strip():
         where.append("commitment = ?")
         params.append(commitment.strip())
+
+    if salary_min is not None or salary_max is not None:
+        # Range-overlap test against the real salary_min/salary_max
+        # columns: a job passes if its own posted range overlaps the
+        # requested [lo, hi] at all, not just if it's fully contained --
+        # e.g. a job posted as "$140k-$180k" should still show up for a
+        # "$150k+" filter even though $140k is below the floor. Missing
+        # `salary_min`/`salary_max` on either side falls back to
+        # unbounded (0 / a very large number) rather than narrowing that
+        # side at all.
+        lo = salary_min if salary_min is not None else 0
+        hi = salary_max if salary_max is not None else 10**9
+        where.append(
+            "(salary_min IS NOT NULL AND salary_max IS NOT NULL "
+            "AND salary_max >= ? AND salary_min <= ?)"
+        )
+        params.append(lo)
+        params.append(hi)
 
     positive_terms = leaf_terms(ast) if ast else []
     if positive_terms:
@@ -400,6 +438,29 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
             return any(matches_group(g, loc) for g in group_list)
 
         candidates = [r for r in candidates if _loc_matches(r)]
+
+    if yoe_min is not None or yoe_max is not None:
+        # Same range-overlap idea as the salary filter above, but done in
+        # Python post-fetch instead of SQL, since `years_experience` is
+        # free text ("5+", "3-5") rather than a numeric column -- has to
+        # be parsed per-row via parse_years_range() before it can be
+        # compared to the requested range at all.
+        yoe_lo = yoe_min if yoe_min is not None else 0
+        yoe_hi = yoe_max if yoe_max is not None else 999
+
+        def _yoe_overlaps(r):
+            job_lo, job_hi = parse_years_range(r.get("years_experience"))
+            if job_lo is None:
+                return False  # can't confirm a fit -- exclude rather than
+                               # guess, same call as the salary filter
+            if job_hi is None:
+                # Open-ended "X+" from the posting -- treat it as
+                # satisfying any requested ceiling rather than excluding
+                # a "10+" job just because the filter's ceiling is 12.
+                job_hi = 999
+            return job_hi >= yoe_lo and job_lo <= yoe_hi
+
+        candidates = [r for r in candidates if _yoe_overlaps(r)]
 
     title_terms = [t.lower() for t in (resume_title_terms or []) if t]
     skill_terms = [t.lower() for t in (resume_skill_terms or []) if t]
@@ -446,6 +507,56 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         except (TypeError, ValueError):
             r["tools"] = []
     return page_rows, total
+
+
+def salary_bounds():
+    """(min, max) of salary_min/salary_max across every job that reports
+    both -- used to size the salary range slider's endpoints so the
+    handles' starting positions reflect what's actually in the dataset,
+    not an arbitrary guess. Falls back to a reasonable default range when
+    nothing in the DB has salary data yet (fresh install, first scrape
+    still running)."""
+    with conn_ctx() as conn:
+        row = conn.execute(
+            "SELECT MIN(salary_min) AS lo, MAX(salary_max) AS hi FROM jobs "
+            "WHERE salary_min IS NOT NULL AND salary_max IS NOT NULL"
+        ).fetchone()
+    if row["lo"] is None or row["hi"] is None:
+        return 40000, 300000
+    # Round outward to the nearest $5k so the slider's endpoints read as
+    # clean numbers instead of whatever oddly-specific figure happened to
+    # be the single lowest/highest posted salary in the dataset.
+    lo = (row["lo"] // 5000) * 5000
+    hi = -(-row["hi"] // 5000) * 5000  # ceiling division
+    return int(lo), int(hi)
+
+
+def years_bounds():
+    """(min, max) of parsed years_experience across every job that has it
+    -- same idea as salary_bounds() but for the YOE slider. years_experience
+    is free text ("5+", "3-5"), not a numeric column, so this can't be a
+    plain SQL MIN/MAX: it fetches the small number of distinct values
+    actually present and parses each with parse_years_range()."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT years_experience AS v FROM jobs "
+            "WHERE years_experience IS NOT NULL AND years_experience != ''"
+        ).fetchall()
+    los, his = [], []
+    for row in rows:
+        lo, hi = parse_years_range(row["v"])
+        if lo is not None:
+            los.append(lo)
+        if hi is not None:
+            his.append(hi)
+    if not los:
+        return 0, 15
+    # An open-ended "10+" posting has no parsed `hi` at all, but the
+    # slider's upper endpoint still needs to reach at least 10 for that
+    # job to ever be selectable -- so the max is taken over BOTH lists,
+    # not just `his` (which would silently cap out at 7 if every
+    # bounded-range posting topped out lower than an open-ended one).
+    return min(los), max(los + his)
 
 
 def distinct_facet_values(column, limit=30):

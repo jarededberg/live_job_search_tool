@@ -17,6 +17,13 @@ const resumeDropzone = document.getElementById("resume-dropzone");
 const resumeStatus = document.getElementById("resume-status");
 
 let currentPage = 1;
+// Populated once /api/facets returns salary_bounds/yoe_bounds and the
+// sliders are initialized (see initRangeSliders). null until then, and
+// search() just skips sending the corresponding filter params in that
+// window (matches how department/commitment selects behave before
+// loadFacets() resolves -- no special-casing needed).
+let salaryRange = null; // { lo, hi, min, max }
+let yoeRange = null; // { lo, hi, min, max }
 // Each entry is { type: "text", value: "San Francisco, CA" } for a plain
 // scraped-location substring, or { type: "group", value: "remote_us",
 // label: "Remote (US)" } for a canonical group chip (see location_groups.py)
@@ -82,6 +89,18 @@ async function search(page = 1) {
   selectedLocations.forEach((loc) => {
     params.append(loc.type === "group" ? "location_group" : "location", loc.value);
   });
+  // Only sent once a handle has actually moved off the slider's own
+  // endpoints -- e.g. dragging the min handle up sends salary_min but
+  // leaves salary_max unsent (no ceiling), matching db.py's treatment of
+  // an unsent bound as "no filter on that side."
+  if (salaryRange) {
+    if (salaryRange.lo > salaryRange.min) params.append("salary_min", salaryRange.lo);
+    if (salaryRange.hi < salaryRange.max) params.append("salary_max", salaryRange.hi);
+  }
+  if (yoeRange) {
+    if (yoeRange.lo > yoeRange.min) params.append("yoe_min", yoeRange.lo);
+    if (yoeRange.hi < yoeRange.max) params.append("yoe_max", yoeRange.hi);
+  }
   if (hasResume) {
     // Sent on every request once a resume is loaded, not just when sorting
     // by match — match_tier badges are computed server-side (see db.py's
@@ -277,9 +296,163 @@ async function loadFacets() {
     const data = await res.json();
     fillSelect(departmentSelect, data.departments, "Any department");
     fillSelect(commitmentSelect, data.commitments, "Any commitment");
+    if (data.salary_bounds && data.yoe_bounds) {
+      initRangeSliders(data.salary_bounds, data.yoe_bounds);
+    }
   } catch (e) {
     /* facets are a nice-to-have; fail quietly */
   }
+}
+
+// ---- salary / YOE dual-range sliders ----
+//
+// Plain custom sliders (pointer-events based, not two overlapping native
+// <input type="range"> elements) -- overlapping range inputs have real
+// quirks around which thumb receives a click when they're stacked at the
+// same position, and this app already leans on vanilla JS everywhere
+// else rather than pulling in a slider library for two fields.
+
+function createRangeSlider({ track, fill, thumbMin, thumbMax, valueEl, min, max, step, format, onCommit }) {
+  let lo = min;
+  let hi = max;
+
+  function pct(v) {
+    return max === min ? 0 : ((v - min) / (max - min)) * 100;
+  }
+
+  function render() {
+    thumbMin.style.left = `${pct(lo)}%`;
+    thumbMax.style.left = `${pct(hi)}%`;
+    fill.style.left = `${pct(lo)}%`;
+    fill.style.width = `${Math.max(0, pct(hi) - pct(lo))}%`;
+    thumbMin.setAttribute("aria-valuemin", min);
+    thumbMin.setAttribute("aria-valuemax", max);
+    thumbMin.setAttribute("aria-valuenow", lo);
+    thumbMax.setAttribute("aria-valuemin", min);
+    thumbMax.setAttribute("aria-valuemax", max);
+    thumbMax.setAttribute("aria-valuenow", hi);
+    // "Any" when untouched, "$150k+" when only the floor moved (no
+    // ceiling requested), "Up to $150k" when only the ceiling moved, and
+    // a plain "$X – $Y" once both handles are off their endpoints.
+    if (lo === min && hi === max) valueEl.textContent = "Any";
+    else if (hi === max) valueEl.textContent = `${format(lo)}+`;
+    else if (lo === min) valueEl.textContent = `Up to ${format(hi)}`;
+    else valueEl.textContent = `${format(lo)} – ${format(hi)}`;
+  }
+
+  function valueFromClientX(clientX) {
+    const rect = track.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const raw = min + ratio * (max - min);
+    return Math.round(raw / step) * step;
+  }
+
+  function startDrag(which, thumb, e) {
+    e.preventDefault();
+    thumb.setPointerCapture(e.pointerId);
+    thumb.classList.add("dragging");
+    function move(ev) {
+      const v = valueFromClientX(ev.clientX);
+      if (which === "min") lo = Math.min(v, hi);
+      else hi = Math.max(v, lo);
+      render();
+    }
+    function up() {
+      thumb.classList.remove("dragging");
+      thumb.removeEventListener("pointermove", move);
+      thumb.removeEventListener("pointerup", up);
+      onCommit(lo, hi);
+    }
+    thumb.addEventListener("pointermove", move);
+    thumb.addEventListener("pointerup", up);
+  }
+
+  thumbMin.addEventListener("pointerdown", (e) => startDrag("min", thumbMin, e));
+  thumbMax.addEventListener("pointerdown", (e) => startDrag("max", thumbMax, e));
+
+  // Arrow-key nudging, same step as dragging -- keeps the sliders usable
+  // without a mouse/touchscreen (native <input type="range"> gets this
+  // for free; a custom div-based slider has to implement it by hand).
+  function onKey(which, e) {
+    let delta = 0;
+    if (e.key === "ArrowRight" || e.key === "ArrowUp") delta = step;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowDown") delta = -step;
+    else if (e.key === "Home") delta = which === "min" ? min - lo : min - hi;
+    else if (e.key === "End") delta = which === "min" ? max - lo : max - hi;
+    else return;
+    e.preventDefault();
+    if (which === "min") lo = Math.min(Math.max(min, lo + delta), hi);
+    else hi = Math.max(Math.min(max, hi + delta), lo);
+    render();
+    onCommit(lo, hi);
+  }
+  thumbMin.addEventListener("keydown", (e) => onKey("min", e));
+  thumbMax.addEventListener("keydown", (e) => onKey("max", e));
+
+  // Clicking the bare track (not a thumb) jumps whichever handle is
+  // closer to the click point -- standard dual-slider behavior.
+  track.addEventListener("click", (e) => {
+    if (e.target !== track) return;
+    const v = valueFromClientX(e.clientX);
+    if (Math.abs(v - lo) <= Math.abs(v - hi)) lo = Math.min(v, hi);
+    else hi = Math.max(v, lo);
+    render();
+    onCommit(lo, hi);
+  });
+
+  render();
+  return { getValues: () => ({ lo, hi, min, max }) };
+}
+
+function formatSalaryShort(n) {
+  return `$${Math.round(n / 1000)}k`;
+}
+
+function formatYoeShort(n) {
+  return `${n} yr${n === 1 ? "" : "s"}`;
+}
+
+let rangeSlidersInitialized = false;
+
+function initRangeSliders(salaryBounds, yoeBounds) {
+  if (rangeSlidersInitialized) return; // /api/facets can be called again later; only wire once
+  rangeSlidersInitialized = true;
+
+  const salaryStep = Math.max(1000, Math.round((salaryBounds.max - salaryBounds.min) / 100 / 1000) * 1000);
+  const salarySlider = createRangeSlider({
+    track: document.querySelector("#salary-slider .range-slider-track"),
+    fill: document.getElementById("salary-slider-fill"),
+    thumbMin: document.getElementById("salary-thumb-min"),
+    thumbMax: document.getElementById("salary-thumb-max"),
+    valueEl: document.getElementById("salary-range-value"),
+    min: salaryBounds.min,
+    max: salaryBounds.max,
+    step: salaryStep,
+    format: formatSalaryShort,
+    onCommit: (lo, hi) => {
+      salaryRange = { lo, hi, min: salaryBounds.min, max: salaryBounds.max };
+      search(1);
+    },
+  });
+  salaryRange = { lo: salaryBounds.min, hi: salaryBounds.max, min: salaryBounds.min, max: salaryBounds.max };
+
+  const yoeStep = 1;
+  const yoeSlider = createRangeSlider({
+    track: document.querySelector("#yoe-slider .range-slider-track"),
+    fill: document.getElementById("yoe-slider-fill"),
+    thumbMin: document.getElementById("yoe-thumb-min"),
+    thumbMax: document.getElementById("yoe-thumb-max"),
+    valueEl: document.getElementById("yoe-range-value"),
+    min: yoeBounds.min,
+    max: yoeBounds.max,
+    step: yoeStep,
+    format: formatYoeShort,
+    onCommit: (lo, hi) => {
+      yoeRange = { lo, hi, min: yoeBounds.min, max: yoeBounds.max };
+      search(1);
+    },
+  });
+  yoeRange = { lo: yoeBounds.min, hi: yoeBounds.max, min: yoeBounds.min, max: yoeBounds.max };
 }
 
 function fillSelect(select, values, defaultLabel) {
