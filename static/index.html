@@ -67,6 +67,13 @@
           <select id="commitment">
             <option value="">Any commitment</option>
           </select>
+          <select id="sort">
+            <option value="newest" selected>Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="company">Company A–Z</option>
+            <option value="salary_high">Salary: high to low</option>
+            <option value="salary_low">Salary: low to high</option>
+          </select>
         </div>
 
         <label for="resume-input" class="resume-dropzone" id="resume-dropzone">
@@ -80,10 +87,9 @@
 
     <div class="results-header">
       <span id="status-line" class="status-line"></span>
-      <div class="sort-hint">Sorted by most recently posted</div>
     </div>
 
-    <section id="results" class="results-list"></section>
+    <section id="results" class="results-grid"></section>
 
     <div id="pagination" class="pagination"></div>
   </main>

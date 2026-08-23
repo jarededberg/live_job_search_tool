@@ -84,13 +84,14 @@ def api_jobs():
     days = request.args.get("days", "")
     department = request.args.get("department", "")
     commitment = request.args.get("commitment", "")
+    sort = request.args.get("sort", db.DEFAULT_SORT)
     page = max(1, int(request.args.get("page", 1) or 1))
     per_page = min(100, max(1, int(request.args.get("per_page", 25) or 25)))
 
     days_val = int(days) if days.strip().isdigit() else None
     try:
         jobs, total = db.search_jobs(query=q, locations=locations, days=days_val, department=department,
-                                      commitment=commitment, page=page, per_page=per_page)
+                                      commitment=commitment, sort=sort, page=page, per_page=per_page)
     except Exception as e:
         return jsonify({"error": f"Couldn't parse that search: {e}"}), 400
     return jsonify({

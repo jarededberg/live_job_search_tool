@@ -21,6 +21,7 @@ import ijson
 
 from companies_data import COMPANIES
 from salary_extractor import strip_html, extract_salary
+from blurb_extractor import extract_blurb, extract_blurb_from_sections
 
 _LOCAL = threading.local()
 
@@ -73,20 +74,30 @@ def fetch(url, timeout=8):
 
 
 def parse_ts(ts):
-    """Best-effort parse of a timestamp into an ISO date string (YYYY-MM-DD)."""
+    """Best-effort parse of a timestamp into a full ISO-8601 string (kept to
+    second precision, always UTC). Deliberately NOT truncated to just a date
+    — with only a date, the dozens of jobs posted on the same day sort by
+    whatever the secondary sort key is (company name), which visually looks
+    like the whole list is "sorted alphabetically" even though newest-first
+    is the primary sort. Full timestamps make ties rare enough that
+    newest-first actually reads as newest-first. ISO-8601 strings still sort
+    correctly as plain strings, so every date-prefix comparison elsewhere
+    (the `days` filter cutoff, etc.) keeps working unchanged."""
     if ts is None:
         return None
     try:
         if isinstance(ts, (int, float)):
-            return datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+            return datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         ts = str(ts).strip()
         try:
             dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            return dt.strftime("%Y-%m-%d")
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         except ValueError:
             pass
         try:
-            return datetime.strptime(ts[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+            return datetime.strptime(ts[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
         except ValueError:
             pass
     except Exception:
@@ -112,7 +123,7 @@ def normalize_commitment(raw):
 
 
 def make_job(title, company, location, posted, url, source, department="", commitment="",
-             salary_min=None, salary_max=None):
+             salary_min=None, salary_max=None, blurb=""):
     return {
         "title": (title or "").strip(),
         "company": (company or "").strip(),
@@ -124,6 +135,7 @@ def make_job(title, company, location, posted, url, source, department="", commi
         "commitment": normalize_commitment(commitment),
         "salary_min": salary_min,
         "salary_max": salary_max,
+        "blurb": (blurb or "").strip(),
     }
 
 
@@ -155,10 +167,12 @@ def try_greenhouse(company, slug):
                 if (meta.get("name") or "").strip().lower() in ("employment type", "job type", "commitment"):
                     commitment = str(meta.get("value") or "")
                     break
-            salary_min, salary_max = extract_salary(strip_html(job.get("content", "")))
+            content = job.get("content", "")
+            salary_min, salary_max = extract_salary(strip_html(content))
+            blurb = extract_blurb(content, is_html=True)
             if title and job_url:
                 results.append(make_job(title, company, location, posted, job_url, "Greenhouse",
-                                         department, commitment, salary_min, salary_max))
+                                         department, commitment, salary_min, salary_max, blurb))
     return results
 
 
@@ -192,9 +206,16 @@ def try_lever(company, slug):
                 job.get("additionalPlain", "") or "",
             ])
             salary_min, salary_max = extract_salary(desc_text)
+            # `lists` (e.g. "What We Require" -> bullet items) is far more
+            # reliable for a blurb than hunting for a heading in the plain
+            # description text, which is often just a generic company
+            # intro paragraph repeated across every posting. Fall back to
+            # the plain text only if there's no usable list section.
+            sections = [(l.get("text"), l.get("content")) for l in (job.get("lists") or [])]
+            blurb = extract_blurb_from_sections(sections) or extract_blurb(desc_text, is_html=False)
             if title and job_url:
                 results.append(make_job(title, company, location, posted, job_url, "Lever",
-                                         department, commitment, salary_min, salary_max))
+                                         department, commitment, salary_min, salary_max, blurb))
     return results
 
 
@@ -257,11 +278,13 @@ def try_ashby(company, slug):
             department = job.get("department", "") or job.get("team", "")
             commitment = job.get("employmentType", "")
             salary_min, salary_max = salary_from_ashby_compensation(job.get("compensation"))
+            desc_plain = job.get("descriptionPlain", "") or ""
             if salary_min is None:
-                salary_min, salary_max = extract_salary(job.get("descriptionPlain", "") or "")
+                salary_min, salary_max = extract_salary(desc_plain)
+            blurb = extract_blurb(desc_plain, is_html=False)
             if title and job_url:
                 results.append(make_job(title, company, location, posted, job_url, "Ashby",
-                                         department, commitment, salary_min, salary_max))
+                                         department, commitment, salary_min, salary_max, blurb))
     return results
 
 

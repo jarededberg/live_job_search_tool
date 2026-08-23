@@ -26,13 +26,17 @@ Built to share the tool publicly and post about it on LinkedIn.
   sometimes exposes a real structured compensation field (used when
   present); everything else falls back to a conservative regex over the job
   description text. See "Salary data" below for the honest accuracy story.
+- **`blurb_extractor.py`** — best-effort role summary for the card view.
+  Prioritizes an explicit years-of-experience requirement, falls back to
+  bullets under a "Qualifications"/"Requirements" heading, falls back to the
+  first substantive sentence. See "Role blurbs" below.
 - **`build_logo_cache.py`** — offline script that resolves a working favicon
   domain for each company and writes `static/logo_cache.json`. Run this
   occasionally (not on every deploy) when companies_data.py changes — see
   "Company logos" below.
 - **`app.py`** — Flask app. Runs the scraper on a schedule (every 8 hours by
   default, via APScheduler) and exposes:
-  - `GET /api/jobs?q=...&location=...&location=...&days=...&department=...&commitment=...&page=...` — search (repeat `location` for multi-select)
+  - `GET /api/jobs?q=...&location=...&location=...&days=...&department=...&commitment=...&sort=...&page=...` — search (repeat `location` for multi-select; `sort` is one of `newest`/`oldest`/`company`/`salary_high`/`salary_low`, default `newest`)
   - `GET /api/facets` — distinct department/commitment values for the filter dropdowns
   - `GET /api/locations?q=...` — location typeahead suggestions, ranked by role count
   - `GET /api/status` — dataset freshness / scrape progress
@@ -144,6 +148,75 @@ already in the cache) whenever `companies_data.py` gets new entries. It's
 not part of the deploy pipeline or the scheduled scrape; it's a manual,
 occasional step, same as editing the company list itself.
 
+### Role blurbs
+
+Each card shows a short blurb — same "best-effort, clearly extracted, not
+curated" philosophy as salary. `blurb_extractor.py` tries, in order:
+
+1. An explicit years-of-experience mention ("4+ years of experience
+   prospecting...", "Minimum 3 years of experience building in AWS...").
+2. The first couple bullet points under a heading that looks like
+   "Qualifications" / "Requirements" / "What You'll Need" / "Who You Are".
+   For Lever specifically, this uses the `lists` field (already split into
+   titled sections like "What We Require") instead of hunting for a heading
+   in a wall of text — far more reliable, since Lever's plain-text fields
+   are often just a repeated company boilerplate paragraph.
+3. The first substantive sentence of the description, as a last resort.
+
+On an 800-company sample, 100% of jobs get some blurb (the fallback ensures
+that), and the years-of-experience / qualifications passes catch a large
+majority of them with something genuinely specific rather than generic
+company-intro text.
+
+One real bug worth knowing about if this ever gets touched again: the
+original years-of-experience regex baked "grab ~10 words before and ~14
+after" directly into the pattern via bounded repetition of a
+variable-length token class (`(?:\S+\s+){0,10}...`). That measured ~14ms
+per call on a real ~8KB job description — 7.75s for one 517-job company,
+which would have meant a full ~4,300-company scrape taking noticeably
+longer than before. The fix: match only the short anchor phrase with a
+plain regex, then grab surrounding context with ordinary Python string
+splitting instead of asking the regex engine to do it. Same 517 jobs
+dropped to ~0.4s. If you're tempted to add more context-aware regexes here,
+benchmark against real data before assuming it's fine at scale — a pattern
+that's instant on a test string can still be slow-by-orders-of-magnitude on
+a real 8KB description.
+
+### Sort control
+
+Default is newest-first — but "newest" only reads as newest if postings
+actually have distinct timestamps. `posted` used to be truncated to a bare
+date (`parse_ts` in `scraper.py`), so the dozens of jobs posted on the same
+day fell back to the secondary sort key (company name), which visually
+looked like the whole list was alphabetized even though newest-first was
+technically the primary sort. `parse_ts` now keeps a full ISO-8601
+timestamp; the UI still only displays the date part
+(`job.posted.slice(0, 10)` in `jobRow`/`jobCard`), but the underlying sort
+now has real second-level precision. `SORT_OPTIONS` in `db.py` covers
+newest / oldest / company A-Z / salary high-to-low / salary low-to-high;
+the `#sort` dropdown applies immediately on change rather than waiting for
+the Search button, since it's "how do you want to look at what you already
+have," not a new query.
+
+### Match tiers (best / good / poor)
+
+Purely client-side, computed in the browser, not stored or scraped: once a
+resume is uploaded, `app.js` keeps the extracted terms in memory and scores
+each visible job by what fraction of those terms appear in its title +
+blurb — ≥50% match is "Best match," ≥20% is "Good match," otherwise "Poor
+match." This is a keyword-overlap heuristic, not semantic matching or a
+model call — it's the same tier of signal as the salary/blurb extraction
+(clearly labeled via a tooltip on the badge), not a claim about actual job
+fit. No resume uploaded yet = no badges shown at all, rather than a
+meaningless default tier.
+
+### Results layout
+
+Cards are laid out in a responsive grid — 5 across at full desktop width,
+stepping down to 4 / 3 / 2 / 1 as the viewport narrows (see `.results-grid`
+in `style.css`). The site's overall max-width grew from 1100px to 1360px to
+give 5 columns reasonable breathing room.
+
 ## Run locally
 
 ```bash
@@ -217,6 +290,13 @@ text streamed through it), and the same 797-company benchmark re-run with
 both flags on peaked at **60MB** RSS — a 4MB increase, not a regression.
 Streaming is what makes this safe: payload size stopped being the thing that
 mattered once nothing holds more than ~1 job's data in memory at a time.
+
+Adding blurb extraction (storing a short ~220-char excerpt per job, on top
+of salary) brought the same 797-company benchmark to **85MB** RSS — still
+well within budget. (This is also where a real performance bug got caught
+and fixed — see "Role blurbs" below; the fix mattered for scrape *duration*
+more than memory, but it's the same instinct: benchmark on real data before
+assuming a regex is fine at scale.)
 
 Railway or Fly.io work the same way — any host that runs a long-lived Python
 process (not a stateless serverless function, since the scheduler needs to

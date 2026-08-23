@@ -61,11 +61,12 @@ def init_db():
                 commitment TEXT DEFAULT '',
                 salary_min INTEGER,
                 salary_max INTEGER,
+                blurb TEXT DEFAULT '',
                 first_seen TEXT NOT NULL,
                 last_seen TEXT NOT NULL
             )
         """)
-        # Lightweight migration for DBs created before department/commitment/salary existed
+        # Lightweight migration for DBs created before department/commitment/salary/blurb existed
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         if "department" not in cols:
             conn.execute("ALTER TABLE jobs ADD COLUMN department TEXT DEFAULT ''")
@@ -75,6 +76,8 @@ def init_db():
             conn.execute("ALTER TABLE jobs ADD COLUMN salary_min INTEGER")
         if "salary_max" not in cols:
             conn.execute("ALTER TABLE jobs ADD COLUMN salary_max INTEGER")
+        if "blurb" not in cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN blurb TEXT DEFAULT ''")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_posted ON jobs(posted)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_title ON jobs(title)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_department ON jobs(department)")
@@ -104,22 +107,23 @@ def upsert_jobs(jobs):
             commit_ = j.get("commitment", "")
             salary_min = j.get("salary_min")
             salary_max = j.get("salary_max")
+            blurb = j.get("blurb", "")
             cur = conn.execute("SELECT url FROM jobs WHERE url = ?", (j["url"],))
             if cur.fetchone() is None:
                 new_count += 1
                 conn.execute(
                     "INSERT INTO jobs (url, title, company, location, posted, source, department, "
-                    "commitment, salary_min, salary_max, first_seen, last_seen) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "commitment, salary_min, salary_max, blurb, first_seen, last_seen) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (j["url"], j["title"], j["company"], j["location"], j["posted"], j["source"],
-                     dept, commit_, salary_min, salary_max, now, now),
+                     dept, commit_, salary_min, salary_max, blurb, now, now),
                 )
             else:
                 conn.execute(
                     "UPDATE jobs SET title=?, company=?, location=?, posted=?, source=?, department=?, "
-                    "commitment=?, salary_min=?, salary_max=?, last_seen=? WHERE url=?",
+                    "commitment=?, salary_min=?, salary_max=?, blurb=?, last_seen=? WHERE url=?",
                     (j["title"], j["company"], j["location"], j["posted"], j["source"], dept, commit_,
-                     salary_min, salary_max, now, j["url"]),
+                     salary_min, salary_max, blurb, now, j["url"]),
                 )
         conn.commit()
     return new_count
@@ -157,8 +161,18 @@ def total_jobs():
         return conn.execute("SELECT COUNT(*) AS c FROM jobs").fetchone()["c"]
 
 
+SORT_OPTIONS = {
+    "newest": "(posted IS NULL), posted DESC, company ASC",
+    "oldest": "(posted IS NULL), posted ASC, company ASC",
+    "company": "company ASC, (posted IS NULL), posted DESC",
+    "salary_high": "(salary_max IS NULL), salary_max DESC, (posted IS NULL), posted DESC",
+    "salary_low": "(salary_min IS NULL), salary_min ASC, (posted IS NULL), posted DESC",
+}
+DEFAULT_SORT = "newest"
+
+
 def search_jobs(query="", location="", locations=None, days=None, department="", commitment="",
-                 page=1, per_page=25):
+                 sort=DEFAULT_SORT, page=1, per_page=25):
     """Boolean keyword search against title (AND/OR/NOT/quotes/parens via
     boolean_search.py), plus facet filters for location substring, days-back,
     department, and commitment. Boolean evaluation happens in Python; SQL is
@@ -170,8 +184,13 @@ def search_jobs(query="", location="", locations=None, days=None, department="",
     matches if its location contains ANY of them. `location` (singular) is
     kept for backward compatibility as a single substring filter; if both
     are given, `locations` wins.
+
+    `sort` picks one of SORT_OPTIONS; unrecognized values fall back to the
+    default (newest-first) rather than raising, since it only ever comes
+    from a query param a user could hand-edit.
     """
     ast = parse_query(query)
+    order_sql = SORT_OPTIONS.get(sort, SORT_OPTIONS[DEFAULT_SORT])
 
     where = []
     params = []
@@ -211,7 +230,7 @@ def search_jobs(query="", location="", locations=None, days=None, department="",
 
     with conn_ctx() as conn:
         rows = conn.execute(
-            f"SELECT * FROM jobs {where_sql} ORDER BY (posted IS NULL), posted DESC, company ASC "
+            f"SELECT * FROM jobs {where_sql} ORDER BY {order_sql} "
             f"LIMIT ?",
             params + [MAX_CANDIDATES],
         ).fetchall()

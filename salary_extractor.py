@@ -46,24 +46,28 @@ MIN_REASONABLE = 15_000
 MAX_REASONABLE = 1_000_000
 
 
-def strip_html(text):
-    """Turn a chunk of job-description HTML into plain text, good enough for
-    regex scanning (not for display).
-
-    Some ATS content fields (observed on Greenhouse) come back
+def unescape_repeated(text):
+    """Some ATS content fields (observed on Greenhouse) come back
     double-escaped — literal `&lt;div&gt;` instead of `<div>`, with the
     original entities like `&mdash;` themselves re-escaped into
-    `&amp;mdash;`. Unescaping only once leaves the tags as escaped text,
-    which _TAG_RE (already run) never gets a chance to strip, silently
-    hiding an "Annual Salary: $X — $Y" block inside literal tag markup.
-    Unescaping repeatedly until the string stops changing handles both
-    singly- and doubly-escaped input the same way."""
+    `&amp;mdash;`. Unescaping only once leaves the tags as escaped text
+    instead of real markup. Unescaping repeatedly until the string stops
+    changing handles both singly- and doubly-escaped input the same way,
+    and yields real `<tag>` markup for anything that still wants to look
+    at tag structure (see blurb_extractor.py) rather than just plain text."""
     if not text:
         return ""
     prev = None
     while prev != text:
         prev = text
         text = html.unescape(text)
+    return text
+
+
+def strip_html(text):
+    """Turn a chunk of job-description HTML into plain text, good enough for
+    regex scanning (not for display)."""
+    text = unescape_repeated(text)
     text = _TAG_RE.sub(" ", text)
     return _WS_RE.sub(" ", text).strip()
 

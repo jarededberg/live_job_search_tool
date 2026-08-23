@@ -5,6 +5,7 @@ const paginationEl = document.getElementById("pagination");
 const footerStatus = document.getElementById("footer-status");
 const departmentSelect = document.getElementById("department");
 const commitmentSelect = document.getElementById("commitment");
+const sortSelect = document.getElementById("sort");
 const locationInput = document.getElementById("location-input");
 const locationChipsEl = document.getElementById("location-chips");
 const locationDropdown = document.getElementById("location-dropdown");
@@ -46,13 +47,14 @@ async function search(page = 1) {
   const days = document.getElementById("days").value;
   const department = departmentSelect.value;
   const commitment = commitmentSelect.value;
+  const sort = sortSelect.value;
 
   statusLine.textContent = "Searching…";
   resultsEl.innerHTML = "";
   paginationEl.innerHTML = "";
 
   const params = new URLSearchParams();
-  qs({ q, days, department, commitment, page, per_page: 50 })
+  qs({ q, days, department, commitment, sort, page, per_page: 50 })
     .split("&")
     .filter(Boolean)
     .forEach((pair) => {
@@ -88,7 +90,7 @@ function renderResults(data) {
   statusLine.textContent =
     `Showing ${start.toLocaleString()}–${end.toLocaleString()} of ${data.total.toLocaleString()} match${data.total === 1 ? "" : "es"}${narrowHint}`;
 
-  resultsEl.innerHTML = data.jobs.map(jobRow).join("");
+  resultsEl.innerHTML = data.jobs.map(jobCard).join("");
 
   const prevDisabled = data.page <= 1 ? "disabled" : "";
   const nextDisabled = data.page >= data.pages ? "disabled" : "";
@@ -122,8 +124,36 @@ function logoHtml(company) {
     onerror="this.outerHTML='<div class=&quot;job-logo job-logo-fallback&quot;>${initial}</div>'" /></div>`;
 }
 
-function jobRow(job) {
-  const posted = job.posted ? job.posted : "date unknown";
+// ---- resume match tiers ----
+// Client-side heuristic only: keyword overlap between the terms extracted
+// from an uploaded resume and each job's title + blurb. This is NOT a deep
+// semantic match — it's the same kind of best-effort, clearly-labeled
+// signal as the salary/blurb extraction, just computed in the browser
+// instead of at scrape time (it depends on the resume, which the server
+// never stores). No resume uploaded yet = no badges at all, rather than a
+// meaningless default.
+let resumeTerms = [];
+let hasResume = false;
+
+function matchTier(job) {
+  if (!hasResume || !resumeTerms.length) return null;
+  const haystack = `${job.title} ${job.blurb || ""}`.toLowerCase();
+  const matched = resumeTerms.filter((t) => haystack.includes(t));
+  const ratio = matched.length / resumeTerms.length;
+  if (ratio >= 0.5) return "best";
+  if (ratio >= 0.2) return "good";
+  return "poor";
+}
+
+function matchBadgeHtml(job) {
+  const tier = matchTier(job);
+  if (!tier) return "";
+  const labels = { best: "Best match", good: "Good match", poor: "Poor match" };
+  return `<span class="match-badge match-${tier}" title="Keyword overlap with your resume's extracted terms — a rough signal, not a full analysis">${labels[tier]}</span>`;
+}
+
+function jobCard(job) {
+  const posted = job.posted ? job.posted.slice(0, 10) : "date unknown";
   const location = job.location || "Location not listed";
   const tags = [`<span class="tag tag-source">${escapeHtml(job.source)}</span>`];
   if (job.department) tags.push(`<span class="tag tag-department">${escapeHtml(job.department)}</span>`);
@@ -134,16 +164,21 @@ function jobRow(job) {
       `<span class="tag tag-salary" title="Best-effort estimate pulled from the listing, not a guaranteed figure">${escapeHtml(salaryText)}</span>`
     );
   }
+  const badge = matchBadgeHtml(job);
 
   return `
-    <div class="job-row">
-      ${logoHtml(job.company)}
-      <div class="job-main">
-        <div class="job-title"><a href="${escapeAttr(job.url)}" target="_blank" rel="noopener">${escapeHtml(job.title)}</a></div>
-        <div class="job-sub">${escapeHtml(job.company)} · ${escapeHtml(location)}</div>
+    <div class="job-card">
+      <div class="job-card-header">
+        ${logoHtml(job.company)}
+        <div class="job-header-text">
+          <div class="job-title"><a href="${escapeAttr(job.url)}" target="_blank" rel="noopener">${escapeHtml(job.title)}</a></div>
+          <div class="job-sub">${escapeHtml(job.company)} · ${escapeHtml(location)}</div>
+        </div>
       </div>
-      <div class="job-side">
-        <span>${escapeHtml(posted)}</span>
+      ${badge}
+      ${job.blurb ? `<div class="job-blurb">${escapeHtml(job.blurb)}</div>` : ""}
+      <div class="job-footer">
+        <span class="job-posted">${escapeHtml(posted)}</span>
         ${tags.join("")}
       </div>
     </div>
@@ -335,7 +370,9 @@ async function handleResumeFile(file) {
       return;
     }
     document.getElementById("q").value = data.query;
-    resumeStatus.textContent = `Extracted: ${data.terms.join(", ")} — edit above, then search.`;
+    resumeTerms = data.terms.map((t) => t.toLowerCase());
+    hasResume = true;
+    resumeStatus.textContent = `Extracted: ${data.terms.join(", ")} — edit above, then search. Results below will show a match tier for your resume.`;
     resumeStatus.className = "resume-status ok";
   } catch (e) {
     resumeStatus.textContent = "Upload failed. Try again.";
@@ -372,6 +409,12 @@ form.addEventListener("submit", (e) => {
   e.preventDefault();
   search(1);
 });
+
+// Sort is a "how do you want to look at what you already have" control,
+// not a new query — applying it immediately (unlike the other filters,
+// which wait for the Search button) matches how sort dropdowns behave
+// everywhere else.
+sortSelect.addEventListener("change", () => search(1));
 
 loadFacets();
 loadStatus();
