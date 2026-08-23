@@ -33,7 +33,7 @@ async function search(page = 1) {
   paginationEl.innerHTML = "";
 
   try {
-    const res = await fetch(`/api/jobs?${qs({ q, location, days, department, commitment, page, per_page: 25 })}`);
+    const res = await fetch(`/api/jobs?${qs({ q, location, days, department, commitment, page, per_page: 50 })}`);
     const data = await res.json();
     if (!res.ok) {
       statusLine.textContent = data.error || "Something went wrong with that search.";
@@ -49,22 +49,28 @@ function renderResults(data) {
   if (!data.jobs.length) {
     resultsEl.innerHTML = `<div class="empty-state">No matching roles found. Try broader keywords, remove a filter, or double-check your search syntax.</div>`;
     statusLine.textContent = `0 results`;
+    paginationEl.innerHTML = "";
     return;
   }
 
-  statusLine.textContent = `${data.total.toLocaleString()} result${data.total === 1 ? "" : "s"} — page ${data.page} of ${data.pages}`;
-  resultsEl.innerHTML = data.jobs.map(jobCard).join("");
+  const start = (data.page - 1) * data.per_page + 1;
+  const end = start + data.jobs.length - 1;
+  const narrowHint = data.total > 500 ? " — try narrowing your search for more precise results" : "";
+  statusLine.textContent =
+    `Showing ${start.toLocaleString()}–${end.toLocaleString()} of ${data.total.toLocaleString()} match${data.total === 1 ? "" : "es"}${narrowHint}`;
+
+  resultsEl.innerHTML = data.jobs.map(jobRow).join("");
 
   const prevDisabled = data.page <= 1 ? "disabled" : "";
   const nextDisabled = data.page >= data.pages ? "disabled" : "";
   paginationEl.innerHTML = `
     <button ${prevDisabled} onclick="search(${data.page - 1})">← Prev</button>
-    <span class="page-indicator">Page ${data.page} of ${data.pages}</span>
+    <span class="page-indicator">Page ${data.page.toLocaleString()} of ${data.pages.toLocaleString()}</span>
     <button ${nextDisabled} onclick="search(${data.page + 1})">Next →</button>
   `;
 }
 
-function jobCard(job) {
+function jobRow(job) {
   const posted = job.posted ? job.posted : "date unknown";
   const location = job.location || "Location not listed";
   const tags = [`<span class="tag tag-source">${escapeHtml(job.source)}</span>`];
@@ -72,10 +78,13 @@ function jobCard(job) {
   if (job.commitment) tags.push(`<span class="tag tag-commitment">${escapeHtml(job.commitment)}</span>`);
 
   return `
-    <div class="job-card">
-      <h3><a href="${escapeAttr(job.url)}" target="_blank" rel="noopener">${escapeHtml(job.title)}</a></h3>
-      <div class="job-meta">
-        <span>${escapeHtml(job.company)} · ${escapeHtml(location)} · posted ${escapeHtml(posted)}</span>
+    <div class="job-row">
+      <div class="job-main">
+        <div class="job-title"><a href="${escapeAttr(job.url)}" target="_blank" rel="noopener">${escapeHtml(job.title)}</a></div>
+        <div class="job-sub">${escapeHtml(job.company)} · ${escapeHtml(location)}</div>
+      </div>
+      <div class="job-side">
+        <span>${escapeHtml(posted)}</span>
         ${tags.join("")}
       </div>
     </div>
