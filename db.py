@@ -177,22 +177,70 @@ SORT_OPTIONS = {
 DEFAULT_SORT = "newest"
 
 
-def _match_score(job, terms):
-    """Fraction of `terms` (already lowercased) that appear in the job's
-    title + blurb. Same heuristic as the client-side best/good/poor badge
-    in app.js — kept in sync by hand since one runs in the browser (to badge
-    visible cards) and one runs here (to actually order the full result set
-    before pagination, which the client can't do since it only ever sees
-    one page at a time)."""
-    if not terms:
-        return 0.0
-    haystack = f"{job.get('title', '')} {job.get('blurb', '')}".lower()
-    matched = sum(1 for t in terms if t in haystack)
-    return matched / len(terms)
+_GENERIC_TERMS = {"operations", "ops", "strategy", "management"}
+
+
+def _match_info(job, title_terms, skill_terms):
+    """Classify a job against resume-derived terms (both already lowercased)
+    into a ("best"/"good"/"poor"/None) tier plus a sortable ordinal score
+    (higher = better match). Returns (None, 0) if no resume terms were
+    supplied at all (no resume uploaded).
+
+    This replaced an earlier version that scored `matched_terms /
+    len(all_terms)` against title+blurb only, which produced far too few
+    "good"/"best" matches in practice for two compounding reasons:
+
+    1. `terms` used to mix title-derived words with generic skill/tool names
+       (Salesforce, SQL, Excel, ...) in one shared list. Tool names almost
+       never appear in a job title or in the ~1-2 sentence qualifications
+       blurb scraped from a posting, so they mostly just inflated the
+       denominator — a genuinely on-target job still scored low because
+       most of the (very long) term list could never realistically match.
+    2. The haystack was only title + blurb. A job's `department` field
+       (e.g. "Revenue Operations", "Sales", "Engineering") is a short,
+       structured ATS label that's often a much stronger and more reliable
+       signal than free-text blurb content, and wasn't being used at all.
+
+    Now: title-derived terms (`title_terms` — the extracted title(s) PLUS
+    role-synonym expansions from role_synonyms.py) are checked against the
+    title directly for the strongest tier, and title/skill terms are
+    checked against blurb+department as a secondary signal — direct hit
+    counts, not a ratio, so a long tail of extra synonym terms only ever
+    helps, never dilutes.
+
+    One deliberate carve-out: a handful of synonym groups in
+    role_synonyms.py include a bare single-word "related" term ("Operations",
+    "Ops", "Strategy") as a catch-all. Fine when it's part of the actual job
+    title (e.g. "Operations Manager" is a real signal), but too generic to
+    trust as a department-field match on its own — a warehouse/logistics
+    job's `department` is very often literally "Operations" too, which isn't
+    the same kind of operations a RevOps/BizOps resume is targeting. So
+    `_GENERIC_TERMS` are excluded from the weaker department/blurb-only
+    check but still count toward a direct title hit."""
+    if not title_terms and not skill_terms:
+        return None, 0
+    title_lower = (job.get("title") or "").lower()
+    body = f"{(job.get('blurb') or '').lower()} {(job.get('department') or '').lower()}"
+
+    title_hits = sum(1 for t in title_terms if t in title_lower)
+    body_title_hits = sum(1 for t in title_terms if t not in _GENERIC_TERMS and t in body)
+    skill_hits = sum(1 for t in skill_terms if t in body or t in title_lower)
+
+    if title_hits > 0:
+        tier = "best"
+    elif body_title_hits > 0 or skill_hits >= 2:
+        tier = "good"
+    else:
+        tier = "poor"
+
+    tier_weight = {"best": 2, "good": 1, "poor": 0}[tier]
+    score = tier_weight * 1000 + title_hits * 50 + body_title_hits * 10 + skill_hits
+    return tier, score
 
 
 def search_jobs(query="", location="", locations=None, location_groups=None, days=None,
-                 department="", commitment="", sort=DEFAULT_SORT, resume_terms=None,
+                 department="", commitment="", sort=DEFAULT_SORT,
+                 resume_title_terms=None, resume_skill_terms=None,
                  page=1, per_page=25):
     """Boolean keyword search against title (AND/OR/NOT/quotes/parens via
     boolean_search.py), plus facet filters for location substring, days-back,
@@ -213,11 +261,17 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     selectable option. Combined with `locations`/`location` via OR, same as
     multi-select location chips are combined with each other.
 
-    `sort` picks one of SORT_OPTIONS, plus the special value "match" (best
-    resume match first, ties broken by newest-first) which requires
-    `resume_terms` (a list of lowercased strings) to mean anything — with no
-    terms it quietly falls back to newest-first rather than raising, since
-    both only ever come from query params a user could hand-edit.
+    `resume_title_terms` / `resume_skill_terms` (lists of lowercased
+    strings, from resume_parser.suggest_query) drive per-job match-tier
+    classification (see `_match_info`). Every returned job gets a
+    `match_tier` field (None if neither list is given) — this happens
+    regardless of `sort`, since the frontend badges every visible card, not
+    just when sorted by match. `sort="match"` (best match first, ties
+    broken by newest-first) additionally reorders the full candidate set by
+    that tier/score before pagination — something the browser can't do
+    itself since it only ever sees one page at a time. With no resume terms,
+    `sort="match"` quietly falls back to newest-first rather than raising,
+    since both only ever come from query params a user could hand-edit.
     """
     ast = parse_query(query)
     order_sql = SORT_OPTIONS.get(sort, SORT_OPTIONS[DEFAULT_SORT])
@@ -294,7 +348,21 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
 
         candidates = [r for r in candidates if _loc_matches(r)]
 
-    if sort == "match" and resume_terms:
+    title_terms = [t.lower() for t in (resume_title_terms or []) if t]
+    skill_terms = [t.lower() for t in (resume_skill_terms or []) if t]
+    has_resume_terms = bool(title_terms or skill_terms)
+
+    if has_resume_terms:
+        # Attach match_tier to every candidate (not just when sort=="match")
+        # since the frontend badges whatever's on the current page
+        # regardless of sort order — the sort below only additionally
+        # reorders using the same numbers.
+        for r in candidates:
+            tier, score = _match_info(r, title_terms, skill_terms)
+            r["match_tier"] = tier
+            r["_match_score"] = score
+
+    if sort == "match" and has_resume_terms:
         # Two stable sorts = one two-key sort: establish newest-first as the
         # tiebreaker order first, then sort by score — Python's sort is
         # stable, so equal-score jobs keep their relative newest-first order
@@ -303,11 +371,13 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         # browser only ever sees one page at a time — it can badge the jobs
         # it can see, but it can't reorder page 3 relative to page 1.
         candidates.sort(key=lambda r: r.get("posted") or "", reverse=True)
-        candidates.sort(key=lambda r: -_match_score(r, resume_terms))
+        candidates.sort(key=lambda r: -r["_match_score"])
 
     total = len(candidates)
     offset = max(0, (page - 1)) * per_page
     page_rows = candidates[offset: offset + per_page]
+    for r in page_rows:
+        r.pop("_match_score", None)  # internal sort key, not part of the API response
     return page_rows, total
 
 

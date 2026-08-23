@@ -220,32 +220,75 @@ have," not a new query.
 
 ### Match tiers (best / good / poor)
 
-Purely client-side, computed in the browser, not stored or scraped: once a
-resume is uploaded, `app.js` keeps the extracted terms in memory and scores
-each visible job by what fraction of those terms appear in its title +
-blurb — ≥50% match is "Best match," ≥20% is "Good match," otherwise "Poor
-match." This is a keyword-overlap heuristic, not semantic matching or a
-model call — it's the same tier of signal as the salary/blurb extraction
-(clearly labeled via a tooltip on the badge), not a claim about actual job
-fit. No resume uploaded yet = no badges shown at all, rather than a
-meaningless default tier.
+Computed entirely server-side now, in `db.py`'s `_match_info()`, and
+attached as a `match_tier` field on every job the API returns once a resume
+is active (independent of sort order — the frontend badges every visible
+card, not just when sorted by match). `app.js` just reads `job.match_tier`
+straight off the response; there's no client-side recomputation anymore, so
+there's exactly one place this logic lives.
+
+This replaced an earlier version (client-side, `matched_terms /
+len(all_terms)` against title+blurb, ≥50%/≥20%/else thresholds) that in
+practice badged almost nothing above "poor," even for resumes with an
+obvious, direct fit. Two compounding bugs, both worth knowing about if this
+ever regresses again:
+
+1. **Shared term budget.** `resume_parser.suggest_query()` used to return
+   one merged list — extracted titles, skills, AND synonym expansions — all
+   competing for a single 25-term cap. A resume with a normal-sized
+   skills/tools section (Salesforce, SQL, Tableau, Excel, ...) could fill
+   that cap before the far more predictive title-derived terms (the actual
+   title plus its role-synonym expansions) were even added. Fixed by
+   splitting the return value into `title_terms` (capped separately at 40)
+   and `skill_terms` (capped at 15) — see the docstring in
+   `resume_parser.py`.
+2. **Ratio scoring against too narrow a haystack.** Even with better terms,
+   scoring `matched / len(terms)` against title+blurb punished a long,
+   diverse term list: skill/tool names essentially never appear in a job
+   title or in the ~1-2 sentence qualifications blurb this app scrapes, so
+   they mostly just inflated the denominator and dragged genuinely
+   on-target jobs' ratios below the 20%/50% cutoffs. Fixed by switching to
+   direct hit-count tiers instead of a fraction (a long tail of extra
+   synonym terms can now only help, never dilute), and by adding the job's
+   `department` field to the haystack — a short, structured ATS label
+   ("Revenue Operations," "Sales," "Engineering") that's often a far more
+   reliable signal than free-text blurb content, and wasn't being checked
+   at all before.
+
+Current tiering: **best** = at least one `title_term` (extracted title or a
+role-synonym expansion of it) appears directly in the job's title. **good**
+= no direct title hit, but a title_term shows up in blurb/department, or
+2+ skill_terms show up anywhere. **poor** = neither. One deliberate
+carve-out: a few synonym groups include a bare single-word catch-all term
+("Operations," "Ops," "Strategy") — these still count toward a direct title
+hit, but are excluded from the weaker department/blurb-only check
+(`_GENERIC_TERMS` in `db.py`), since e.g. a warehouse job's department is
+very often also literally "Operations," which isn't the kind of operations
+role a RevOps/BizOps resume is actually targeting.
+
+Verified against a synthetic 20-job test batch (mix of genuinely relevant
+RevOps/Sales Ops/GTM/Strategy roles and clearly unrelated ones like
+Software Engineer, Legal Counsel, Data Scientist): 10/10 relevant postings
+now come back "best match," all 10 irrelevant ones "poor," with no false
+positives.
 
 ### Match sort (server-side)
 
 "Best match" isn't only a badge — it's also a sort option (`#sort-match-
 option` in `index.html`, hidden until a resume is uploaded, then selected
-automatically). Client-side match tiers can only badge whatever's already
-on the current page; ranking the *full* result set by match quality has to
-happen server-side, before pagination. `db.search_jobs(sort="match",
-resume_terms=[...])` scores every candidate row with `_match_score()`
-(fraction of resume terms found in title + blurb), then sorts by that score
-descending, with newest-posted-first as the tiebreaker within a tier —
-implemented as two sequential stable `.sort()` calls (sort by date first,
-then by score, since Python's sort is stable and a later sort only
+automatically). Badges alone can only describe whatever's on the current
+page; ranking the *full* result set by match quality has to happen
+server-side, before pagination. `db.search_jobs(sort="match",
+resume_title_terms=[...], resume_skill_terms=[...])` computes `match_tier`
++ an ordinal score for every candidate row via `_match_info()`, then sorts
+by that score descending, with newest-posted-first as the tiebreaker within
+a tier — implemented as two sequential stable `.sort()` calls (sort by date
+first, then by score, since Python's sort is stable and a later sort only
 reorders elements that tied on the earlier one). `SORT_OPTIONS` in `db.py`
 deliberately excludes `"match"`, so it falls through to the default
 newest-first SQL ordering when no resume terms are present — the Python
-resort only kicks in when `resume_terms` is actually populated.
+resort only kicks in when at least one of the two term lists is actually
+populated.
 
 ### Resume keyword expansion (role synonyms)
 
@@ -263,13 +306,15 @@ a set of related terms. `expand_with_synonyms()` matches an extracted
 resume phrase against every group's triggers and returns the related terms
 not already present.
 
-`resume_parser.suggest_query()` keeps two separate outputs: `query_string`
-(built from only the first 8 originally-extracted title/skill phrases —
-short and legible, since the user is expected to review/edit it before
-searching) and `terms` (the longer list, up to 25, that also includes the
-synonym expansions — used as the match-scoring vocabulary against job
-cards/for the match sort above, where more real synonyms is a stronger
-signal, not clutter).
+`resume_parser.suggest_query()` returns three things: `title_terms`
+(extracted titles + every synonym expansion of them, capped at 40 — the
+primary match-scoring signal, see above), `skill_terms` (extracted
+skills-section items, capped at 15 — a secondary, weaker signal), and
+`query_string` (built from only the first 8 originally-extracted
+title/skill phrases, NOT synonym expansions — short and legible, since the
+user is expected to review/edit it before searching). Keeping title and
+skill terms in two separately-capped lists, rather than one merged bag, is
+what fixed the sparse-match bug described above.
 
 Title-phrase extraction itself (`_extract_title_phrases()`) also got more
 careful: the original regex was fully case-insensitive, which meant any

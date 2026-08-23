@@ -180,46 +180,58 @@ def _extract_title_phrases(text):
     return [phrase for phrase, _ in ranked[:8]]
 
 
-def suggest_query(text, max_query_terms=8, max_terms=25):
-    """Returns (terms, query_string).
+def suggest_query(text, max_query_terms=8, max_title_terms=40, max_skill_terms=15):
+    """Returns (title_terms, skill_terms, query_string).
 
-    `terms` is the fuller list — extracted title phrases, skills, AND
-    role-synonym expansions (e.g. "Revenue Operations Manager" also pulls in
-    "RevOps", "Sales Ops", "GTM") — returned for display and used as the
-    match-scoring vocabulary against job cards. It's deliberately longer
-    than what goes into the query box: cluttering the editable search query
-    with 20+ OR'd synonyms would make it unreadable and unpredictable to
-    edit, but for match-tier scoring, more real synonyms = a better signal,
-    not a worse one.
+    These used to be one merged "terms" bag with a single shared cap. That
+    was the main reason match-tier scoring came back so sparse: a resume
+    with a long skills/tools section (Salesforce, SQL, Tableau, Excel, ...)
+    could fill the shared budget before the far more predictive
+    title-derived terms — the actual extracted job title PLUS its
+    role-synonym expansions (RevOps, Sales Ops, GTM, ...) — even got added.
+    Those title/synonym terms are what's actually likely to appear in a real
+    job posting's title; generic tool names almost never do. Splitting them
+    into two separately-capped lists means the skills section can no longer
+    crowd out the title-derived signal.
 
-    `query_string` is built from only the first `max_query_terms` originally-
-    extracted terms (titles + skills, NOT synonym expansions) — kept short
-    and legible since the user is expected to review/edit it before
-    searching.
+    `title_terms`: extracted title phrases + every role-synonym expansion of
+    them, deduped, capped at `max_title_terms` (generous, since this is the
+    primary match signal — see db.py's `_match_info`).
+
+    `skill_terms`: extracted skills-section items, deduped, capped at
+    `max_skill_terms` — a secondary, weaker signal.
+
+    `query_string` is still built from the first `max_query_terms`
+    originally-extracted terms (titles + skills, NOT synonym expansions) —
+    kept short and legible since the user is expected to review/edit it
+    before searching.
     """
     titles = _extract_title_phrases(text)
     skills = _extract_skills_section(text)
 
-    seen = set()
-    base_terms = []
-    for t in titles + skills:
-        key = t.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        base_terms.append(t)
+    def _dedup(items):
+        seen_local = set()
+        out = []
+        for t in items:
+            key = t.lower()
+            if key in seen_local:
+                continue
+            seen_local.add(key)
+            out.append(t)
+        return out
 
-    synonyms = expand_with_synonyms(titles, max_extra=max_terms)
-
-    terms = list(base_terms)
-    for s in synonyms:
-        if s.lower() not in seen:
-            seen.add(s.lower())
-            terms.append(s)
-        if len(terms) >= max_terms:
+    title_terms = _dedup(titles)
+    seen_titles = {t.lower() for t in title_terms}
+    for s in expand_with_synonyms(titles, max_extra=max_title_terms):
+        if s.lower() not in seen_titles:
+            seen_titles.add(s.lower())
+            title_terms.append(s)
+        if len(title_terms) >= max_title_terms:
             break
 
-    query_terms = base_terms[:max_query_terms]
+    skill_terms = _dedup(skills)[:max_skill_terms]
+
+    query_terms = _dedup(titles + skills)[:max_query_terms]
     parts = [f'"{t}"' if " " in t else t for t in query_terms]
     query_string = " OR ".join(parts)
-    return terms, query_string
+    return title_terms, skill_terms, query_string

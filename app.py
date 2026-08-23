@@ -86,7 +86,8 @@ def api_jobs():
     department = request.args.get("department", "")
     commitment = request.args.get("commitment", "")
     sort = request.args.get("sort", db.DEFAULT_SORT)
-    resume_terms = [t.lower() for t in request.args.getlist("resume_term") if t.strip()]
+    resume_title_terms = [t.lower() for t in request.args.getlist("resume_title_term") if t.strip()]
+    resume_skill_terms = [t.lower() for t in request.args.getlist("resume_skill_term") if t.strip()]
     page = max(1, int(request.args.get("page", 1) or 1))
     per_page = min(100, max(1, int(request.args.get("per_page", 25) or 25)))
 
@@ -94,7 +95,9 @@ def api_jobs():
     try:
         jobs, total = db.search_jobs(query=q, locations=locations, location_groups=location_groups,
                                       days=days_val, department=department,
-                                      commitment=commitment, sort=sort, resume_terms=resume_terms,
+                                      commitment=commitment, sort=sort,
+                                      resume_title_terms=resume_title_terms,
+                                      resume_skill_terms=resume_skill_terms,
                                       page=page, per_page=per_page)
     except Exception as e:
         return jsonify({"error": f"Couldn't parse that search: {e}"}), 400
@@ -172,15 +175,20 @@ def api_parse_resume():
     if not text.strip():
         return jsonify({"ok": False, "message": "Couldn't find any text in that file (is it a scanned image?)."}), 400
 
-    terms, query = resume_parser.suggest_query(text)
-    if not terms:
+    title_terms, skill_terms, query = resume_parser.suggest_query(text)
+    if not title_terms and not skill_terms:
         return jsonify({"ok": False, "message": "Couldn't find any obvious job titles or skills in that resume."}), 200
 
     location_terms, matched_city = resume_parser.extract_location(text)
 
     return jsonify({
         "ok": True,
-        "terms": terms,
+        # Combined list, display-only (shown in the "Extracted: ..." status
+        # line). Match scoring uses title_terms/skill_terms separately —
+        # see db.py's _match_info for why the split matters.
+        "terms": title_terms + skill_terms,
+        "title_terms": title_terms,
+        "skill_terms": skill_terms,
         "query": query,
         "location_terms": location_terms,
         # Always suggest Remote (US) alongside whatever city was found (or

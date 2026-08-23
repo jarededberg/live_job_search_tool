@@ -80,8 +80,13 @@ async function search(page = 1) {
   selectedLocations.forEach((loc) => {
     params.append(loc.type === "group" ? "location_group" : "location", loc.value);
   });
-  if (hasResume && sort === "match") {
-    resumeTerms.forEach((t) => params.append("resume_term", t));
+  if (hasResume) {
+    // Sent on every request once a resume is loaded, not just when sorting
+    // by match — match_tier badges are computed server-side (see db.py's
+    // _match_info) and shown on cards regardless of sort order, so the
+    // server needs these terms whenever a resume is active.
+    resumeTitleTerms.forEach((t) => params.append("resume_title_term", t));
+    resumeSkillTerms.forEach((t) => params.append("resume_skill_term", t));
   }
 
   try {
@@ -146,31 +151,22 @@ function logoHtml(company) {
 }
 
 // ---- resume match tiers ----
-// Client-side heuristic only: keyword overlap between the terms extracted
-// from an uploaded resume and each job's title + blurb. This is NOT a deep
-// semantic match — it's the same kind of best-effort, clearly-labeled
-// signal as the salary/blurb extraction, just computed in the browser
-// instead of at scrape time (it depends on the resume, which the server
-// never stores). No resume uploaded yet = no badges at all, rather than a
-// meaningless default.
-let resumeTerms = [];
+// Computed server-side now (db.py's _match_info), against title + blurb +
+// department, across the FULL result set before pagination — not just a
+// client-side scan of the fraction of terms present in title+blurb on
+// whatever page happens to be visible. Still a keyword-overlap heuristic,
+// not a deep semantic match (labeled as such via the badge tooltip). No
+// resume uploaded yet = no badges at all, rather than a meaningless
+// default; that's still decided client-side (`hasResume`), the tier itself
+// comes straight from `job.match_tier` in the API response.
+let resumeTitleTerms = [];
+let resumeSkillTerms = [];
 let hasResume = false;
 
-function matchTier(job) {
-  if (!hasResume || !resumeTerms.length) return null;
-  const haystack = `${job.title} ${job.blurb || ""}`.toLowerCase();
-  const matched = resumeTerms.filter((t) => haystack.includes(t));
-  const ratio = matched.length / resumeTerms.length;
-  if (ratio >= 0.5) return "best";
-  if (ratio >= 0.2) return "good";
-  return "poor";
-}
-
 function matchBadgeHtml(job) {
-  const tier = matchTier(job);
-  if (!tier) return "";
+  if (!hasResume || !job.match_tier) return "";
   const labels = { best: "Best match", good: "Good match", poor: "Poor match" };
-  return `<span class="match-badge match-${tier}" title="Keyword overlap with your resume's extracted terms — a rough signal, not a full analysis">${labels[tier]}</span>`;
+  return `<span class="match-badge match-${job.match_tier}" title="Keyword overlap with your resume's extracted terms — a rough signal, not a full analysis">${labels[job.match_tier]}</span>`;
 }
 
 function jobCard(job) {
@@ -409,7 +405,8 @@ async function handleResumeFile(file) {
       return;
     }
     document.getElementById("q").value = data.query;
-    resumeTerms = data.terms.map((t) => t.toLowerCase());
+    resumeTitleTerms = (data.title_terms || []).map((t) => t.toLowerCase());
+    resumeSkillTerms = (data.skill_terms || []).map((t) => t.toLowerCase());
     hasResume = true;
     document.getElementById("sort-match-option").hidden = false;
     sortSelect.value = "match";
