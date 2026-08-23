@@ -81,6 +81,26 @@ chips are OR'd together server-side (`db.search_jobs(locations=[...])`).
 Jobs with no reported location always pass the filter rather than getting
 hidden by a filter they have no data to match against.
 
+Beyond raw substrings, the dropdown also pins five canonical **group**
+options — "Remote (US)", "Remote (Canada)", "Remote (UK)", "Remote
+(Europe)", "Remote (unspecified / global)" — fetched from `GET
+/api/location-groups`. These exist because Greenhouse/Lever/Ashby store
+whatever free-text location string a company typed into their ATS: an
+800-company sample turned up 865 distinct strings containing the word
+"remote" ("Remote - US", "US Remote", "REMOTE - USA",
+"California, USA, Remote", "AMER-US-Remote", ...). `location_groups.py`
+classifies a raw location string into a group via regex/keyword heuristics
+(the word "remote" plus a US state name/abbreviation, "canada", a UK/Europe
+signal, etc.) rather than an exact-match lookup table, since there's no way
+to enumerate every real-world spelling in advance. Selecting "Remote (US)"
+sends `location_group=remote_us`; `db.search_jobs()` first broadens the SQL
+query to any row containing "remote" when a group is requested, then
+applies the precise `matches_group()` classification in Python afterward —
+group and plain-text location chips are OR'd together, same as multiple
+plain-text chips are. Group chips render in a darker color in both the
+dropdown (pinned at the top, marked with a ★) and as selected chips, so
+they're visually distinct from a raw scraped-location chip.
+
 ### Salary data
 
 None of Greenhouse, Lever, or Ashby expose salary as a clean structured
@@ -209,6 +229,80 @@ model call — it's the same tier of signal as the salary/blurb extraction
 (clearly labeled via a tooltip on the badge), not a claim about actual job
 fit. No resume uploaded yet = no badges shown at all, rather than a
 meaningless default tier.
+
+### Match sort (server-side)
+
+"Best match" isn't only a badge — it's also a sort option (`#sort-match-
+option` in `index.html`, hidden until a resume is uploaded, then selected
+automatically). Client-side match tiers can only badge whatever's already
+on the current page; ranking the *full* result set by match quality has to
+happen server-side, before pagination. `db.search_jobs(sort="match",
+resume_terms=[...])` scores every candidate row with `_match_score()`
+(fraction of resume terms found in title + blurb), then sorts by that score
+descending, with newest-posted-first as the tiebreaker within a tier —
+implemented as two sequential stable `.sort()` calls (sort by date first,
+then by score, since Python's sort is stable and a later sort only
+reorders elements that tied on the earlier one). `SORT_OPTIONS` in `db.py`
+deliberately excludes `"match"`, so it falls through to the default
+newest-first SQL ordering when no resume terms are present — the Python
+resort only kicks in when `resume_terms` is actually populated.
+
+### Resume keyword expansion (role synonyms)
+
+Keyword search against the literal phrases on a resume alone misses a lot
+of real postings for the same kind of work: a resume that says "Revenue
+Operations Manager" won't keyword-match a posting titled "RevOps Manager"
+or "Sales Operations," even though they're the same job. `role_synonyms.py`
+is a hand-curated dictionary of ~24 role families (RevOps/Sales Ops/GTM,
+Chief of Staff, Product Management, Program Management, Growth/Product
+Marketing, Sales/BDR/SDR, Customer Success, Data Analytics, Data Science,
+Software Engineering, UX/Product Design, People Ops/Talent Acquisition,
+FP&A/Accounting, Supply Chain, Operations, Strategy/Consulting, IT/SysAdmin,
+Legal, Executive Assistant, etc.) — each maps a set of trigger substrings to
+a set of related terms. `expand_with_synonyms()` matches an extracted
+resume phrase against every group's triggers and returns the related terms
+not already present.
+
+`resume_parser.suggest_query()` keeps two separate outputs: `query_string`
+(built from only the first 8 originally-extracted title/skill phrases —
+short and legible, since the user is expected to review/edit it before
+searching) and `terms` (the longer list, up to 25, that also includes the
+synonym expansions — used as the match-scoring vocabulary against job
+cards/for the match sort above, where more real synonyms is a stronger
+signal, not clutter).
+
+Title-phrase extraction itself (`_extract_title_phrases()`) also got more
+careful: the original regex was fully case-insensitive, which meant any
+lowercase word (like "with") could satisfy its "capitalized leading word"
+requirement, producing garbage matches like "Partnered with Sales Ops" as a
+3-word title phrase. Fixed by scoping case-insensitivity to only the
+role-noun alternation (`(?i:...)` inline group) while keeping the leading
+words genuinely case-sensitive, plus a `BUZZWORD_RE` pass that strips
+resume-summary openers ("Results-driven", "Experienced", "Proven", etc.)
+that are capitalized only because they start a sentence, not because
+they're part of an actual title.
+
+### Resume location auto-populate
+
+`resume_parser.extract_location()` looks for a "City, ST" pattern
+(case-sensitive 2-letter USPS state code, to avoid common lowercase words
+like "or"/"me" false-matching), biased toward the first ~600 characters of
+the document since contact info almost always lives at the very top.
+`metro_areas.py` is a curated dataset — not real geocoding, same tradeoff as
+`location_groups.py` and `role_synonyms.py` — mapping the ~65 largest US
+metro home cities to a hand-picked list of nearby suburbs/cities
+approximating "within ~50 miles" (e.g. "Phoenix, AZ" → Phoenix, Scottsdale,
+Tempe, Mesa, Chandler, Gilbert, Glendale, Peoria). A city outside the
+curated set still contributes its own literal "City, ST" as a single
+location term rather than nothing.
+
+On a successful resume parse, `POST /api/parse-resume` returns
+`location_terms` (the nearby-city list, or just the one matched city) and
+`location_groups: ["remote_us"]` — the frontend adds all of them as
+ordinary deselectable location chips (`handleResumeFile()` in `app.js`),
+per the requirement that virtually every resume-driven search should
+default to including remote roles, with the user free to remove any chip
+(including "Remote (US)") they don't want.
 
 ### Results layout
 

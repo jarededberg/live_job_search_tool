@@ -81,17 +81,21 @@ def start_scheduler():
 def api_jobs():
     q = request.args.get("q", "")
     locations = request.args.getlist("location")  # repeated ?location=a&location=b, multi-select
+    location_groups = request.args.getlist("location_group")  # canonical "Remote (US)" etc. chips
     days = request.args.get("days", "")
     department = request.args.get("department", "")
     commitment = request.args.get("commitment", "")
     sort = request.args.get("sort", db.DEFAULT_SORT)
+    resume_terms = [t.lower() for t in request.args.getlist("resume_term") if t.strip()]
     page = max(1, int(request.args.get("page", 1) or 1))
     per_page = min(100, max(1, int(request.args.get("per_page", 25) or 25)))
 
     days_val = int(days) if days.strip().isdigit() else None
     try:
-        jobs, total = db.search_jobs(query=q, locations=locations, days=days_val, department=department,
-                                      commitment=commitment, sort=sort, page=page, per_page=per_page)
+        jobs, total = db.search_jobs(query=q, locations=locations, location_groups=location_groups,
+                                      days=days_val, department=department,
+                                      commitment=commitment, sort=sort, resume_terms=resume_terms,
+                                      page=page, per_page=per_page)
     except Exception as e:
         return jsonify({"error": f"Couldn't parse that search: {e}"}), 400
     return jsonify({
@@ -115,6 +119,15 @@ def api_facets():
 def api_locations():
     q = request.args.get("q", "")
     return jsonify({"locations": db.distinct_locations(prefix=q, limit=20)})
+
+
+@app.route("/api/location-groups")
+def api_location_groups():
+    """Canonical 'Remote (US)' / 'Remote (Canada)' / etc. options, pinned at
+    the top of the location dropdown alongside raw per-company location
+    strings — see location_groups.py for why these exist."""
+    from location_groups import LOCATION_GROUPS
+    return jsonify({"groups": [{"key": k, "label": v["label"]} for k, v in LOCATION_GROUPS.items()]})
 
 
 @app.route("/api/status")
@@ -163,7 +176,19 @@ def api_parse_resume():
     if not terms:
         return jsonify({"ok": False, "message": "Couldn't find any obvious job titles or skills in that resume."}), 200
 
-    return jsonify({"ok": True, "terms": terms, "query": query})
+    location_terms, matched_city = resume_parser.extract_location(text)
+
+    return jsonify({
+        "ok": True,
+        "terms": terms,
+        "query": query,
+        "location_terms": location_terms,
+        # Always suggest Remote (US) alongside whatever city was found (or
+        # even if none was) — per spec, virtually every search should default
+        # to including remote roles, with the user free to deselect it.
+        "location_groups": ["remote_us"],
+        "matched_city": matched_city,
+    })
 
 
 @app.route("/")

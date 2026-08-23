@@ -274,6 +274,16 @@ main {
 }
 .location-chip button:hover { color: var(--ink); }
 
+/* Canonical "Remote (US)" / "Remote (Canada)" etc. group chips — visually
+   distinct from plain scraped-location text chips since one deselect toggles
+   dozens of underlying raw location strings at once. */
+.location-chip-group {
+  background: var(--ink);
+  color: var(--bg);
+}
+.location-chip-group button { color: var(--bg); }
+.location-chip-group button:hover { color: var(--accent-soft); }
+
 #location-input {
   flex: 1;
   min-width: 90px;
@@ -313,6 +323,9 @@ main {
 .location-option:hover, .location-option.active { background: var(--bg-subtle); color: var(--ink); }
 .location-option .count { color: var(--muted-light); font-size: 0.76rem; }
 .location-option-empty { padding: 10px 12px; font-size: 0.8rem; color: var(--muted-light); }
+
+.location-option-group { font-weight: 600; }
+.location-option-group::before { content: "★ "; color: var(--accent); }
 
 .resume-dropzone {
   margin-top: 12px;

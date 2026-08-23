@@ -17,8 +17,24 @@ const resumeDropzone = document.getElementById("resume-dropzone");
 const resumeStatus = document.getElementById("resume-status");
 
 let currentPage = 1;
+// Each entry is { type: "text", value: "San Francisco, CA" } for a plain
+// scraped-location substring, or { type: "group", value: "remote_us",
+// label: "Remote (US)" } for a canonical group chip (see location_groups.py)
 let selectedLocations = [];
 let logoCache = {};
+let locationGroupList = []; // [{key, label}] fetched from /api/location-groups
+let locationGroupLabels = {};
+
+async function loadLocationGroups() {
+  try {
+    const res = await fetch("/api/location-groups");
+    const data = await res.json();
+    locationGroupList = data.groups || [];
+    locationGroupList.forEach((g) => { locationGroupLabels[g.key] = g.label; });
+  } catch (e) {
+    locationGroupList = []; // quick-select groups are a nice-to-have; fail quietly
+  }
+}
 
 async function loadLogoCache() {
   try {
@@ -61,7 +77,12 @@ async function search(page = 1) {
       const [k, v] = pair.split("=");
       params.append(decodeURIComponent(k), decodeURIComponent(v));
     });
-  selectedLocations.forEach((loc) => params.append("location", loc));
+  selectedLocations.forEach((loc) => {
+    params.append(loc.type === "group" ? "location_group" : "location", loc.value);
+  });
+  if (hasResume && sort === "match") {
+    resumeTerms.forEach((t) => params.append("resume_term", t));
+  }
 
   try {
     const res = await fetch(`/api/jobs?${params.toString()}`);
@@ -240,10 +261,11 @@ let locationActiveIndex = -1;
 
 function renderLocationChips() {
   locationChipsEl.innerHTML = selectedLocations
-    .map(
-      (loc, i) =>
-        `<span class="location-chip">${escapeHtml(loc)}<button type="button" data-idx="${i}" aria-label="Remove ${escapeAttr(loc)}">×</button></span>`
-    )
+    .map((loc, i) => {
+      const label = loc.label || loc.value;
+      const cls = loc.type === "group" ? "location-chip location-chip-group" : "location-chip";
+      return `<span class="${cls}">${escapeHtml(label)}<button type="button" data-idx="${i}" aria-label="Remove ${escapeAttr(label)}">×</button></span>`;
+    })
     .join("");
   locationChipsEl.querySelectorAll("button").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -268,7 +290,10 @@ function renderLocationDropdown(options) {
     locationDropdown.innerHTML = `<div class="location-option-empty">No matching locations</div>`;
   } else {
     locationDropdown.innerHTML = options
-      .map((v, i) => `<div class="location-option" data-idx="${i}">${escapeHtml(v)}</div>`)
+      .map((opt, i) => {
+        const cls = opt.type === "group" ? "location-option location-option-group" : "location-option";
+        return `<div class="${cls}" data-idx="${i}">${escapeHtml(opt.label)}</div>`;
+      })
       .join("");
     locationDropdown.querySelectorAll(".location-option").forEach((el) => {
       el.addEventListener("mousedown", (e) => {
@@ -280,9 +305,11 @@ function renderLocationDropdown(options) {
   locationDropdown.classList.remove("hidden");
 }
 
-function pickLocation(value) {
-  if (value && !selectedLocations.includes(value)) {
-    selectedLocations.push(value);
+function pickLocation(option) {
+  if (typeof option === "string") option = { type: "text", value: option, label: option };
+  const isDup = (opt) => selectedLocations.some((s) => s.type === opt.type && s.value === opt.value);
+  if (option && option.value && !isDup(option)) {
+    selectedLocations.push(option);
     renderLocationChips();
     search(1);
   }
@@ -291,13 +318,25 @@ function pickLocation(value) {
 }
 
 async function fetchLocationOptions(query) {
+  const q = query.trim().toLowerCase();
+  // Canonical groups are pinned quick-select options — shown whenever their
+  // label matches what's typed (or always, when the box is empty) — kept
+  // separate from raw per-company location strings pulled from the DB below.
+  const groupMatches = locationGroupList
+    .filter((g) => !q || g.label.toLowerCase().includes(q))
+    .map((g) => ({ type: "group", value: g.key, label: g.label }));
+
+  let textMatches = [];
   try {
     const res = await fetch(`/api/locations?q=${encodeURIComponent(query)}`);
     const data = await res.json();
-    return (data.locations || []).filter((v) => !selectedLocations.includes(v));
+    textMatches = (data.locations || []).map((v) => ({ type: "text", value: v, label: v }));
   } catch (e) {
-    return [];
+    /* raw suggestions are a nice-to-have; fail quietly */
   }
+
+  const isSelected = (opt) => selectedLocations.some((s) => s.type === opt.type && s.value === opt.value);
+  return [...groupMatches, ...textMatches].filter((opt) => !isSelected(opt));
 }
 
 locationInput.addEventListener("input", () => {
@@ -372,8 +411,39 @@ async function handleResumeFile(file) {
     document.getElementById("q").value = data.query;
     resumeTerms = data.terms.map((t) => t.toLowerCase());
     hasResume = true;
-    resumeStatus.textContent = `Extracted: ${data.terms.join(", ")} — edit above, then search. Results below will show a match tier for your resume.`;
+    document.getElementById("sort-match-option").hidden = false;
+    sortSelect.value = "match";
+
+    // Auto-populate location: nearby cities to whatever "City, ST" the
+    // resume listed, plus Remote (US) — both as deselectable chips, per
+    // spec ("virtually all of the searches should autopopulate a remote
+    // field with optionality for the user to deselect").
+    let locationNote = "";
+    (data.location_terms || []).forEach((loc) => {
+      const opt = { type: "text", value: loc, label: loc };
+      if (!selectedLocations.some((s) => s.type === "text" && s.value === loc)) {
+        selectedLocations.push(opt);
+      }
+    });
+    (data.location_groups || []).forEach((key) => {
+      const label = locationGroupLabels[key] || key;
+      if (!selectedLocations.some((s) => s.type === "group" && s.value === key)) {
+        selectedLocations.push({ type: "group", value: key, label });
+      }
+    });
+    if (data.location_terms && data.location_terms.length) {
+      renderLocationChips();
+      locationNote = data.matched_city
+        ? ` Added locations near ${data.matched_city} plus Remote (US) — remove any you don't want.`
+        : " Added Remote (US) — remove it if you don't want remote roles.";
+    } else if (data.location_groups && data.location_groups.length) {
+      renderLocationChips();
+      locationNote = " Added Remote (US) — remove it if you don't want remote roles.";
+    }
+
+    resumeStatus.textContent = `Extracted: ${data.terms.join(", ")} — edit above, then search. Sorted by best match to your resume.${locationNote}`;
     resumeStatus.className = "resume-status ok";
+    search(1);
   } catch (e) {
     resumeStatus.textContent = "Upload failed. Try again.";
     resumeStatus.className = "resume-status error";
@@ -417,6 +487,7 @@ form.addEventListener("submit", (e) => {
 sortSelect.addEventListener("change", () => search(1));
 
 loadFacets();
+loadLocationGroups();
 loadStatus();
 setInterval(loadStatus, 30000);
 loadLogoCache().then(() => search(1)); // wait for it so the first render already has logos, not a flash-in

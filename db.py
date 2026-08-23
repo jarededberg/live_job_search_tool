@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from boolean_search import parse_query, evaluate, leaf_terms
+from location_groups import matches_group
 
 DB_PATH = os.environ.get("JOBS_DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "jobs.db"))
 MAX_CANDIDATES = 50000  # cap on rows pulled from SQLite before Python-side boolean evaluation
@@ -167,12 +168,32 @@ SORT_OPTIONS = {
     "company": "company ASC, (posted IS NULL), posted DESC",
     "salary_high": "(salary_max IS NULL), salary_max DESC, (posted IS NULL), posted DESC",
     "salary_low": "(salary_min IS NULL), salary_min ASC, (posted IS NULL), posted DESC",
+    # "match" isn't a SQL ORDER BY — it's computed in Python below, since it
+    # depends on resume terms that only exist per-request. Left out of this
+    # dict on purpose so SORT_OPTIONS.get(sort, ...) falls back to "newest"
+    # for the underlying SQL fetch, which the Python-side match sort then
+    # overrides entirely.
 }
 DEFAULT_SORT = "newest"
 
 
-def search_jobs(query="", location="", locations=None, days=None, department="", commitment="",
-                 sort=DEFAULT_SORT, page=1, per_page=25):
+def _match_score(job, terms):
+    """Fraction of `terms` (already lowercased) that appear in the job's
+    title + blurb. Same heuristic as the client-side best/good/poor badge
+    in app.js — kept in sync by hand since one runs in the browser (to badge
+    visible cards) and one runs here (to actually order the full result set
+    before pagination, which the client can't do since it only ever sees
+    one page at a time)."""
+    if not terms:
+        return 0.0
+    haystack = f"{job.get('title', '')} {job.get('blurb', '')}".lower()
+    matched = sum(1 for t in terms if t in haystack)
+    return matched / len(terms)
+
+
+def search_jobs(query="", location="", locations=None, location_groups=None, days=None,
+                 department="", commitment="", sort=DEFAULT_SORT, resume_terms=None,
+                 page=1, per_page=25):
     """Boolean keyword search against title (AND/OR/NOT/quotes/parens via
     boolean_search.py), plus facet filters for location substring, days-back,
     department, and commitment. Boolean evaluation happens in Python; SQL is
@@ -185,9 +206,18 @@ def search_jobs(query="", location="", locations=None, days=None, department="",
     kept for backward compatibility as a single substring filter; if both
     are given, `locations` wins.
 
-    `sort` picks one of SORT_OPTIONS; unrecognized values fall back to the
-    default (newest-first) rather than raising, since it only ever comes
-    from a query param a user could hand-edit.
+    `location_groups`, if given, is a list of canonical group keys from
+    location_groups.py (e.g. "remote_us") — a job matches if its raw
+    location string satisfies that group's classifier. This collapses the
+    dozens of raw spellings ATSes use for "remote in the US" into one
+    selectable option. Combined with `locations`/`location` via OR, same as
+    multi-select location chips are combined with each other.
+
+    `sort` picks one of SORT_OPTIONS, plus the special value "match" (best
+    resume match first, ties broken by newest-first) which requires
+    `resume_terms` (a list of lowercased strings) to mean anything — with no
+    terms it quietly falls back to newest-first rather than raising, since
+    both only ever come from query params a user could hand-edit.
     """
     ast = parse_query(query)
     order_sql = SORT_OPTIONS.get(sort, SORT_OPTIONS[DEFAULT_SORT])
@@ -198,13 +228,21 @@ def search_jobs(query="", location="", locations=None, days=None, department="",
     loc_list = [l.strip() for l in (locations or []) if l and l.strip()]
     if not loc_list and location.strip():
         loc_list = [location.strip()]
+    group_list = [g.strip() for g in (location_groups or []) if g and g.strip()]
 
-    if loc_list:
+    if loc_list or group_list:
         clauses = ["location LIKE ?" for _ in loc_list]
+        params.extend(f"%{l}%" for l in loc_list)
+        if group_list:
+            # Cheap SQL-side narrowing only, not the real decision — every
+            # canonical group is some flavor of remote, so this broadly
+            # keeps candidate rows in play. The precise per-group
+            # classification (matches_group) happens in Python below, once
+            # rows are already fetched.
+            clauses.append("location LIKE '%remote%'")
         # Jobs with no reported location still show up rather than getting
         # hidden by a filter they simply have no data to match against.
         where.append("(" + " OR ".join(clauses) + " OR location = '' OR location IS NULL)")
-        params.extend(f"%{l}%" for l in loc_list)
 
     if days:
         from datetime import timedelta
@@ -238,6 +276,34 @@ def search_jobs(query="", location="", locations=None, days=None, department="",
     candidates = [dict(r) for r in rows]
     if ast is not None:
         candidates = [r for r in candidates if evaluate(ast, r["title"])]
+
+    if group_list:
+        # The SQL prefilter above was deliberately loose (any "remote"
+        # substring) when groups were requested — this is the actual
+        # decision. Combined via OR with plain location substrings, same as
+        # multi-select location chips are OR'd with each other.
+        loc_list_lower = [l.lower() for l in loc_list]
+
+        def _loc_matches(r):
+            loc = r.get("location") or ""
+            if not loc:
+                return True
+            if loc_list_lower and any(l in loc.lower() for l in loc_list_lower):
+                return True
+            return any(matches_group(g, loc) for g in group_list)
+
+        candidates = [r for r in candidates if _loc_matches(r)]
+
+    if sort == "match" and resume_terms:
+        # Two stable sorts = one two-key sort: establish newest-first as the
+        # tiebreaker order first, then sort by score — Python's sort is
+        # stable, so equal-score jobs keep their relative newest-first order
+        # from the first pass. This has to happen here (in Python, over the
+        # full candidate set) rather than in the browser, because the
+        # browser only ever sees one page at a time — it can badge the jobs
+        # it can see, but it can't reorder page 3 relative to page 1.
+        candidates.sort(key=lambda r: r.get("posted") or "", reverse=True)
+        candidates.sort(key=lambda r: -_match_score(r, resume_terms))
 
     total = len(candidates)
     offset = max(0, (page - 1)) * per_page
