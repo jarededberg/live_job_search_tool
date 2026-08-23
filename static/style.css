@@ -361,6 +361,21 @@ main {
 .resume-status.error { color: #b3261e; }
 .resume-status.ok { color: #146c43; }
 
+.resume-suggestion-btn {
+  display: inline-block;
+  margin: 2px 4px 0 0;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.resume-suggestion-btn:hover { background: var(--accent); color: var(--bg); }
+
 /* ---------- Results ---------- */
 
 .results-header {
@@ -476,6 +491,39 @@ main {
   -webkit-box-orient: vertical;
   overflow: hidden;
   flex: 1;
+}
+
+.yoe-badge {
+  display: inline-block;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+  margin-right: 2px;
+  vertical-align: 1px;
+}
+
+.job-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+}
+.tools-icon { font-size: 0.75rem; opacity: 0.6; margin-right: 1px; }
+.tool-chip {
+  display: inline-block;
+  background: var(--bg-subtle);
+  color: var(--muted);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .job-footer {

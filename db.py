@@ -4,6 +4,7 @@ db.py — tiny SQLite layer for the job cache.
 
 import sqlite3
 import os
+import json
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -63,6 +64,8 @@ def init_db():
                 salary_min INTEGER,
                 salary_max INTEGER,
                 blurb TEXT DEFAULT '',
+                years_experience TEXT,
+                tools TEXT DEFAULT '[]',
                 first_seen TEXT NOT NULL,
                 last_seen TEXT NOT NULL
             )
@@ -79,6 +82,10 @@ def init_db():
             conn.execute("ALTER TABLE jobs ADD COLUMN salary_max INTEGER")
         if "blurb" not in cols:
             conn.execute("ALTER TABLE jobs ADD COLUMN blurb TEXT DEFAULT ''")
+        if "years_experience" not in cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN years_experience TEXT")
+        if "tools" not in cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN tools TEXT DEFAULT '[]'")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_posted ON jobs(posted)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_title ON jobs(title)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_department ON jobs(department)")
@@ -109,22 +116,26 @@ def upsert_jobs(jobs):
             salary_min = j.get("salary_min")
             salary_max = j.get("salary_max")
             blurb = j.get("blurb", "")
+            years_experience = j.get("years_experience")
+            tools = json.dumps(j.get("tools") or [])
             cur = conn.execute("SELECT url FROM jobs WHERE url = ?", (j["url"],))
             if cur.fetchone() is None:
                 new_count += 1
                 conn.execute(
                     "INSERT INTO jobs (url, title, company, location, posted, source, department, "
-                    "commitment, salary_min, salary_max, blurb, first_seen, last_seen) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "commitment, salary_min, salary_max, blurb, years_experience, tools, "
+                    "first_seen, last_seen) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (j["url"], j["title"], j["company"], j["location"], j["posted"], j["source"],
-                     dept, commit_, salary_min, salary_max, blurb, now, now),
+                     dept, commit_, salary_min, salary_max, blurb, years_experience, tools, now, now),
                 )
             else:
                 conn.execute(
                     "UPDATE jobs SET title=?, company=?, location=?, posted=?, source=?, department=?, "
-                    "commitment=?, salary_min=?, salary_max=?, blurb=?, last_seen=? WHERE url=?",
+                    "commitment=?, salary_min=?, salary_max=?, blurb=?, years_experience=?, tools=?, "
+                    "last_seen=? WHERE url=?",
                     (j["title"], j["company"], j["location"], j["posted"], j["source"], dept, commit_,
-                     salary_min, salary_max, blurb, now, j["url"]),
+                     salary_min, salary_max, blurb, years_experience, tools, now, j["url"]),
                 )
         conn.commit()
     return new_count
@@ -338,6 +349,15 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         ).fetchall()
 
     candidates = [dict(r) for r in rows]
+    for r in candidates:
+        # stored as a JSON string (SQLite has no native array type); parse
+        # back to a real list for the API response. Malformed/legacy rows
+        # (pre-migration, or NULL) fall back to an empty list rather than
+        # raising.
+        try:
+            r["tools"] = json.loads(r.get("tools") or "[]")
+        except (TypeError, ValueError):
+            r["tools"] = []
     if ast is not None:
         candidates = [r for r in candidates if evaluate(ast, r["title"])]
 

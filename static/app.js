@@ -183,6 +183,23 @@ function jobCard(job) {
   }
   const badge = matchBadgeHtml(job);
 
+  // Years-of-experience badge + qualifications blurb, shown together like a
+  // single line of "here's what this role actually wants" — the YOE number
+  // pulled out as its own small pill (extract_years_experience in
+  // blurb_extractor.py) rather than buried in the sentence, so it reads at
+  // a glance instead of requiring the user to parse it out of prose.
+  const blurbLine = job.blurb || job.years_experience
+    ? `<div class="job-blurb">${job.years_experience ? `<span class="yoe-badge">${escapeHtml(job.years_experience)} YOE</span> ` : ""}${escapeHtml(job.blurb || "")}</div>`
+    : "";
+
+  // Tools/tech row: specific product names mentioned in the posting
+  // (tools_extractor.py), not a generic skills summary — a company that
+  // never mentions a tool by name just doesn't get a row, rather than a
+  // guessed one.
+  const toolsLine = job.tools && job.tools.length
+    ? `<div class="job-tools"><span class="tools-icon" aria-hidden="true">🔧</span>${job.tools.map((t) => `<span class="tool-chip">${escapeHtml(t)}</span>`).join("")}</div>`
+    : "";
+
   return `
     <div class="job-card">
       <div class="job-card-header">
@@ -193,7 +210,8 @@ function jobCard(job) {
         </div>
       </div>
       ${badge}
-      ${job.blurb ? `<div class="job-blurb">${escapeHtml(job.blurb)}</div>` : ""}
+      ${blurbLine}
+      ${toolsLine}
       <div class="job-footer">
         <span class="job-posted">${escapeHtml(posted)}</span>
         ${tags.join("")}
@@ -404,42 +422,69 @@ async function handleResumeFile(file) {
       resumeStatus.className = "resume-status error";
       return;
     }
-    document.getElementById("q").value = data.query;
     resumeTitleTerms = (data.title_terms || []).map((t) => t.toLowerCase());
     resumeSkillTerms = (data.skill_terms || []).map((t) => t.toLowerCase());
     hasResume = true;
     document.getElementById("sort-match-option").hidden = false;
     sortSelect.value = "match";
 
-    // Auto-populate location: nearby cities to whatever "City, ST" the
-    // resume listed, plus Remote (US) — both as deselectable chips, per
-    // spec ("virtually all of the searches should autopopulate a remote
-    // field with optionality for the user to deselect").
-    let locationNote = "";
-    (data.location_terms || []).forEach((loc) => {
-      const opt = { type: "text", value: loc, label: loc };
-      if (!selectedLocations.some((s) => s.type === "text" && s.value === loc)) {
-        selectedLocations.push(opt);
-      }
-    });
-    (data.location_groups || []).forEach((key) => {
-      const label = locationGroupLabels[key] || key;
-      if (!selectedLocations.some((s) => s.type === "group" && s.value === key)) {
-        selectedLocations.push({ type: "group", value: key, label });
-      }
-    });
-    if (data.location_terms && data.location_terms.length) {
-      renderLocationChips();
-      locationNote = data.matched_city
-        ? ` Added locations near ${data.matched_city} plus Remote (US) — remove any you don't want.`
-        : " Added Remote (US) — remove it if you don't want remote roles.";
-    } else if (data.location_groups && data.location_groups.length) {
-      renderLocationChips();
-      locationNote = " Added Remote (US) — remove it if you don't want remote roles.";
+    // Deliberately NOT auto-filling the query box or auto-adding location
+    // chips anymore. Both used to apply automatically, and stacked
+    // together they were brutal: a synthetic 600-job test went 600 -> 109
+    // (query box narrowing to just the 8 extracted title phrases, matched
+    // against title text only) -> 7 (location chips on top, excluding
+    // every onsite job outside the resume's home metro). That directly
+    // fought the match-tier sort, whose whole point is to rank the FULL
+    // dataset by fit so the best matches float to the top without hiding
+    // everything else. Now: leave query/location untouched, search
+    // immediately with sort=match so all open roles show up ranked by fit,
+    // and offer the extracted query + location as one-click opt-in
+    // refinements instead of a default filter.
+    const suggestions = [];
+    if (data.query) {
+      suggestions.push(
+        `<button type="button" id="apply-resume-query" class="resume-suggestion-btn">Narrow to these titles</button>`
+      );
+    }
+    if ((data.location_terms && data.location_terms.length) || (data.location_groups && data.location_groups.length)) {
+      const label = data.matched_city ? `${data.matched_city} area + Remote (US)` : "Remote (US)";
+      suggestions.push(
+        `<button type="button" id="apply-resume-location" class="resume-suggestion-btn">Narrow to ${escapeHtml(label)}</button>`
+      );
+    }
+    const suggestionHtml = suggestions.length
+      ? ` Optional narrowing: ${suggestions.join(" ")}`
+      : "";
+    resumeStatus.innerHTML =
+      `Extracted: ${escapeHtml(data.terms.join(", "))} — sorted by best match across all open roles.${suggestionHtml}`;
+    resumeStatus.className = "resume-status ok";
+
+    const applyQueryBtn = document.getElementById("apply-resume-query");
+    if (applyQueryBtn) {
+      applyQueryBtn.addEventListener("click", () => {
+        document.getElementById("q").value = data.query;
+        search(1);
+      });
+    }
+    const applyLocationBtn = document.getElementById("apply-resume-location");
+    if (applyLocationBtn) {
+      applyLocationBtn.addEventListener("click", () => {
+        (data.location_terms || []).forEach((loc) => {
+          if (!selectedLocations.some((s) => s.type === "text" && s.value === loc)) {
+            selectedLocations.push({ type: "text", value: loc, label: loc });
+          }
+        });
+        (data.location_groups || []).forEach((key) => {
+          const label = locationGroupLabels[key] || key;
+          if (!selectedLocations.some((s) => s.type === "group" && s.value === key)) {
+            selectedLocations.push({ type: "group", value: key, label });
+          }
+        });
+        renderLocationChips();
+        search(1);
+      });
     }
 
-    resumeStatus.textContent = `Extracted: ${data.terms.join(", ")} — edit above, then search. Sorted by best match to your resume.${locationNote}`;
-    resumeStatus.className = "resume-status ok";
     search(1);
   } catch (e) {
     resumeStatus.textContent = "Upload failed. Try again.";

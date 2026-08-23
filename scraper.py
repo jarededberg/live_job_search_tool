@@ -21,7 +21,8 @@ import ijson
 
 from companies_data import COMPANIES
 from salary_extractor import strip_html, extract_salary
-from blurb_extractor import extract_blurb, extract_blurb_from_sections
+from blurb_extractor import extract_blurb, extract_blurb_from_sections, extract_years_experience
+from tools_extractor import extract_tools
 
 _LOCAL = threading.local()
 
@@ -123,7 +124,7 @@ def normalize_commitment(raw):
 
 
 def make_job(title, company, location, posted, url, source, department="", commitment="",
-             salary_min=None, salary_max=None, blurb=""):
+             salary_min=None, salary_max=None, blurb="", years_experience=None, tools=None):
     return {
         "title": (title or "").strip(),
         "company": (company or "").strip(),
@@ -136,6 +137,8 @@ def make_job(title, company, location, posted, url, source, department="", commi
         "salary_min": salary_min,
         "salary_max": salary_max,
         "blurb": (blurb or "").strip(),
+        "years_experience": years_experience,  # e.g. "5+", "3-6", or None
+        "tools": tools or [],  # list of display names, e.g. ["Salesforce", "SQL"]
     }
 
 
@@ -168,11 +171,15 @@ def try_greenhouse(company, slug):
                     commitment = str(meta.get("value") or "")
                     break
             content = job.get("content", "")
-            salary_min, salary_max = extract_salary(strip_html(content))
+            plain = strip_html(content)
+            salary_min, salary_max = extract_salary(plain)
             blurb = extract_blurb(content, is_html=True)
+            years_experience = extract_years_experience(plain)
+            tools = extract_tools(plain)
             if title and job_url:
                 results.append(make_job(title, company, location, posted, job_url, "Greenhouse",
-                                         department, commitment, salary_min, salary_max, blurb))
+                                         department, commitment, salary_min, salary_max, blurb,
+                                         years_experience, tools))
     return results
 
 
@@ -213,9 +220,12 @@ def try_lever(company, slug):
             # the plain text only if there's no usable list section.
             sections = [(l.get("text"), l.get("content")) for l in (job.get("lists") or [])]
             blurb = extract_blurb_from_sections(sections) or extract_blurb(desc_text, is_html=False)
+            years_experience = extract_years_experience(desc_text)
+            tools = extract_tools(desc_text)
             if title and job_url:
                 results.append(make_job(title, company, location, posted, job_url, "Lever",
-                                         department, commitment, salary_min, salary_max, blurb))
+                                         department, commitment, salary_min, salary_max, blurb,
+                                         years_experience, tools))
     return results
 
 
@@ -282,9 +292,12 @@ def try_ashby(company, slug):
             if salary_min is None:
                 salary_min, salary_max = extract_salary(desc_plain)
             blurb = extract_blurb(desc_plain, is_html=False)
+            years_experience = extract_years_experience(desc_plain)
+            tools = extract_tools(desc_plain)
             if title and job_url:
                 results.append(make_job(title, company, location, posted, job_url, "Ashby",
-                                         department, commitment, salary_min, salary_max, blurb))
+                                         department, commitment, salary_min, salary_max, blurb,
+                                         years_experience, tools))
     return results
 
 

@@ -168,25 +168,89 @@ already in the cache) whenever `companies_data.py` gets new entries. It's
 not part of the deploy pipeline or the scheduled scrape; it's a manual,
 occasional step, same as editing the company list itself.
 
-### Role blurbs
+### Role blurbs, years-of-experience badge, and tools row
 
-Each card shows a short blurb — same "best-effort, clearly extracted, not
-curated" philosophy as salary. `blurb_extractor.py` tries, in order:
+Each card shows a short blurb, a years-of-experience badge when the posting
+states one, and a row of specific tools/tech the posting mentions — modeled
+directly on hiring.cafe's cards (a real reference the user pointed at,
+comparing our then-generic blurbs against theirs), with this app's own
+visual styling. Same "best-effort, clearly extracted, not curated"
+philosophy as salary throughout.
 
-1. An explicit years-of-experience mention ("4+ years of experience
-   prospecting...", "Minimum 3 years of experience building in AWS...").
-2. The first couple bullet points under a heading that looks like
-   "Qualifications" / "Requirements" / "What You'll Need" / "Who You Are".
-   For Lever specifically, this uses the `lists` field (already split into
-   titled sections like "What We Require") instead of hunting for a heading
-   in a wall of text — far more reliable, since Lever's plain-text fields
-   are often just a repeated company boilerplate paragraph.
-3. The first substantive sentence of the description, as a last resort.
+`blurb_extractor.py` tries, in order:
 
-On an 800-company sample, 100% of jobs get some blurb (the fallback ensures
-that), and the years-of-experience / qualifications passes catch a large
-majority of them with something genuinely specific rather than generic
-company-intro text.
+1. The first couple bullet points under a heading that looks like a real
+   qualifications/responsibilities section — "Qualifications" /
+   "Requirements" / "Desired Qualifications" / "Essential Duties" /
+   "Responsibilities" / "You Should Have" / "What You'll Bring" / "Who You
+   Are" / etc. Bullets go FIRST now (they didn't used to) because real
+   bullet content is far more specific and useful than a single sentence
+   built around wherever "years" happens to appear. For Lever specifically,
+   this uses the `lists` field (already split into titled sections like
+   "What We Require") instead of hunting for a heading in a wall of text.
+2. A years-of-experience-anchored sentence, if no bullets were found.
+3. The first substantive sentence of the description, as a last resort —
+   actively skipping past an "About [Company]" / "Company Overview" / "Who
+   We Are" intro block if that's what the posting opens with, rather than
+   grabbing it (see below).
+
+`extract_years_experience()` pulls just the bare number phrase ("5+",
+"3-6") as its own field, rendered as a small badge next to the blurb text
+instead of being buried inside a sentence.
+
+**The bug that prompted this rewrite**: cards were showing things like
+"About Redwood Materials — Redwood is localizing a global battery supply
+chain..." as the blurb, identical across every posting from that company,
+on postings that had perfectly good qualifications content further down.
+Fetching a real Greenhouse posting and running it through the extractor
+found two compounding causes:
+
+1. **The heading regex was too strict.** It required an EXACT match like
+   `<strong>Qualifications</strong>` with nothing else in the tag — no
+   trailing colon, no prefix beyond "minimum/required/preferred/basic". A
+   real posting's actual heading was `<strong>Desired Qualifications:
+   </strong>` — "Desired" wasn't an allowed prefix and the trailing colon
+   broke the match entirely, so it never fired. Broadened to cover common
+   real-world phrasings ("Desired", "Additional", "Key", "Essential"
+   prefixes; "Responsibilities", "Duties", "Must Haves", "You Should Have",
+   "You Have", optional trailing colon) — validated against real postings
+   from three different companies (Redwood Materials, Adyen, Digible)
+   spanning Greenhouse content that used at least five different heading
+   phrasings for the same kind of section.
+2. **The last-resort fallback had no boilerplate guard.** With no
+   qualifications heading found, it fell to "first sentence ≥60 chars" —
+   and since companies routinely put "About [Company]" as the literal
+   first paragraph of the job description (before any qualifications
+   section), that's exactly what got grabbed. Fixed with
+   `_skip_about_block()`: detects a company-intro heading ("About Us",
+   "Company Overview", "Who We Are", "Our Mission", etc.) at the start of
+   the text and skips past it — including multiple sentences of marketing
+   copy if needed (one real example, Digible's "Company Overview:", ran
+   3+ sentences of mission/culture copy before reaching anything
+   job-specific; `_COMPANY_MARKETING_SIGNAL_RE` keeps dropping sentences
+   that still read like generic company language, capped at 4, rather than
+   assuming exactly one sentence is enough).
+
+Verified against 9 real postings across those 3 companies (fetched live
+from their Greenhouse boards, not synthetic text): 0 fell back to
+company-boilerplate after the fix, versus roughly half before it.
+
+`tools_extractor.py` is new: a curated list of ~55 real
+tool/technology names (Salesforce, SQL, Python, Tableau, Kubernetes,
+Figma, AI/LLM, etc., spanning the many job functions this app covers, not
+just engineering) matched against the posting text, capped at 6 per
+card, rendered as a row of small chips under the blurb with a wrench icon.
+A few short/common-word tool names are deliberately excluded or narrowed
+to a safer anchor phrase to avoid false positives in exactly the kind of
+text this app scrapes a lot of — bare "Segment" would match "market
+segment"/"customer segment" constantly in sales/marketing postings, and
+bare "Linear" would match "linear regression"/"linear model" in
+data-science postings, so those only match on their more distinctive full
+product names/domains instead.
+
+On an 800-company sample, 100% of jobs get some blurb (the fallback still
+ensures that), and the qualifications-bullets / years-of-experience passes
+now catch a large majority of them with something genuinely specific.
 
 One real bug worth knowing about if this ever gets touched again: the
 original years-of-experience regex baked "grab ~10 words before and ~14
@@ -391,11 +455,31 @@ location term rather than nothing.
 
 On a successful resume parse, `POST /api/parse-resume` returns
 `location_terms` (the nearby-city list, or just the one matched city) and
-`location_groups: ["remote_us"]` — the frontend adds all of them as
-ordinary deselectable location chips (`handleResumeFile()` in `app.js`),
-per the requirement that virtually every resume-driven search should
-default to including remote roles, with the user free to remove any chip
-(including "Remote (US)") they don't want.
+`location_groups: ["remote_us"]`.
+
+**This used to auto-apply both the location chips AND a narrow title query
+to the search on upload, and it badly over-filtered.** The very next round
+of testing after building this surfaced it directly: a resume that should
+have matched hundreds of open roles came back with only ~30 total results.
+The mechanism, confirmed with a synthetic 600-job test: the auto-filled
+query box (an OR of the 8 extracted title phrases, matched against title
+text only) cut 600 → 109 on its own; the auto-added location chips
+(nearby-metro cities + Remote (US)) on top of that cut it further to 7 —
+excluding every onsite job outside the resume's home metro, and every
+remote posting whose location string didn't classify as `remote_us`. Once
+server-side match-tier sorting existed (see "Match sort" above), that
+auto-narrowing became actively counterproductive: it fights the exact
+thing match-tier sort is for, which is ranking the FULL dataset by fit so
+the best matches float to the top without hiding everything else.
+
+Fixed by making both opt-in instead of automatic: on upload, the query box
+and location filter are left untouched, `sort` is set to `match`, and the
+search fires immediately — so all open roles show up, ranked best-match-
+first. The extracted query string and location suggestion are still
+surfaced, as two small pill buttons in the resume-status line ("Narrow to
+these titles" / "Narrow to Phoenix, AZ area + Remote (US)") the user can
+click if they specifically want to narrow further — `applyQueryBtn`/
+`applyLocationBtn` in `handleResumeFile()` in `app.js`.
 
 ### Results layout
 
