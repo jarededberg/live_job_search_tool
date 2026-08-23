@@ -23,7 +23,7 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 
 SCRAPE_INTERVAL_HOURS = float(os.environ.get("SCRAPE_INTERVAL_HOURS", "8"))
-MAX_WORKERS = int(os.environ.get("SCRAPE_MAX_WORKERS", "4"))
+MAX_WORKERS = int(os.environ.get("SCRAPE_MAX_WORKERS", "10"))
 MAX_RESUME_BYTES = 8 * 1024 * 1024  # 8 MB
 ALLOWED_RESUME_EXT = (".pdf", ".docx", ".txt")
 
@@ -47,13 +47,8 @@ def run_scrape_job():
             _scrape_progress["done"] = done
             _scrape_progress["total"] = total
 
-        new_count = 0
-
-        def batch_cb(jobs_batch):
-            nonlocal new_count
-            new_count += db.upsert_jobs(jobs_batch)
-
-        _, stats = scrape_all(max_workers=MAX_WORKERS, progress_cb=progress_cb, batch_cb=batch_cb)
+        jobs, stats = scrape_all(max_workers=MAX_WORKERS, progress_cb=progress_cb)
+        new_count = db.upsert_jobs(jobs)
         removed = db.prune_stale(max_age_days=10)
         finished = datetime.now(timezone.utc).isoformat()
         db.record_run(started, finished, "ok", stats, db.total_jobs())

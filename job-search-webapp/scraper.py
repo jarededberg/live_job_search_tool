@@ -88,14 +88,12 @@ def make_job(title, company, location, posted, url, source, department="", commi
 
 
 def try_greenhouse(company, slug):
-    # Deliberately NOT passing ?content=true. That flag also gates the
-    # `departments` field, so Greenhouse-sourced jobs won't populate the
-    # department facet (Lever/Ashby still do) — but content=true was
-    # returning several MB per company (full HTML job descriptions we never
-    # use), and was the main driver of the memory spikes that got this app
-    # OOM-killed on Render. `metadata` (used for commitment) is still
-    # returned without the flag, so that facet is unaffected.
-    data = fetch(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs")
+    # content=true is required to get `departments` back at all (Greenhouse
+    # bundles department/office metadata behind the same flag as the full
+    # HTML job description), so we can't drop it without losing the
+    # department facet. The memory fix instead is on the concurrency side —
+    # see MAX_WORKERS in scrape_all().
+    data = fetch(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true")
     if data is None:
         return None
     results = []
@@ -184,14 +182,9 @@ def search_company(name, slug):
     return [], "not_found", "not_found"
 
 
-def scrape_all(companies=None, max_workers=4, progress_cb=None, batch_cb=None, batch_size=100):
-    """Scrape every company in COMPANIES (or a provided subset). Thread-pooled
-    for speed, but memory-bounded: jobs are buffered only up to `batch_size`
-    at a time, then handed to `batch_cb(jobs)` (e.g. a DB upsert) and
-    discarded, rather than accumulating ~100k job dicts for the entire
-    ~10-minute scrape. If batch_cb is None, falls back to returning
-    everything at once (used by tests / small ad-hoc scrapes).
-    """
+def scrape_all(companies=None, max_workers=10, progress_cb=None):
+    """Scrape every company in COMPANIES (or a provided subset). Returns a flat
+    list of job dicts plus simple stats. Thread-pooled for speed."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     companies = companies if companies is not None else COMPANIES
@@ -202,22 +195,11 @@ def scrape_all(companies=None, max_workers=4, progress_cb=None, batch_cb=None, b
             seen_slugs.add(slug)
             clean.append((name, slug))
 
-    buffer = []
-    all_jobs = [] if batch_cb is None else None  # only retained without streaming
-    total_jobs = 0
+    all_jobs = []
     not_found = 0
     found_no_match = 0
     found = 0
     done = 0
-
-    def _flush():
-        nonlocal buffer
-        if buffer and batch_cb:
-            batch_cb(buffer)
-        buffer = []
-        if batch_cb:
-            import gc
-            gc.collect()
 
     def _one(item):
         name, slug = item
@@ -236,13 +218,7 @@ def scrape_all(companies=None, max_workers=4, progress_cb=None, batch_cb=None, b
                 continue
             if status == "found_jobs":
                 found += 1
-                total_jobs += len(jobs)
-                if batch_cb:
-                    buffer.extend(jobs)
-                    if len(buffer) >= batch_size:
-                        _flush()
-                else:
-                    all_jobs.extend(jobs)
+                all_jobs.extend(jobs)
             elif status == "found_no_match":
                 found_no_match += 1
             else:
@@ -250,13 +226,11 @@ def scrape_all(companies=None, max_workers=4, progress_cb=None, batch_cb=None, b
             if progress_cb:
                 progress_cb(done, len(clean))
 
-    _flush()
-
     stats = {
         "companies_scanned": len(clean),
         "companies_with_jobs": found,
         "companies_found_no_openings": found_no_match,
         "companies_not_found": not_found,
-        "jobs_scraped": total_jobs,
+        "jobs_scraped": len(all_jobs),
     }
-    return (all_jobs or []), stats
+    return all_jobs, stats

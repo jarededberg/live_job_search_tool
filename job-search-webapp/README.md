@@ -80,36 +80,19 @@ for the first several minutes.
    the app still works, it just re-scrapes from empty on every redeploy.
 6. Optional environment variables:
    - `SCRAPE_INTERVAL_HOURS` (default `8`)
-   - `SCRAPE_MAX_WORKERS` (default `4`)
+   - `SCRAPE_MAX_WORKERS` (default `10`)
 
 ### Memory
 
-This went through two real rounds of fixing after hitting Render's memory
-limit in production, worth understanding if you ever tune it further:
-
-1. **Greenhouse's `?content=true` flag** was dropped from requests. That flag
-   returns the full HTML job description on every posting (several MB per
-   company for big boards), which we never used. It also happens to be the
-   only way to get `departments` back from Greenhouse, so Greenhouse-sourced
-   jobs no longer populate the department facet — Lever and Ashby jobs still
-   do, since their APIs don't gate that behind an extra flag.
-2. **Streaming instead of accumulating.** The scraper used to hold every job
-   found (~85-100k dicts) in memory for the entire ~10-minute scrape before
-   writing anything to disk. It now flushes to SQLite every `batch_size`
-   (default 100) jobs and forces a GC pass after each flush, so peak memory
-   no longer grows with how much of the company list has been scanned.
-
-Even with both fixes, memory does still grow somewhat with company count
-(measured ~274 MB scanning 800 of the ~4,300 companies at
-`SCRAPE_MAX_WORKERS=4`) — a full run wasn't fully load-tested end-to-end due
-to tooling constraints while building this, so treat the current defaults as
-a solid improvement, not a guarantee. `SCRAPE_MAX_WORKERS` and `batch_size`
-(in the `scrape_all()` call in `app.py`) are the two levers if it's still
-tight; realistically, if Render flags memory again after this, the
-straightforward fix is bumping the instance from the smallest tier
-(512 MB) to the next one up — 4,300 companies and ~80-100k jobs is a
-legitimately non-trivial amount of data to hold and index, not just a bug
-to keep chasing.
+Greenhouse boards are fetched with `?content=true` so we can also pull
+`departments` (the department facet needs it — Greenhouse bundles that
+metadata behind the same flag as the full HTML job description, there's no
+way to request one without the other). That means each in-flight request
+during a scrape can be several MB, and `SCRAPE_MAX_WORKERS` controls how
+many of those are in flight at once — it's the main lever for memory usage.
+The default of 10 should fit comfortably on Render's smallest paid instance
+(512 MB); if you still see "exceeded its memory limit" emails, drop it to 5
+via the environment variable, or upgrade the instance type.
 
 Railway or Fly.io work the same way — any host that runs a long-lived Python
 process (not a stateless serverless function, since the scheduler needs to
