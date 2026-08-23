@@ -59,16 +59,22 @@ def init_db():
                 source TEXT,
                 department TEXT DEFAULT '',
                 commitment TEXT DEFAULT '',
+                salary_min INTEGER,
+                salary_max INTEGER,
                 first_seen TEXT NOT NULL,
                 last_seen TEXT NOT NULL
             )
         """)
-        # Lightweight migration for DBs created before department/commitment existed
+        # Lightweight migration for DBs created before department/commitment/salary existed
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         if "department" not in cols:
             conn.execute("ALTER TABLE jobs ADD COLUMN department TEXT DEFAULT ''")
         if "commitment" not in cols:
             conn.execute("ALTER TABLE jobs ADD COLUMN commitment TEXT DEFAULT ''")
+        if "salary_min" not in cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN salary_min INTEGER")
+        if "salary_max" not in cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN salary_max INTEGER")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_posted ON jobs(posted)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_title ON jobs(title)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_department ON jobs(department)")
@@ -96,21 +102,24 @@ def upsert_jobs(jobs):
         for j in jobs:
             dept = j.get("department", "")
             commit_ = j.get("commitment", "")
+            salary_min = j.get("salary_min")
+            salary_max = j.get("salary_max")
             cur = conn.execute("SELECT url FROM jobs WHERE url = ?", (j["url"],))
             if cur.fetchone() is None:
                 new_count += 1
                 conn.execute(
                     "INSERT INTO jobs (url, title, company, location, posted, source, department, "
-                    "commitment, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "commitment, salary_min, salary_max, first_seen, last_seen) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (j["url"], j["title"], j["company"], j["location"], j["posted"], j["source"],
-                     dept, commit_, now, now),
+                     dept, commit_, salary_min, salary_max, now, now),
                 )
             else:
                 conn.execute(
                     "UPDATE jobs SET title=?, company=?, location=?, posted=?, source=?, department=?, "
-                    "commitment=?, last_seen=? WHERE url=?",
+                    "commitment=?, salary_min=?, salary_max=?, last_seen=? WHERE url=?",
                     (j["title"], j["company"], j["location"], j["posted"], j["source"], dept, commit_,
-                     now, j["url"]),
+                     salary_min, salary_max, now, j["url"]),
                 )
         conn.commit()
     return new_count
@@ -148,22 +157,35 @@ def total_jobs():
         return conn.execute("SELECT COUNT(*) AS c FROM jobs").fetchone()["c"]
 
 
-def search_jobs(query="", location="", days=None, department="", commitment="", page=1, per_page=25):
+def search_jobs(query="", location="", locations=None, days=None, department="", commitment="",
+                 page=1, per_page=25):
     """Boolean keyword search against title (AND/OR/NOT/quotes/parens via
     boolean_search.py), plus facet filters for location substring, days-back,
     department, and commitment. Boolean evaluation happens in Python; SQL is
     only used to (a) apply the facet filters and (b) cheaply narrow the
     candidate set using a safe superset (OR of all non-negated terms) before
     evaluating the full expression.
+
+    `locations`, if given, is a list of substrings (multi-select) — a job
+    matches if its location contains ANY of them. `location` (singular) is
+    kept for backward compatibility as a single substring filter; if both
+    are given, `locations` wins.
     """
     ast = parse_query(query)
 
     where = []
     params = []
 
-    if location.strip():
-        where.append("(location LIKE ? OR location = '' OR location IS NULL)")
-        params.append(f"%{location.strip()}%")
+    loc_list = [l.strip() for l in (locations or []) if l and l.strip()]
+    if not loc_list and location.strip():
+        loc_list = [location.strip()]
+
+    if loc_list:
+        clauses = ["location LIKE ?" for _ in loc_list]
+        # Jobs with no reported location still show up rather than getting
+        # hidden by a filter they simply have no data to match against.
+        where.append("(" + " OR ".join(clauses) + " OR location = '' OR location IS NULL)")
+        params.extend(f"%{l}%" for l in loc_list)
 
     if days:
         from datetime import timedelta
@@ -213,4 +235,27 @@ def distinct_facet_values(column, limit=30):
             f"GROUP BY {column} ORDER BY c DESC LIMIT ?",
             (limit,),
         ).fetchall()
+        return [row["v"] for row in rows]
+
+
+def distinct_locations(prefix="", limit=20):
+    """Distinct non-empty location strings for the typeahead dropdown,
+    ranked by how many open roles use them. `prefix` is actually matched as
+    a substring anywhere in the location (not just a true prefix) since
+    location strings vary a lot in format ("Remote - US", "US - Remote",
+    "New York, NY"), and a strict prefix match would miss too much."""
+    with conn_ctx() as conn:
+        prefix = prefix.strip()
+        if prefix:
+            rows = conn.execute(
+                "SELECT location AS v, COUNT(*) AS c FROM jobs WHERE location LIKE ? AND location != '' "
+                "GROUP BY location ORDER BY c DESC LIMIT ?",
+                (f"%{prefix}%", limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT location AS v, COUNT(*) AS c FROM jobs WHERE location != '' "
+                "GROUP BY location ORDER BY c DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         return [row["v"] for row in rows]

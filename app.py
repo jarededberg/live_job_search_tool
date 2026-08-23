@@ -80,7 +80,7 @@ def start_scheduler():
 @app.route("/api/jobs")
 def api_jobs():
     q = request.args.get("q", "")
-    location = request.args.get("location", "")
+    locations = request.args.getlist("location")  # repeated ?location=a&location=b, multi-select
     days = request.args.get("days", "")
     department = request.args.get("department", "")
     commitment = request.args.get("commitment", "")
@@ -89,7 +89,7 @@ def api_jobs():
 
     days_val = int(days) if days.strip().isdigit() else None
     try:
-        jobs, total = db.search_jobs(query=q, location=location, days=days_val, department=department,
+        jobs, total = db.search_jobs(query=q, locations=locations, days=days_val, department=department,
                                       commitment=commitment, page=page, per_page=per_page)
     except Exception as e:
         return jsonify({"error": f"Couldn't parse that search: {e}"}), 400
@@ -108,6 +108,12 @@ def api_facets():
         "departments": db.distinct_facet_values("department", limit=40),
         "commitments": db.distinct_facet_values("commitment", limit=10),
     })
+
+
+@app.route("/api/locations")
+def api_locations():
+    q = request.args.get("q", "")
+    return jsonify({"locations": db.distinct_locations(prefix=q, limit=20)})
 
 
 @app.route("/api/status")

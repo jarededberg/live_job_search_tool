@@ -22,14 +22,24 @@ Built to share the tool publicly and post about it on LinkedIn.
   resume, pulls out a Skills section (if present) and likely job-title
   phrases (e.g. "Senior Product Manager"), and returns a ready-to-edit
   boolean query.
+- **`salary_extractor.py`** — best-effort salary range extraction. Ashby
+  sometimes exposes a real structured compensation field (used when
+  present); everything else falls back to a conservative regex over the job
+  description text. See "Salary data" below for the honest accuracy story.
+- **`build_logo_cache.py`** — offline script that resolves a working favicon
+  domain for each company and writes `static/logo_cache.json`. Run this
+  occasionally (not on every deploy) when companies_data.py changes — see
+  "Company logos" below.
 - **`app.py`** — Flask app. Runs the scraper on a schedule (every 8 hours by
   default, via APScheduler) and exposes:
-  - `GET /api/jobs?q=...&location=...&days=...&department=...&commitment=...&page=...` — search
+  - `GET /api/jobs?q=...&location=...&location=...&days=...&department=...&commitment=...&page=...` — search (repeat `location` for multi-select)
   - `GET /api/facets` — distinct department/commitment values for the filter dropdowns
+  - `GET /api/locations?q=...` — location typeahead suggestions, ranked by role count
   - `GET /api/status` — dataset freshness / scrape progress
   - `POST /api/refresh` — manually trigger a scrape (blocked if one's already running)
   - `POST /api/parse-resume` — multipart file upload (`resume` field), returns suggested search terms
   - `/` — the search UI (static/index.html, style.css, app.js)
+  - `/logo_cache.json` — served as a static file, fetched once client-side
 
 A full scrape of all ~4,300 companies takes roughly 5-10 minutes with 30
 parallel worker threads (tested live during development: ~98,000 jobs from
@@ -55,6 +65,84 @@ rarely reports employment type, so that facet will be sparser for
 Greenhouse-heavy results. Commitment values are normalized into a small set
 (Full-time / Part-time / Contract / Temporary / Internship / Other) since
 each ATS spells them differently.
+
+### Location filter
+
+Multi-select with type-ahead, not a plain text box. `#location-input` in
+`static/app.js` debounces (200ms) and hits `GET /api/locations?q=...`, which
+returns the top 20 distinct location strings (by role count) that contain
+the typed substring — ranked so "Remote" and major hubs surface before
+long-tail office locations. Selecting a suggestion adds a chip; multiple
+chips are OR'd together server-side (`db.search_jobs(locations=[...])`).
+Jobs with no reported location always pass the filter rather than getting
+hidden by a filter they have no data to match against.
+
+### Salary data
+
+None of Greenhouse, Lever, or Ashby expose salary as a clean structured
+field consistently:
+
+- **Ashby** sometimes does — pass `?includeCompensation=true` (undocumented
+  in the obvious places; found by comparing a rendered job page, which shows
+  a "Compensation" section with per-location pay bands, against what the
+  plain API response was missing) and some postings return a real
+  `compensation.compensationTiers[].components[]` array with `minValue`/
+  `maxValue`/`currencyCode`/`interval`. Used directly when present — this is
+  exact data, not a guess. Only `interval == "1 YEAR"` and `currencyCode ==
+  "USD"` components are used, since some postings (contract/hourly roles)
+  quote an hourly rate that would otherwise get silently averaged in next to
+  six-figure annual salaries.
+- **Greenhouse and Lever** (and any Ashby posting without the structured
+  field) fall back to `salary_extractor.py`, a conservative regex over the
+  job description text: `$120,000 - $150,000`, `$120k-$150k`, "between
+  $X and $Y", or a single `$130,000 per year` figure. Deliberately narrow —
+  it requires a `$` sign and comma/k-formatted numbers in a sane annual-
+  salary range (\$15k–\$1M), specifically to avoid catching things like
+  "$50,000,000 Series B" or phone numbers. It'll miss real disclosures
+  written in unusual formats; it should rarely show a wrong one.
+
+Every salary tag in the UI is prefixed `~` and has a tooltip noting it's a
+best-effort figure, not a verified one — this matters more for the regex
+path than the Ashby structured path, but the UI doesn't try to distinguish
+the two sources.
+
+Measured across an 800-company sample: ~45% of scraped jobs end up with a
+salary figure (department coverage is ~100% now that Greenhouse's
+`content=true` is back on — see Memory section below for why that's safe).
+
+### Company logos
+
+Clearbit's logo API (the obvious choice) is dead. Google's favicon service
+(`https://www.google.com/s2/favicons?domain=X&sz=64`) is used instead, but
+it needs an actual working domain — and company names/ATS slugs in
+`companies_data.py` often aren't one ("scaleai" 404s; the real domain is
+`scale.com`). Guessing wrong isn't just imprecise, it can be confidently
+*wrong*: naively turning "Apollo.io" into "apolloio.com" resolves to a real
+but unrelated site, showing someone else's logo.
+
+`build_logo_cache.py` handles this once, offline, for all ~3,500 unique
+companies rather than guessing live on every page render:
+
+1. Generates domain candidates per company — the ATS slug and the company
+   name (each tried with `.com`/`.ai`/`.io`/`.co`), plus, when the company
+   name already spells out its own TLD (e.g. "Character.AI", "Apollo.io"),
+   that exact domain is tried first since it's a far stronger signal than
+   any generic guess.
+2. HEAD-requests Google's favicon endpoint for each candidate in order;
+   Google returns a real 404 (not a generic fallback icon) when a domain
+   has no resolvable favicon, so the first 200 wins.
+3. Writes `static/logo_cache.json` (`{"Company Name": "domain.com" | null}`),
+   served as a static file and fetched once client-side.
+
+Resolved 3,306 of 3,453 unique company names (96%) in ~2.5 minutes with 30
+concurrent workers. Companies that don't resolve get a lettered fallback
+avatar in the UI (`job-logo-fallback` in style.css) instead of a broken
+image icon.
+
+Re-run `python3 build_logo_cache.py` (safe to re-run — it skips companies
+already in the cache) whenever `companies_data.py` gets new entries. It's
+not part of the deploy pipeline or the scheduled scrape; it's a manual,
+occasional step, same as editing the company list itself.
 
 ## Run locally
 
@@ -119,6 +207,16 @@ With all three fixes, a run of 797 of the ~4,300 companies
 `SCRAPE_MAX_WORKERS` and `batch_size` (in the `scrape_all()` call in
 `app.py`) are still the two levers if memory ever gets tight again, but at
 this point there's real headroom.
+
+Salary extraction (see below) later added Greenhouse's `?content=true` flag
+back and Ashby's `?includeCompensation=true` flag — both add payload size
+per job, which is exactly the kind of change that broke this before. Both
+were re-verified the same way: `content=true` alone measured 459KB peak
+traced memory for a 518-job Greenhouse board (vs. ~5.7MB of raw description
+text streamed through it), and the same 797-company benchmark re-run with
+both flags on peaked at **60MB** RSS — a 4MB increase, not a regression.
+Streaming is what makes this safe: payload size stopped being the thing that
+mattered once nothing holds more than ~1 job's data in memory at a time.
 
 Railway or Fly.io work the same way — any host that runs a long-lived Python
 process (not a stateless serverless function, since the scheduler needs to

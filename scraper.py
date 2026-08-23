@@ -20,6 +20,7 @@ from urllib.error import HTTPError
 import ijson
 
 from companies_data import COMPANIES
+from salary_extractor import strip_html, extract_salary
 
 _LOCAL = threading.local()
 
@@ -110,7 +111,8 @@ def normalize_commitment(raw):
     return "Other"
 
 
-def make_job(title, company, location, posted, url, source, department="", commitment=""):
+def make_job(title, company, location, posted, url, source, department="", commitment="",
+             salary_min=None, salary_max=None):
     return {
         "title": (title or "").strip(),
         "company": (company or "").strip(),
@@ -120,19 +122,23 @@ def make_job(title, company, location, posted, url, source, department="", commi
         "source": source,
         "department": (department or "").strip(),
         "commitment": normalize_commitment(commitment),
+        "salary_min": salary_min,
+        "salary_max": salary_max,
     }
 
 
 def try_greenhouse(company, slug):
-    # Deliberately NOT passing ?content=true. That flag also gates the
-    # `departments` field, so Greenhouse-sourced jobs won't populate the
-    # department facet (Lever/Ashby still do) — but content=true was
-    # returning several MB per company (full HTML job descriptions we never
-    # use), and was a major driver of the memory spikes that got this app
-    # OOM-killed on Render. `metadata` (used for commitment) is still
-    # returned without the flag, so that facet is unaffected. Streamed for
-    # consistency/safety even though this endpoint is already small.
-    resp = open_stream(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs")
+    # content=true IS passed here. That flag returns the full HTML job
+    # description on every posting (several MB per company for big boards)
+    # — it was dropped earlier specifically to fix an OOM crash, at the cost
+    # of losing the `departments` field (also gated behind this flag) and
+    # any shot at salary data. Now that responses are parsed with ijson
+    # streaming (one job at a time, never the whole response materialized),
+    # turning it back on is safe: verified 459KB peak traced memory for
+    # Anthropic's 518-job board even with content=true on, vs. ~5.7MB of raw
+    # description text streamed through. That gets department back for free
+    # and makes best-effort salary extraction possible.
+    resp = open_stream(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true")
     if resp is None:
         return None
     results = []
@@ -149,9 +155,10 @@ def try_greenhouse(company, slug):
                 if (meta.get("name") or "").strip().lower() in ("employment type", "job type", "commitment"):
                     commitment = str(meta.get("value") or "")
                     break
+            salary_min, salary_max = extract_salary(strip_html(job.get("content", "")))
             if title and job_url:
                 results.append(make_job(title, company, location, posted, job_url, "Greenhouse",
-                                         department, commitment))
+                                         department, commitment, salary_min, salary_max))
     return results
 
 
@@ -160,7 +167,9 @@ def try_lever(company, slug):
     # includes full description/descriptionPlain/descriptionBody/
     # descriptionBodyPlain HTML+text (measured ~19KB/job average). Streamed
     # so we only ever hold one job's worth of that in memory at a time
-    # instead of a whole company's response (which can be several MB).
+    # instead of a whole company's response (which can be several MB). Since
+    # these fields are already being pulled down at no extra network/memory
+    # cost, salary extraction here is essentially free.
     resp = open_stream(f"https://api.lever.co/v0/postings/{slug}?mode=json")
     if resp is None:
         return None
@@ -177,16 +186,62 @@ def try_lever(company, slug):
             posted = parse_ts(job.get("createdAt"))
             department = cats.get("team", "") or cats.get("department", "")
             commitment = cats.get("commitment", "")
+            desc_text = " ".join([
+                job.get("descriptionPlain", "") or "",
+                job.get("openingPlain", "") or "",
+                job.get("additionalPlain", "") or "",
+            ])
+            salary_min, salary_max = extract_salary(desc_text)
             if title and job_url:
                 results.append(make_job(title, company, location, posted, job_url, "Lever",
-                                         department, commitment))
+                                         department, commitment, salary_min, salary_max))
     return results
+
+
+def salary_from_ashby_compensation(comp):
+    """Ashby has a real structured compensation field (min/max/currency per
+    tier), gated behind ?includeCompensation=true — not documented anywhere
+    obvious, found by comparing the rendered job page (which shows a
+    "Compensation" section with per-location pay bands) against what the
+    plain API response was missing. When present this is exact data, not a
+    regex guess, so it's tried before falling back to description text.
+    Spans across all USD Salary components (e.g. separate SF/NY vs.
+    rest-of-US tiers) to get the overall min-to-max range, matching what the
+    "Compensation" section shows on the actual job page."""
+    if not comp:
+        return None, None
+    lo = hi = None
+    for tier in comp.get("compensationTiers") or []:
+        for component in tier.get("components") or []:
+            if component.get("compensationType") != "Salary":
+                continue
+            if component.get("currencyCode") != "USD":
+                continue  # avoid conflating EUR/GBP/etc. figures with USD
+            if component.get("interval") != "1 YEAR":
+                continue  # some roles (e.g. contract/IT support) are quoted
+                          # hourly ($60.58/hr) — mixing that into an "annual"
+                          # range next to $200,000 salaries would be wrong,
+                          # not just imprecise
+            cmin, cmax = component.get("minValue"), component.get("maxValue")
+            # ijson parses JSON numbers with a decimal point as
+            # decimal.Decimal (for precision), which sqlite3 can't bind —
+            # normalize to plain ints here.
+            if cmin is not None:
+                cmin = int(round(float(cmin)))
+                lo = cmin if lo is None else min(lo, cmin)
+            if cmax is not None:
+                cmax = int(round(float(cmax)))
+                hi = cmax if hi is None else max(hi, cmax)
+    return lo, hi
 
 
 def try_ashby(company, slug):
     # Same story as Lever — descriptionHtml/descriptionPlain are always
     # present on every posting (~17.5KB/job average), no opt-out. Streamed.
-    resp = open_stream(f"https://api.ashbyhq.com/posting-api/job-board/{slug}")
+    # descriptionPlain is already in memory per-job, so regex salary
+    # extraction is free here too, used as a fallback when the structured
+    # compensation field (below) isn't present.
+    resp = open_stream(f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true")
     if resp is None:
         return None
     results = []
@@ -201,9 +256,12 @@ def try_ashby(company, slug):
             posted = parse_ts(job.get("publishedAt") or job.get("createdAt"))
             department = job.get("department", "") or job.get("team", "")
             commitment = job.get("employmentType", "")
+            salary_min, salary_max = salary_from_ashby_compensation(job.get("compensation"))
+            if salary_min is None:
+                salary_min, salary_max = extract_salary(job.get("descriptionPlain", "") or "")
             if title and job_url:
                 results.append(make_job(title, company, location, posted, job_url, "Ashby",
-                                         department, commitment))
+                                         department, commitment, salary_min, salary_max))
     return results
 
 

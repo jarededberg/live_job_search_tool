@@ -49,7 +49,11 @@
         </div>
 
         <div class="filters-row">
-          <input type="text" id="location" placeholder="Location contains…" />
+          <div class="location-select" id="location-select">
+            <div class="location-chips" id="location-chips"></div>
+            <input type="text" id="location-input" placeholder="Location…" autocomplete="off" />
+            <div class="location-dropdown hidden" id="location-dropdown"></div>
+          </div>
           <select id="days">
             <option value="">Any time posted</option>
             <option value="7">Last 7 days</option>
