@@ -43,7 +43,22 @@ ROLE_NOUN_RE = re.compile(
     # instead of just "Sales Ops". Requiring real capitalization for the
     # leading words means a lowercase word breaks the run, so the match
     # correctly starts at the next actually-capitalized word instead.
-    r"\b((?:[A-Z][a-zA-Z/&\-]*\s+){0,3}(?i:" + "|".join(ROLE_NOUNS) + r"))\b"
+    #
+    # {1,3}, NOT {0,3}: a {0,3} quantifier lets the leading-words group
+    # match zero words, which meant a bare, lowercase, totally
+    # out-of-context role noun ("the sales lead", "the finance controller",
+    # "reported to the VP of Operations") got extracted as a standalone
+    # 1-word "title phrase" — just "lead", just "controller" — since (?i:...)
+    # makes the noun itself case-insensitive and there's no capital-letter
+    # requirement left once zero leading words are allowed. Those bare,
+    # ultra-generic words then matched almost every job title on the board
+    # (nearly everything has a "lead" or "manager" or "director" in it
+    # somewhere), which is what caused hundreds of postings to all come back
+    # "best match" at once. Requiring at least one real leading Title-Case
+    # word means a role noun only counts when it's actually functioning as
+    # part of a specific title ("Revenue Operations Manager"), not when it's
+    # just an ordinary word used in a sentence.
+    r"\b((?:[A-Z][a-zA-Z/&\-]*\s+){1,3}(?i:" + "|".join(ROLE_NOUNS) + r"))\b"
 )
 
 # Common resume-summary buzzwords that are capitalized only because they
@@ -165,6 +180,14 @@ def _extract_title_phrases(text):
         for m in ROLE_NOUN_RE.finditer(line):
             phrase = re.sub(r"\s+", " ", m.group(1)).strip()
             words = phrase.split()
+            # "<Acronym/Word> Lead Time" is a supply-chain/manufacturing
+            # metric ("PRQ lead time", "vendor lead time"), not a job title
+            # -- "lead" is a genuine role noun (Product Lead, Team Lead) but
+            # only when NOT immediately followed by "time".
+            if words and words[-1].lower() == "lead":
+                after = line[m.end():m.end() + 10]
+                if re.match(r"\s+time\b", after, re.IGNORECASE):
+                    continue
             # drop a leading word that's actually a section header bleeding in,
             # or a resume-summary buzzword that's capitalized only because it
             # starts a sentence ("Results-driven Revenue Operations Manager"),
@@ -172,7 +195,13 @@ def _extract_title_phrases(text):
             while words and (words[0].lower() in SECTION_HEADER_WORDS or BUZZWORD_RE.match(words[0])):
                 words = words[1:]
             phrase = " ".join(words)
-            if len(phrase) < 4 or len(words) > 4:
+            # Defense-in-depth: even after the {1,3} fix above, buzzword/
+            # section-header stripping could still whittle a phrase down to
+            # a single bare word ("Results-driven Manager" -> "Manager").
+            # Require at least 2 words so every extracted title phrase is a
+            # genuinely specific search term, not a generic noun that'll
+            # match nearly any job title.
+            if len(phrase) < 4 or len(words) < 2 or len(words) > 4:
                 continue
             counts[phrase] += 1
     # keep the most frequent, prefer longer/more specific phrases on ties

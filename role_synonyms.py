@@ -24,9 +24,19 @@ ROLE_SYNONYM_GROUPS = [
                      "GTM", "Go-to-Market", "Business Operations", "Deal Desk"],
     },
     {
-        "triggers": ["business operations", "biz ops", "bizops"],
+        "triggers": ["business operations", "biz ops", "bizops", "strategy & operations",
+                     "strategy and operations", "strategy & business operations"],
+        # "Chief of Staff" and "Special Projects" added here (not just on the
+        # chief-of-staff trigger below) so the expansion works in both
+        # directions: a resume titled "Chief of Staff" already pulled in
+        # Business Operations via the group below, but a resume titled
+        # "Director, Strategy & Business Operations" was NOT pulling in
+        # "Chief of Staff" postings, even though that's a well-established
+        # real-world adjacency (BizOps/Strategy leaders regularly move into
+        # or apply for Chief of Staff roles, and vice versa).
         "related": ["Business Operations", "BizOps", "Biz Ops", "Strategy & Operations",
-                     "Strategy and Operations", "Operations"],
+                     "Strategy and Operations", "Operations", "Chief of Staff",
+                     "Special Projects"],
     },
     {
         "triggers": ["chief of staff"],

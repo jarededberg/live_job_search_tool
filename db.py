@@ -210,31 +210,41 @@ def _match_info(job, title_terms, skill_terms):
 
     One deliberate carve-out: a handful of synonym groups in
     role_synonyms.py include a bare single-word "related" term ("Operations",
-    "Ops", "Strategy") as a catch-all. Fine when it's part of the actual job
-    title (e.g. "Operations Manager" is a real signal), but too generic to
-    trust as a department-field match on its own — a warehouse/logistics
-    job's `department` is very often literally "Operations" too, which isn't
-    the same kind of operations a RevOps/BizOps resume is targeting. So
-    `_GENERIC_TERMS` are excluded from the weaker department/blurb-only
-    check but still count toward a direct title hit."""
+    "Ops", "Strategy", "Management") as a catch-all. Those are too generic
+    to trust as a standalone "best match" signal on their own — a
+    warehouse/logistics job's `department` is very often literally
+    "Operations" too, and a huge fraction of ALL job titles contain
+    "Manager" somewhere. So `_GENERIC_TERMS` never single-handedly produce
+    "best": they're split out from the specific title terms and only count
+    toward the weaker "good" tier and the tiebreak score, never the primary
+    title-hit check. (Resume-extracted title PHRASES themselves are always
+    2+ words by the time they reach here — see resume_parser.py's
+    ROLE_NOUN_RE and the word-count check in _extract_title_phrases — so
+    this carve-out is specifically about role_synonyms.py's bare catch-all
+    entries, not extraction bugs.)"""
     if not title_terms and not skill_terms:
         return None, 0
     title_lower = (job.get("title") or "").lower()
     body = f"{(job.get('blurb') or '').lower()} {(job.get('department') or '').lower()}"
 
-    title_hits = sum(1 for t in title_terms if t in title_lower)
-    body_title_hits = sum(1 for t in title_terms if t not in _GENERIC_TERMS and t in body)
+    specific_terms = [t for t in title_terms if t not in _GENERIC_TERMS]
+    generic_terms = [t for t in title_terms if t in _GENERIC_TERMS]
+
+    title_hits = sum(1 for t in specific_terms if t in title_lower)
+    generic_title_hits = sum(1 for t in generic_terms if t in title_lower)
+    body_title_hits = sum(1 for t in specific_terms if t in body)
     skill_hits = sum(1 for t in skill_terms if t in body or t in title_lower)
 
     if title_hits > 0:
         tier = "best"
-    elif body_title_hits > 0 or skill_hits >= 2:
+    elif body_title_hits > 0 or generic_title_hits > 0 or skill_hits >= 2:
         tier = "good"
     else:
         tier = "poor"
 
     tier_weight = {"best": 2, "good": 1, "poor": 0}[tier]
-    score = tier_weight * 1000 + title_hits * 50 + body_title_hits * 10 + skill_hits
+    score = (tier_weight * 1000 + title_hits * 50 + body_title_hits * 10
+             + generic_title_hits * 5 + skill_hits)
     return tier, score
 
 

@@ -256,21 +256,69 @@ ever regresses again:
    at all before.
 
 Current tiering: **best** = at least one `title_term` (extracted title or a
-role-synonym expansion of it) appears directly in the job's title. **good**
-= no direct title hit, but a title_term shows up in blurb/department, or
-2+ skill_terms show up anywhere. **poor** = neither. One deliberate
-carve-out: a few synonym groups include a bare single-word catch-all term
-("Operations," "Ops," "Strategy") — these still count toward a direct title
-hit, but are excluded from the weaker department/blurb-only check
-(`_GENERIC_TERMS` in `db.py`), since e.g. a warehouse job's department is
-very often also literally "Operations," which isn't the kind of operations
-role a RevOps/BizOps resume is actually targeting.
+role-synonym expansion of it, excluding `_GENERIC_TERMS` below) appears
+directly in the job's title. **good** = no direct specific title hit, but a
+title_term shows up in blurb/department, a bare generic term hits the
+title, or 2+ skill_terms show up anywhere. **poor** = none of the above.
 
-Verified against a synthetic 20-job test batch (mix of genuinely relevant
-RevOps/Sales Ops/GTM/Strategy roles and clearly unrelated ones like
-Software Engineer, Legal Counsel, Data Scientist): 10/10 relevant postings
-now come back "best match," all 10 irrelevant ones "poor," with no false
-positives.
+That first fix overcorrected, though — the very next resume upload came
+back with essentially every posting badged "best match" (dozens of result
+pages). Root cause was one line up the stack, in
+`resume_parser.py`'s `ROLE_NOUN_RE`: the "leading Title-Case words" part of
+the title-phrase regex used a `{0,3}` quantifier, which allows *zero*
+leading words. Combined with the role-noun alternation being
+case-insensitive, that meant a completely ordinary, lowercase, out-of-
+context sentence like "worked with the sales **lead**" or "reported to the
+finance **controller**" got extracted as a standalone 1-word "title
+phrase" — just `lead`, just `controller` — with no capitalization check
+left to stop it once the leading-words group matched nothing. Those bare,
+maximally generic words then matched almost every job title on the board
+(nearly any posting has "lead" or "manager" or "director" in it
+somewhere), which is exactly what produced page after page of false
+"best" badges. Fixed at the source: `ROLE_NOUN_RE` now requires `{1,3}` (at
+least one genuine leading Title-Case word), plus a defense-in-depth
+`len(words) >= 2` check in `_extract_title_phrases()` in case buzzword/
+section-header stripping ever whittles a phrase down to one word again.
+`db.py`'s `_GENERIC_TERMS` carve-out (a handful of role_synonyms.py groups
+still deliberately include a bare catch-all like "Operations" in their
+`related` list) was also tightened so those can only ever produce a "good"
+match, never single-handedly a "best" one — belt-and-suspenders against
+the same failure mode recurring from the synonym side instead of the
+extraction side.
+
+One more small, low-stakes extraction bug caught in the same pass: "PRQ
+lead **time**" (a supply-chain lead-time metric, not a job title) was
+matching as a 2-word title phrase ending in "Lead," since an all-caps
+acronym like "PRQ" satisfies the leading-Title-Case-word check just as
+well as a real word does. Fixed with a narrow, specific guard in
+`_extract_title_phrases()`: a phrase ending in "lead" is dropped if the
+very next word in the source text is "time." Doesn't touch legitimate "X
+Lead" titles (Product Lead, Team Lead, Engineering Lead) at all.
+
+Verified three ways: a synthetic 20-job batch (10 relevant RevOps/BizOps/
+GTM-family roles vs. 10 unrelated ones — 9-10 best, the rest correctly
+poor, no false positives); a regression batch specifically targeting the
+"bare word from prose" bug (confirms `lead`/`controller`/`director`/
+`analyst`/`manager` never again appear as standalone extracted terms); and
+a batch built from Jared's actual resume content/bullets (reconstructed
+from the `jared-resumes` skill, since the source PDFs aren't available in
+this environment) against a mix of real target-role titles (Director of
+Revenue Operations, Chief of Staff, Technical Program Manager, Deal Desk
+Manager, GTM Strategy Lead, PMO Lead, etc.) and clearly unrelated ones
+(Registered Nurse, Electrician, Paralegal, ...) — 12/12 relevant roles
+correctly flagged best/good, 0/10 false positives among the unrelated
+batch.
+
+That last pass also surfaced a real synonym-coverage gap, not a bug: a
+resume titled "Director, Strategy & Business Operations" wasn't pulling in
+"Chief of Staff" postings, even though the `jared-resumes` reference notes
+BizOps/Strategy framing as a strong real-world Chief-of-Staff match. The
+`chief of staff` synonym group already expanded outward to Business
+Operations, but not the other way around. Fixed by adding "Chief of Staff"
+and "Special Projects" to the business-operations group's `related` list
+too (and adding `strategy & operations`/`strategy and operations`/
+`strategy & business operations` as additional triggers for that same
+group), so the expansion now works in both directions.
 
 ### Match sort (server-side)
 
