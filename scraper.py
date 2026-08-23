@@ -88,6 +88,11 @@ def make_job(title, company, location, posted, url, source, department="", commi
 
 
 def try_greenhouse(company, slug):
+    # content=true is required to get `departments` back at all (Greenhouse
+    # bundles department/office metadata behind the same flag as the full
+    # HTML job description), so we can't drop it without losing the
+    # department facet. The memory fix instead is on the concurrency side —
+    # see MAX_WORKERS in scrape_all().
     data = fetch(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true")
     if data is None:
         return None
@@ -177,7 +182,7 @@ def search_company(name, slug):
     return [], "not_found", "not_found"
 
 
-def scrape_all(companies=None, max_workers=30, progress_cb=None):
+def scrape_all(companies=None, max_workers=10, progress_cb=None):
     """Scrape every company in COMPANIES (or a provided subset). Returns a flat
     list of job dicts plus simple stats. Thread-pooled for speed."""
     from concurrent.futures import ThreadPoolExecutor, as_completed

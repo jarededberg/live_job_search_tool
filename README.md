@@ -80,7 +80,19 @@ for the first several minutes.
    the app still works, it just re-scrapes from empty on every redeploy.
 6. Optional environment variables:
    - `SCRAPE_INTERVAL_HOURS` (default `8`)
-   - `SCRAPE_MAX_WORKERS` (default `30`)
+   - `SCRAPE_MAX_WORKERS` (default `10`)
+
+### Memory
+
+Greenhouse boards are fetched with `?content=true` so we can also pull
+`departments` (the department facet needs it — Greenhouse bundles that
+metadata behind the same flag as the full HTML job description, there's no
+way to request one without the other). That means each in-flight request
+during a scrape can be several MB, and `SCRAPE_MAX_WORKERS` controls how
+many of those are in flight at once — it's the main lever for memory usage.
+The default of 10 should fit comfortably on Render's smallest paid instance
+(512 MB); if you still see "exceeded its memory limit" emails, drop it to 5
+via the environment variable, or upgrade the instance type.
 
 Railway or Fly.io work the same way — any host that runs a long-lived Python
 process (not a stateless serverless function, since the scheduler needs to

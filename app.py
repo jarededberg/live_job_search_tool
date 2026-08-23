@@ -23,7 +23,7 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 
 SCRAPE_INTERVAL_HOURS = float(os.environ.get("SCRAPE_INTERVAL_HOURS", "8"))
-MAX_WORKERS = int(os.environ.get("SCRAPE_MAX_WORKERS", "30"))
+MAX_WORKERS = int(os.environ.get("SCRAPE_MAX_WORKERS", "10"))
 MAX_RESUME_BYTES = 8 * 1024 * 1024  # 8 MB
 ALLOWED_RESUME_EXT = (".pdf", ".docx", ".txt")
 
