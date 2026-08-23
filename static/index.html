@@ -4,23 +4,24 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Open Roles Finder — search 4,300+ company job boards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header class="hero">
     <div class="hero-inner">
+      <div class="eyebrow">Free · no login · updated automatically</div>
       <h1>Open Roles Finder</h1>
-      <p class="tagline">Search live openings pulled directly from the career pages of 4,300+ companies — no job-board middleman, no stale listings.</p>
+      <p class="tagline">Real-time search across the career pages of 4,300+ companies — Greenhouse, Lever, and Ashby boards, pulled directly, no stale job-board listings.</p>
+
       <div class="about">
-        <p>
-          I built this while running my own job search this year — I got tired of stale
-          LinkedIn listings and wanted something that checks company career pages directly.
-          Figured other people looking for work could use it too, so here it is, free to use.
-        </p>
-        <p class="byline">
-          Built by <strong>Jared Edberg</strong> ·
-          <a href="https://www.linkedin.com/in/jared-edberg" target="_blank" rel="noopener">Connect on LinkedIn</a>
-        </p>
+        <div class="about-avatar">JE</div>
+        <div class="about-text">
+          <p>I built this while running my own job search this year — I got tired of stale listings on the big job boards and wanted something that checks company career pages directly. Figured other people job hunting could use it too, so here it is, free to use.</p>
+          <p class="byline">Built by <strong>Jared Edberg</strong> · <a href="https://www.linkedin.com/in/jared-edberg" target="_blank" rel="noopener">Connect on LinkedIn ↗</a></p>
+        </div>
       </div>
     </div>
   </header>
@@ -28,19 +29,49 @@
   <main>
     <section class="search-panel">
       <form id="search-form">
-        <input type="text" id="q" placeholder="Keywords, comma-separated (e.g. product manager, revenue operations)" />
-        <div class="row">
-          <input type="text" id="location" placeholder="Location contains (e.g. remote, Austin) — leave blank for any" />
+        <div class="query-row">
+          <div class="query-input-wrap">
+            <input type="text" id="q" autocomplete="off"
+              placeholder='e.g. ("product manager" OR "program manager") AND revenue NOT intern' />
+            <button type="button" id="syntax-help-btn" aria-label="Search syntax help">?</button>
+          </div>
+          <button type="submit" class="btn-primary">Search</button>
+        </div>
+
+        <div id="syntax-help" class="syntax-help hidden">
+          Type keywords separated by spaces to require all of them (implicit <code>AND</code>).
+          Use <code>OR</code> to match either term, <code>NOT</code> to exclude one, quotes
+          for an exact phrase, and parentheses to group. Example:
+          <code>("product manager" OR "program manager") AND revenue NOT intern</code>
+        </div>
+
+        <div class="filters-row">
+          <input type="text" id="location" placeholder="Location contains (e.g. remote, Austin)" />
           <select id="days">
-            <option value="">Any time</option>
+            <option value="">Any time posted</option>
             <option value="7">Last 7 days</option>
             <option value="14">Last 14 days</option>
             <option value="30" selected>Last 30 days</option>
             <option value="90">Last 90 days</option>
           </select>
-          <button type="submit">Search</button>
+          <select id="department">
+            <option value="">Any department</option>
+          </select>
+          <select id="commitment">
+            <option value="">Any commitment</option>
+          </select>
+        </div>
+
+        <div class="resume-row">
+          <label for="resume-input" class="resume-dropzone" id="resume-dropzone">
+            <span class="resume-icon">⇪</span>
+            <span><strong>Upload your resume</strong> to auto-fill search terms — .pdf, .docx, or .txt</span>
+          </label>
+          <input type="file" id="resume-input" accept=".pdf,.docx,.txt" hidden />
+          <span id="resume-status" class="resume-status"></span>
         </div>
       </form>
+
       <div id="status-line" class="status-line"></div>
     </section>
 

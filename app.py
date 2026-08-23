@@ -17,14 +17,18 @@ from flask import Flask, jsonify, request, send_from_directory
 import db
 from scraper import scrape_all
 from companies_data import COMPANIES
+import resume_parser
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 
 SCRAPE_INTERVAL_HOURS = float(os.environ.get("SCRAPE_INTERVAL_HOURS", "8"))
 MAX_WORKERS = int(os.environ.get("SCRAPE_MAX_WORKERS", "30"))
+MAX_RESUME_BYTES = 8 * 1024 * 1024  # 8 MB
+ALLOWED_RESUME_EXT = (".pdf", ".docx", ".txt")
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
+app.config["MAX_CONTENT_LENGTH"] = MAX_RESUME_BYTES
 
 _scrape_lock = threading.Lock()
 _scrape_in_progress = False
@@ -73,17 +77,31 @@ def api_jobs():
     q = request.args.get("q", "")
     location = request.args.get("location", "")
     days = request.args.get("days", "")
+    department = request.args.get("department", "")
+    commitment = request.args.get("commitment", "")
     page = max(1, int(request.args.get("page", 1) or 1))
     per_page = min(100, max(1, int(request.args.get("per_page", 25) or 25)))
 
     days_val = int(days) if days.strip().isdigit() else None
-    jobs, total = db.search_jobs(query=q, location=location, days=days_val, page=page, per_page=per_page)
+    try:
+        jobs, total = db.search_jobs(query=q, location=location, days=days_val, department=department,
+                                      commitment=commitment, page=page, per_page=per_page)
+    except Exception as e:
+        return jsonify({"error": f"Couldn't parse that search: {e}"}), 400
     return jsonify({
         "jobs": jobs,
         "total": total,
         "page": page,
         "per_page": per_page,
         "pages": (total + per_page - 1) // per_page if per_page else 1,
+    })
+
+
+@app.route("/api/facets")
+def api_facets():
+    return jsonify({
+        "departments": db.distinct_facet_values("department", limit=40),
+        "commitments": db.distinct_facet_values("commitment", limit=10),
     })
 
 
@@ -105,6 +123,35 @@ def api_refresh():
         return jsonify({"ok": False, "message": "A scrape is already running."}), 409
     threading.Thread(target=run_scrape_job, daemon=True).start()
     return jsonify({"ok": True, "message": "Scrape started."})
+
+
+@app.route("/api/parse-resume", methods=["POST"])
+def api_parse_resume():
+    f = request.files.get("resume")
+    if f is None or not f.filename:
+        return jsonify({"ok": False, "message": "No file uploaded."}), 400
+
+    name = f.filename.lower()
+    if not name.endswith(ALLOWED_RESUME_EXT):
+        return jsonify({"ok": False, "message": "Please upload a .pdf, .docx, or .txt file."}), 400
+
+    data = f.read()
+    if not data:
+        return jsonify({"ok": False, "message": "That file looks empty."}), 400
+
+    try:
+        text = resume_parser.extract_text(data, name)
+    except Exception as e:
+        return jsonify({"ok": False, "message": f"Couldn't read that file: {e}"}), 400
+
+    if not text.strip():
+        return jsonify({"ok": False, "message": "Couldn't find any text in that file (is it a scanned image?)."}), 400
+
+    terms, query = resume_parser.suggest_query(text)
+    if not terms:
+        return jsonify({"ok": False, "message": "Couldn't find any obvious job titles or skills in that resume."}), 200
+
+    return jsonify({"ok": True, "terms": terms, "query": query})
 
 
 @app.route("/")

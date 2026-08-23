@@ -13,16 +13,48 @@ Built to share the tool publicly and post about it on LinkedIn.
   job gets stored, so each visitor can filter it their own way.
 - **`db.py`** — a tiny SQLite layer. Jobs are upserted by URL; anything not
   seen in the last 10 scrape cycles is pruned (assumed closed/filled).
+- **`boolean_search.py`** — a small AND/OR/NOT/quotes/parentheses query
+  parser (e.g. `("product manager" OR "program manager") AND revenue NOT
+  intern`). Evaluated in Python against each job title; SQLite is only used
+  to apply the location/days/department/commitment filters and a cheap
+  superset prefilter before the boolean logic runs.
+- **`resume_parser.py`** — extracts text from an uploaded `.pdf`/`.docx`/`.txt`
+  resume, pulls out a Skills section (if present) and likely job-title
+  phrases (e.g. "Senior Product Manager"), and returns a ready-to-edit
+  boolean query.
 - **`app.py`** — Flask app. Runs the scraper on a schedule (every 8 hours by
   default, via APScheduler) and exposes:
-  - `GET /api/jobs?q=...&location=...&days=...&page=...` — search
+  - `GET /api/jobs?q=...&location=...&days=...&department=...&commitment=...&page=...` — search
+  - `GET /api/facets` — distinct department/commitment values for the filter dropdowns
   - `GET /api/status` — dataset freshness / scrape progress
   - `POST /api/refresh` — manually trigger a scrape (blocked if one's already running)
+  - `POST /api/parse-resume` — multipart file upload (`resume` field), returns suggested search terms
   - `/` — the search UI (static/index.html, style.css, app.js)
 
 A full scrape of all ~4,300 companies takes roughly 5-10 minutes with 30
-parallel worker threads (tested live during development: ~85,000 jobs from
-~3,500 reachable companies).
+parallel worker threads (tested live during development: ~98,000 jobs from
+~2,300 reachable companies, after fixing a bug in the original script where
+Ashby-hosted boards were silently returning zero results due to an API
+schema mismatch).
+
+### Search syntax
+
+The search box takes a small boolean query language, not a plain keyword list:
+
+- Bare words are implicitly ANDed: `product manager` requires both words.
+- `OR` matches either side: `engineer OR designer`.
+- `NOT` excludes: `salesforce NOT intern`.
+- `"quoted phrases"` require the exact phrase, not just both words separately.
+- `(parentheses)` for grouping: `("product manager" OR "program manager") AND revenue`.
+
+### Facets
+
+Department and employment-type (commitment) filters are populated from
+whatever Greenhouse/Lever/Ashby actually report for each job — Greenhouse
+rarely reports employment type, so that facet will be sparser for
+Greenhouse-heavy results. Commitment values are normalized into a small set
+(Full-time / Part-time / Contract / Temporary / Internship / Other) since
+each ATS spells them differently.
 
 ## Run locally
 

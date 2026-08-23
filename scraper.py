@@ -57,7 +57,24 @@ def parse_ts(ts):
     return None
 
 
-def make_job(title, company, location, posted, url, source):
+def normalize_commitment(raw):
+    """Collapse the many ATS-specific spellings of employment type into a
+    small canonical set so the facet dropdown isn't a mess of near-duplicates."""
+    r = (raw or "").strip().lower()
+    if not r:
+        return ""
+    if "intern" in r:
+        return "Internship"
+    if "part" in r:
+        return "Part-time"
+    if "contract" in r or "temp" in r or "freelance" in r:
+        return "Contract / Temporary"
+    if "full" in r:
+        return "Full-time"
+    return "Other"
+
+
+def make_job(title, company, location, posted, url, source, department="", commitment=""):
     return {
         "title": (title or "").strip(),
         "company": (company or "").strip(),
@@ -65,6 +82,8 @@ def make_job(title, company, location, posted, url, source):
         "posted": posted,  # ISO date string or None
         "url": url,
         "source": source,
+        "department": (department or "").strip(),
+        "commitment": normalize_commitment(commitment),
     }
 
 
@@ -78,8 +97,16 @@ def try_greenhouse(company, slug):
         location = job.get("location", {}).get("name", "")
         job_url = job.get("absolute_url", "")
         posted = parse_ts(job.get("updated_at") or job.get("created_at"))
+        depts = job.get("departments") or []
+        department = depts[0].get("name", "") if depts else ""
+        commitment = ""
+        for meta in job.get("metadata") or []:
+            if (meta.get("name") or "").strip().lower() in ("employment type", "job type", "commitment"):
+                commitment = str(meta.get("value") or "")
+                break
         if title and job_url:
-            results.append(make_job(title, company, location, posted, job_url, "Greenhouse"))
+            results.append(make_job(title, company, location, posted, job_url, "Greenhouse",
+                                     department, commitment))
     return results
 
 
@@ -99,8 +126,11 @@ def try_lever(company, slug):
         location = locs[0] if locs else cats.get("location", "")
         job_url = job.get("hostedUrl", "")
         posted = parse_ts(job.get("createdAt"))
+        department = cats.get("team", "") or cats.get("department", "")
+        commitment = cats.get("commitment", "")
         if title and job_url:
-            results.append(make_job(title, company, location, posted, job_url, "Lever"))
+            results.append(make_job(title, company, location, posted, job_url, "Lever",
+                                     department, commitment))
     return results
 
 
@@ -108,15 +138,21 @@ def try_ashby(company, slug):
     data = fetch(f"https://api.ashbyhq.com/posting-api/job-board/{slug}")
     if data is None:
         return None
+    postings = data.get("jobs") or data.get("jobPostings") or []
     results = []
-    for job in data.get("jobPostings", []):
+    for job in postings:
         title = job.get("title", "")
         location = job.get("location", "") or job.get("locationName", "")
-        path = job.get("jobPostingPath", "")
-        job_url = f"https://jobs.ashbyhq.com/{slug}{path}" if path and not path.startswith("http") else path
+        job_url = job.get("jobUrl", "")
+        if not job_url:
+            path = job.get("jobPostingPath", "")
+            job_url = f"https://jobs.ashbyhq.com/{slug}{path}" if path and not path.startswith("http") else path
         posted = parse_ts(job.get("publishedAt") or job.get("createdAt"))
+        department = job.get("department", "") or job.get("team", "")
+        commitment = job.get("employmentType", "")
         if title and job_url:
-            results.append(make_job(title, company, location, posted, job_url, "Ashby"))
+            results.append(make_job(title, company, location, posted, job_url, "Ashby",
+                                     department, commitment))
     return results
 
 
