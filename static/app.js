@@ -22,6 +22,7 @@ let currentPage = 1;
 // label: "Remote (US)" } for a canonical group chip (see location_groups.py)
 let selectedLocations = [];
 let logoCache = {};
+let logoCacheLoaded = false;
 let locationGroupList = []; // [{key, label}] fetched from /api/location-groups
 let locationGroupLabels = {};
 
@@ -43,6 +44,7 @@ async function loadLogoCache() {
   } catch (e) {
     logoCache = {}; // logos are cosmetic; fail quietly and just skip them
   }
+  logoCacheLoaded = true; // set regardless of success -- don't keep retrying every search
 }
 
 function logoUrlFor(company) {
@@ -87,10 +89,25 @@ async function search(page = 1) {
     // server needs these terms whenever a resume is active.
     resumeTitleTerms.forEach((t) => params.append("resume_title_term", t));
     resumeSkillTerms.forEach((t) => params.append("resume_skill_term", t));
+    // Only sent once we successfully parsed a US city off the resume --
+    // this is what lets db.py demote clearly-non-US postings (Prague,
+    // Remote-Canada, etc.) instead of calling them a "best match" just
+    // because the title lines up. See location_groups.is_clearly_non_us.
+    if (resumeUsBased) params.append("resume_us_based", "1");
   }
 
   try {
-    const res = await fetch(`/api/jobs?${params.toString()}`);
+    // Kick the jobs fetch off immediately, and — the first time only —
+    // the logo cache fetch alongside it, rather than one after the other.
+    // This used to be sequential at page load (fetch all ~3,500 companies'
+    // logo domains, THEN start the jobs search), which added the full
+    // logo-fetch round trip on top of the search's own latency before
+    // anything ever rendered. Running them concurrently caps the wait at
+    // whichever one is slower instead of the sum of both. Once the cache
+    // is loaded, later searches (paging, filters) skip this entirely.
+    const jobsFetch = fetch(`/api/jobs?${params.toString()}`);
+    const logoWait = logoCacheLoaded ? Promise.resolve() : loadLogoCache();
+    const [res] = await Promise.all([jobsFetch, logoWait]);
     const data = await res.json();
     if (!res.ok) {
       statusLine.textContent = data.error || "Something went wrong with that search.";
@@ -162,6 +179,11 @@ function logoHtml(company) {
 let resumeTitleTerms = [];
 let resumeSkillTerms = [];
 let hasResume = false;
+// True only when parse-resume successfully matched a US city off the
+// resume text (data.matched_city truthy). Gates the resume_us_based=1
+// query param so db.py's is_clearly_non_us() demotion only kicks in when
+// we're actually confident the candidate is US-based -- see search().
+let resumeUsBased = false;
 
 function matchBadgeHtml(job) {
   if (!hasResume || !job.match_tier) return "";
@@ -425,6 +447,7 @@ async function handleResumeFile(file) {
     resumeTitleTerms = (data.title_terms || []).map((t) => t.toLowerCase());
     resumeSkillTerms = (data.skill_terms || []).map((t) => t.toLowerCase());
     hasResume = true;
+    resumeUsBased = Boolean(data.matched_city);
     document.getElementById("sort-match-option").hidden = false;
     sortSelect.value = "match";
 
@@ -532,4 +555,4 @@ loadFacets();
 loadLocationGroups();
 loadStatus();
 setInterval(loadStatus, 30000);
-loadLogoCache().then(() => search(1)); // wait for it so the first render already has logos, not a flash-in
+search(1); // fires the logo-cache fetch internally, in parallel with the jobs fetch -- see search()

@@ -384,6 +384,45 @@ too (and adding `strategy & operations`/`strategy and operations`/
 `strategy & business operations` as additional triggers for that same
 group), so the expansion now works in both directions.
 
+### Location-aware match tiers
+
+Title/skill overlap alone can still badge a job "best match" that's
+obviously off for the candidate — the case that surfaced this: a Phoenix-
+based resume got "best match" badges on a Peterborough, UK role, two
+"Remote (Canada)" roles, and a Prague role, purely because the job titles
+lined up. None of those are viable for a US-only candidate, but the old
+`_match_info()` had no concept of location at all.
+
+Fixed with a new `location_groups.is_clearly_non_us(location)` classifier
+and a `resume_us_based` flag threaded end-to-end: `resume_parser`/`app.py`'s
+`/api/parse-resume` already tries to extract a US city from the resume
+(see "Resume location auto-populate" below); `app.js` now remembers
+whether that succeeded (`resumeUsBased = Boolean(data.matched_city)`) and,
+only when it did, sends `resume_us_based=1` on every `/api/jobs` call
+alongside the existing resume term params. `app.py` reads that into
+`db.search_jobs(resume_us_based=...)`, which passes it through to
+`_match_info(..., us_based=...)`. When `us_based` is true, any job whose
+location reads as clearly non-US — a specific foreign city with no US
+signal at all ("Prague", "Peterborough"), or an explicitly non-US remote
+label ("Remote (Canada)"/"(UK)"/"(Europe)") — is force-set to `"poor"`
+before any title/skill scoring happens, regardless of how well the title
+matches. Blank locations and unqualified/ambiguous "Remote" (no region
+specified) are deliberately given the benefit of the doubt and left alone,
+since they might still be US-eligible; `is_clearly_non_us()`'s docstring
+also notes a known gap (no APAC/LatAm classifier yet, so an unlabeled
+"Remote - APAC" wouldn't be caught). If the resume parser couldn't
+confidently place the candidate in the US, `resume_us_based` stays false
+and location is left out of scoring entirely — same behavior as before
+this fix, rather than guessing.
+
+Verified end-to-end against a small synthetic DB: three otherwise-
+identical "Business Operations Manager" postings, one each in Prague,
+"Remote (Canada)," and Phoenix, AZ. With `resume_us_based=True`, only the
+Phoenix posting scores `"best"`; both Prague and Remote-Canada drop to
+`"poor"`. With `resume_us_based=False` (or omitted), all three still score
+`"best"` — confirming the gate only engages when the app is actually
+confident about the candidate's location, not by default.
+
 ### Match sort (server-side)
 
 "Best match" isn't only a badge — it's also a sort option (`#sort-match-
@@ -480,6 +519,45 @@ surfaced, as two small pill buttons in the resume-status line ("Narrow to
 these titles" / "Narrow to Phoenix, AZ area + Remote (US)") the user can
 click if they specifically want to narrow further — `applyQueryBtn`/
 `applyLocationBtn` in `handleResumeFile()` in `app.js`.
+
+### Response time
+
+Reported symptom: ~10s between clicking search (or uploading a resume) and
+results showing up. Two backend inefficiencies were found and fixed
+regardless of whether they were the dominant cause:
+
+1. `tools` (stored as a JSON string in SQLite) was being `json.loads()`'d
+   for every candidate row right after the SQL fetch — up to `MAX_CANDIDATES`
+   (50,000) rows — even though only the ~25-50 rows on the current page ever
+   reach the response. Deferred to only run on `page_rows`.
+2. Match-tier scoring (`_match_info()` over every candidate) had the same
+   shape of waste when `sort != "match"`: it doesn't affect ordering in that
+   case, so there's no reason to compute it for rows that never make it into
+   the response. Deferred to `page_rows` only; still runs on the full
+   candidate set when `sort == "match"`, since that's genuinely needed to
+   determine the sort order before pagination.
+
+Before optimizing further, these were benchmarked locally against 60,000
+synthetic rows with realistic term counts
+(`search_jobs(sort="match", resume_title_terms=[26 terms],
+resume_skill_terms=[11 terms], resume_us_based=True, per_page=50)`): 773ms.
+That's real but far short of 10 seconds, so the Python-side scoring loop is
+not, by itself, the main source of the reported latency.
+
+A concrete frontend bottleneck was also found and fixed: page load used to
+call `loadLogoCache().then(() => search(1))` — a fully sequential chain that
+blocked the very first search behind fetching and parsing the entire
+~104KB company-logo cache JSON (one entry per company, ~4,400 companies).
+`search()` now fires the jobs request immediately and only waits on the
+logo cache the first time (via `Promise.all`, see `logoCacheLoaded` in
+`app.js`); subsequent searches don't touch the logo fetch at all.
+
+Honest caveat: it's not confirmed these two fixes fully account for the
+reported ~10s. Render's free-tier cold-start behavior (the dyno spinning
+down after inactivity and taking several seconds to wake back up) is a
+plausible additional contributor that's outside the codebase and wasn't
+investigated in this pass — worth checking if slowness persists,
+particularly on the very first request after a period of no traffic.
 
 ### Results layout
 

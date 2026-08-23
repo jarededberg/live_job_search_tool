@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from boolean_search import parse_query, evaluate, leaf_terms
-from location_groups import matches_group
+from location_groups import matches_group, is_clearly_non_us
 
 DB_PATH = os.environ.get("JOBS_DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "jobs.db"))
 MAX_CANDIDATES = 50000  # cap on rows pulled from SQLite before Python-side boolean evaluation
@@ -191,7 +191,7 @@ DEFAULT_SORT = "newest"
 _GENERIC_TERMS = {"operations", "ops", "strategy", "management"}
 
 
-def _match_info(job, title_terms, skill_terms):
+def _match_info(job, title_terms, skill_terms, us_based=False):
     """Classify a job against resume-derived terms (both already lowercased)
     into a ("best"/"good"/"poor"/None) tier plus a sortable ordinal score
     (higher = better match). Returns (None, 0) if no resume terms were
@@ -232,9 +232,23 @@ def _match_info(job, title_terms, skill_terms):
     2+ words by the time they reach here — see resume_parser.py's
     ROLE_NOUN_RE and the word-count check in _extract_title_phrases — so
     this carve-out is specifically about role_synonyms.py's bare catch-all
-    entries, not extraction bugs.)"""
+    entries, not extraction bugs.)
+
+    `us_based`: when True (the resume's contact info parsed to a "City, ST"
+    US address — see resume_parser.extract_location), a job whose location
+    reads as clearly not viable for a US-based candidate
+    (location_groups.is_clearly_non_us) is forced to "poor" regardless of
+    title/skill overlap. Added after real feedback: a Phoenix, AZ resume
+    was getting "Best Match" badges on roles in Prague and "Remote -
+    Canada" purely because the titles lined up — title/skill overlap alone
+    was never enough, a job someone can't actually take isn't a match at
+    any tier above poor. Only applied when we're confident the candidate is
+    US-based; with no detected home location, no assumption is made either
+    way and every location is left alone."""
     if not title_terms and not skill_terms:
         return None, 0
+    if us_based and is_clearly_non_us(job.get("location") or ""):
+        return "poor", 0
     title_lower = (job.get("title") or "").lower()
     body = f"{(job.get('blurb') or '').lower()} {(job.get('department') or '').lower()}"
 
@@ -261,7 +275,7 @@ def _match_info(job, title_terms, skill_terms):
 
 def search_jobs(query="", location="", locations=None, location_groups=None, days=None,
                  department="", commitment="", sort=DEFAULT_SORT,
-                 resume_title_terms=None, resume_skill_terms=None,
+                 resume_title_terms=None, resume_skill_terms=None, resume_us_based=False,
                  page=1, per_page=25):
     """Boolean keyword search against title (AND/OR/NOT/quotes/parens via
     boolean_search.py), plus facet filters for location substring, days-back,
@@ -293,6 +307,17 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     itself since it only ever sees one page at a time. With no resume terms,
     `sort="match"` quietly falls back to newest-first rather than raising,
     since both only ever come from query params a user could hand-edit.
+
+    `resume_us_based`, if True, tells `_match_info` the candidate is
+    US-based (their resume's location was successfully parsed to a US
+    city) — this demotes any job whose location reads as clearly non-US
+    (a bare foreign city like "Prague"/"Peterborough", or an explicitly
+    non-US remote label like "Remote (Canada)") straight to `"poor"`,
+    regardless of title/skill overlap, via
+    `location_groups.is_clearly_non_us`. False (the default, and what's
+    sent whenever the resume parser couldn't confidently place the
+    candidate in the US) leaves location out of scoring entirely, same as
+    before this param existed.
     """
     ast = parse_query(query)
     order_sql = SORT_OPTIONS.get(sort, SORT_OPTIONS[DEFAULT_SORT])
@@ -349,15 +374,13 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         ).fetchall()
 
     candidates = [dict(r) for r in rows]
-    for r in candidates:
-        # stored as a JSON string (SQLite has no native array type); parse
-        # back to a real list for the API response. Malformed/legacy rows
-        # (pre-migration, or NULL) fall back to an empty list rather than
-        # raising.
-        try:
-            r["tools"] = json.loads(r.get("tools") or "[]")
-        except (TypeError, ValueError):
-            r["tools"] = []
+    # `tools` is stored as a JSON string (SQLite has no native array type)
+    # and needs parsing back to a real list for the API response — but only
+    # for rows that actually make it into the response. Deliberately NOT
+    # done here for every candidate (same reasoning as the match-tier fix
+    # below): parsing JSON on up to MAX_CANDIDATES rows when only
+    # `per_page` of them ever get returned was pure wasted work on every
+    # single request.
     if ast is not None:
         candidates = [r for r in candidates if evaluate(ast, r["title"])]
 
@@ -382,32 +405,46 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     skill_terms = [t.lower() for t in (resume_skill_terms or []) if t]
     has_resume_terms = bool(title_terms or skill_terms)
 
-    if has_resume_terms:
-        # Attach match_tier to every candidate (not just when sort=="match")
-        # since the frontend badges whatever's on the current page
-        # regardless of sort order — the sort below only additionally
-        # reorders using the same numbers.
+    if has_resume_terms and sort == "match":
+        # Scoring the FULL candidate set (could be tens of thousands of
+        # rows) is only actually necessary here, when the sort order itself
+        # depends on the score — the browser can't reorder page 3 relative
+        # to page 1 on its own, so this has to happen before pagination.
         for r in candidates:
-            tier, score = _match_info(r, title_terms, skill_terms)
+            tier, score = _match_info(r, title_terms, skill_terms, us_based=resume_us_based)
             r["match_tier"] = tier
             r["_match_score"] = score
-
-    if sort == "match" and has_resume_terms:
         # Two stable sorts = one two-key sort: establish newest-first as the
         # tiebreaker order first, then sort by score — Python's sort is
         # stable, so equal-score jobs keep their relative newest-first order
-        # from the first pass. This has to happen here (in Python, over the
-        # full candidate set) rather than in the browser, because the
-        # browser only ever sees one page at a time — it can badge the jobs
-        # it can see, but it can't reorder page 3 relative to page 1.
+        # from the first pass.
         candidates.sort(key=lambda r: r.get("posted") or "", reverse=True)
         candidates.sort(key=lambda r: -r["_match_score"])
 
     total = len(candidates)
     offset = max(0, (page - 1)) * per_page
     page_rows = candidates[offset: offset + per_page]
+
+    if has_resume_terms and sort != "match":
+        # Any other sort order doesn't need the whole candidate set scored
+        # — badges only need to exist for the ~25-50 rows actually being
+        # returned this page, not however many thousand matched the
+        # search. This used to run unconditionally on every candidate
+        # regardless of sort, which was fine back when the location filter
+        # was applied automatically on resume upload (shrinking the
+        # candidate set way down) but turned into real, measurable latency
+        # once that auto-filter was removed and searches started scoring
+        # the full unfiltered dataset on every request.
+        for r in page_rows:
+            tier, _score = _match_info(r, title_terms, skill_terms, us_based=resume_us_based)
+            r["match_tier"] = tier
+
     for r in page_rows:
         r.pop("_match_score", None)  # internal sort key, not part of the API response
+        try:
+            r["tools"] = json.loads(r.get("tools") or "[]")
+        except (TypeError, ValueError):
+            r["tools"] = []
     return page_rows, total
 
 

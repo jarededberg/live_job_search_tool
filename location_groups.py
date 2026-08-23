@@ -134,3 +134,30 @@ def matches_group(group_key, location):
     if not group or not location:
         return False
     return group["match"](location)
+
+
+def is_clearly_non_us(location):
+    """True if `location` reads as clearly NOT viable for a US-based
+    candidate — either a specific onsite address with no US signal at all
+    (e.g. "Prague", "Peterborough"), or an explicitly non-US remote label
+    (Remote (Canada) / (UK) / (Europe)). Used to keep match-tier badges
+    from calling a Prague-based role a "best match" for a Phoenix, AZ
+    resume just because the job title lines up — see db.py's
+    `_match_info`.
+
+    Blank locations and unqualified/ambiguous "Remote" (no region
+    specified at all — the `remote_anywhere` group) are given the benefit
+    of the doubt and NOT flagged, since they might still be US-eligible.
+    This intentionally only recognizes Canada/UK/Europe as disqualifying
+    remote regions (the ones this app already classifies) — a location
+    clearly in another region entirely (APAC, LatAm, etc.) that doesn't
+    mention "remote" at all still gets caught by the plain "no US signal,
+    not remote" branch below; an unlabeled "Remote - APAC" would not be
+    caught, a known gap given there's no APAC classifier yet."""
+    if not location:
+        return False
+    if _mentions_us(location):
+        return False
+    if _is_remote(location) and not _mentions_canada(location) and not _mentions_europe(location):
+        return False  # unqualified/ambiguous remote -- benefit of the doubt
+    return True

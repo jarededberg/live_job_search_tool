@@ -88,6 +88,7 @@ def api_jobs():
     sort = request.args.get("sort", db.DEFAULT_SORT)
     resume_title_terms = [t.lower() for t in request.args.getlist("resume_title_term") if t.strip()]
     resume_skill_terms = [t.lower() for t in request.args.getlist("resume_skill_term") if t.strip()]
+    resume_us_based = request.args.get("resume_us_based") == "1"
     page = max(1, int(request.args.get("page", 1) or 1))
     per_page = min(100, max(1, int(request.args.get("per_page", 25) or 25)))
 
@@ -98,6 +99,7 @@ def api_jobs():
                                       commitment=commitment, sort=sort,
                                       resume_title_terms=resume_title_terms,
                                       resume_skill_terms=resume_skill_terms,
+                                      resume_us_based=resume_us_based,
                                       page=page, per_page=per_page)
     except Exception as e:
         return jsonify({"error": f"Couldn't parse that search: {e}"}), 400
