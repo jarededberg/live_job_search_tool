@@ -56,9 +56,32 @@ MAX_BLURB_LEN = 220
 # Python string splitting (see _context_window), does the same job in
 # actual O(n) time: the same 517-job batch dropped to ~0.02s.
 _YEARS_CORE_RE = re.compile(
-    r"(\d+\+?)\s*(?:-|to)\s*(\d+\+?)\s*years?\b"
+    # "3-5 years" / "3 to 5 years" -- widened from just "-"/"to" to also
+    # catch en/em dashes ("3–5 years", "3—5 years"), which real postings
+    # use constantly and the original version silently missed.
+    r"(?P<range_lo>\d+\+?)\s*(?:-|–|—|to)\s*(?P<range_hi>\d+\+?)\s*years?\b"
     r"|"
-    r"(\d+\+?)\s*years?(?:\s+of)?\s+(?:relevant\s+)?experience\b",
+    # "5+ years of enterprise SaaS experience" / "3 years of hands-on
+    # Python development experience" -- the original version only matched
+    # "years of experience" verbatim (at most one "relevant" in between),
+    # which missed the extremely common case of descriptive words between
+    # "years of" and "experience" (a specific domain/skill, not just the
+    # bare word). Capped at 4 intervening words, and restricted to a
+    # word-ish character class with no ".", so it can't run past a
+    # sentence boundary looking for a stray later "experience" -- same
+    # anti-backtracking-blowup reasoning as the rest of this file (see the
+    # module docstring's note on the old context-capturing version).
+    r"(?P<of_lo>\d+\+?)\s*years?\s+of\s+(?:[A-Za-z/&,\-]+\s+){0,4}experience\b"
+    r"|"
+    # "5+ years experience" (no "of" at all)
+    r"(?P<plain_lo>\d+\+?)\s*years?\s+(?:relevant\s+)?experience\b"
+    r"|"
+    # Lead-in cue phrases that signal a real requirement even with nothing
+    # resembling "experience" right after the number at all -- "minimum of
+    # 5 years", "at least 5 years", "more than 5 years". These turned out
+    # to account for a big chunk of real postings that mention YOE without
+    # ever using the literal word "experience" adjacent to the number.
+    r"(?:minimum(?:\s+of)?|at\s+least|more\s+than)\s+(?P<cue_lo>\d+\+?)\s*years?\b",
     re.IGNORECASE,
 )
 
@@ -74,9 +97,20 @@ def extract_years_experience(text):
     m = _YEARS_CORE_RE.search(text)
     if not m:
         return None
-    if m.group(1) and m.group(2):
-        return f"{m.group(1)}-{m.group(2)}"
-    return m.group(3)
+    if m.group("range_lo") and m.group("range_hi"):
+        return f"{m.group('range_lo')}-{m.group('range_hi')}"
+    if m.group("of_lo"):
+        return m.group("of_lo")
+    if m.group("plain_lo"):
+        return m.group("plain_lo")
+    if m.group("cue_lo"):
+        # "at least 5 years" / "minimum of 5 years" / "more than 5 years"
+        # are all open-ended requirements even when the source text itself
+        # has no literal "+" on the number -- the cue phrase already means
+        # "N or more", so badge it the same way "5+" would be.
+        n = m.group("cue_lo")
+        return n if n.endswith("+") else f"{n}+"
+    return None
 
 
 _YEARS_RANGE_PARSE_RE = re.compile(r"^(\d+)\+?(?:\s*-\s*(\d+)\+?)?$")

@@ -65,6 +65,17 @@ EUROPE_COUNTRY_NAMES = {
     "hungary", "romania", "europe", "emea",
 }
 
+# Latin America / Mexico -- added after a real "Remote, Mexico" posting
+# (Spreedly) was badged BEST MATCH for a Phoenix, AZ resume, since the
+# original is_clearly_non_us() only recognized Canada/UK/Europe as
+# disqualifying remote regions and gave everything else (including this)
+# the "unqualified remote, benefit of the doubt" treatment.
+LATAM_COUNTRY_NAMES = {
+    "mexico", "brazil", "argentina", "colombia", "chile", "peru", "latam",
+    "latin america", "costa rica", "ecuador", "uruguay", "panama",
+    "guatemala", "dominican republic",
+}
+
 
 def _mentions_us(loc):
     if US_WORD_RE.search(loc):
@@ -93,8 +104,62 @@ def _mentions_europe(loc):
     return any(name in low for name in EUROPE_COUNTRY_NAMES) or _mentions_uk(loc)
 
 
+def _mentions_latam(loc):
+    low = loc.lower()
+    return any(name in low for name in LATAM_COUNTRY_NAMES)
+
+
 def _is_remote(loc):
     return bool(_REMOTE_RE.search(loc))
+
+
+def is_remote(location):
+    """Public wrapper around the remote-word check, for callers outside
+    this module (db.py's metro-distance match-tier gating needs to know
+    "is this remote at all", separately from which region)."""
+    return _is_remote(location or "")
+
+
+STATE_ABBR_TO_NAME = {
+    "al": "alabama", "ak": "alaska", "az": "arizona", "ar": "arkansas",
+    "ca": "california", "co": "colorado", "ct": "connecticut", "de": "delaware",
+    "fl": "florida", "ga": "georgia", "hi": "hawaii", "id": "idaho",
+    "il": "illinois", "in": "indiana", "ia": "iowa", "ks": "kansas",
+    "ky": "kentucky", "la": "louisiana", "me": "maine", "md": "maryland",
+    "ma": "massachusetts", "mi": "michigan", "mn": "minnesota", "ms": "mississippi",
+    "mo": "missouri", "mt": "montana", "ne": "nebraska", "nv": "nevada",
+    "nh": "new hampshire", "nj": "new jersey", "nm": "new mexico", "ny": "new york",
+    "nc": "north carolina", "nd": "north dakota", "oh": "ohio", "ok": "oklahoma",
+    "or": "oregon", "pa": "pennsylvania", "ri": "rhode island", "sc": "south carolina",
+    "sd": "south dakota", "tn": "tennessee", "tx": "texas", "ut": "utah",
+    "vt": "vermont", "va": "virginia", "wa": "washington", "wv": "west virginia",
+    "wi": "wisconsin", "wy": "wyoming", "dc": "district of columbia",
+}
+
+
+def city_state_variants(term):
+    """Given a lowercased "city, st" string, returns a set of spelling
+    variants to check a job's raw location string against: the original
+    abbreviated form, plus (when the state abbreviation is recognized) the
+    same city with the state spelled out in full.
+
+    Exists because real scraped job locations are inconsistent about which
+    form they use -- "Denver, CO" on one posting, "Denver, Colorado,
+    United States" on another, same company even -- while
+    metro_areas.py's curated nearby-city lists are all written in the
+    abbreviated "City, ST" form. Matching only that one exact spelling
+    caused a real bug: a job literally headquartered in Phoenix, AZ got
+    demoted out of "best match" for a Phoenix, AZ resume because the
+    posting spelled the state out as "Arizona" and never contained the
+    literal substring "phoenix, az" at all."""
+    term = term.strip().lower()
+    variants = {term}
+    if "," in term:
+        city, _, abbr = term.rpartition(",")
+        full = STATE_ABBR_TO_NAME.get(abbr.strip())
+        if full:
+            variants.add(f"{city.strip()}, {full}")
+    return variants
 
 
 LOCATION_GROUPS = {
@@ -148,16 +213,21 @@ def is_clearly_non_us(location):
     Blank locations and unqualified/ambiguous "Remote" (no region
     specified at all — the `remote_anywhere` group) are given the benefit
     of the doubt and NOT flagged, since they might still be US-eligible.
-    This intentionally only recognizes Canada/UK/Europe as disqualifying
-    remote regions (the ones this app already classifies) — a location
-    clearly in another region entirely (APAC, LatAm, etc.) that doesn't
-    mention "remote" at all still gets caught by the plain "no US signal,
-    not remote" branch below; an unlabeled "Remote - APAC" would not be
-    caught, a known gap given there's no APAC classifier yet."""
+    Canada/UK/Europe/LatAm are all recognized as disqualifying remote
+    regions. A location clearly in some OTHER region entirely (APAC, for
+    instance) that doesn't mention "remote" at all still gets caught by
+    the plain "no US signal, not remote" branch below; an unlabeled
+    "Remote - APAC" would not be caught, a known gap given there's no APAC
+    classifier yet."""
     if not location:
         return False
     if _mentions_us(location):
         return False
-    if _is_remote(location) and not _mentions_canada(location) and not _mentions_europe(location):
+    if (
+        _is_remote(location)
+        and not _mentions_canada(location)
+        and not _mentions_europe(location)
+        and not _mentions_latam(location)
+    ):
         return False  # unqualified/ambiguous remote -- benefit of the doubt
     return True

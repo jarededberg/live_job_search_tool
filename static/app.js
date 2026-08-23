@@ -113,6 +113,7 @@ async function search(page = 1) {
     // Remote-Canada, etc.) instead of calling them a "best match" just
     // because the title lines up. See location_groups.is_clearly_non_us.
     if (resumeUsBased) params.append("resume_us_based", "1");
+    resumeMetroTerms.forEach((t) => params.append("resume_metro_term", t));
   }
 
   try {
@@ -203,6 +204,14 @@ let hasResume = false;
 // query param so db.py's is_clearly_non_us() demotion only kicks in when
 // we're actually confident the candidate is US-based -- see search().
 let resumeUsBased = false;
+// The candidate's home-metro "City, ST" list (data.location_terms --
+// Phoenix -> ["Phoenix, AZ", "Scottsdale, AZ", ...]), sent as
+// resume_metro_term params so db.py's _match_info can demote onsite jobs
+// that are technically US-based but nowhere near the candidate (Denver,
+// Salt Lake City, etc. for a Phoenix resume) instead of badging them
+// "best match" purely on title overlap. See the location-proximity fix
+// in db.py.
+let resumeMetroTerms = [];
 
 function matchBadgeHtml(job) {
   if (!hasResume || !job.match_tier) return "";
@@ -621,6 +630,7 @@ async function handleResumeFile(file) {
     resumeSkillTerms = (data.skill_terms || []).map((t) => t.toLowerCase());
     hasResume = true;
     resumeUsBased = Boolean(data.matched_city);
+    resumeMetroTerms = (data.location_terms || []).map((t) => t.toLowerCase());
     document.getElementById("sort-match-option").hidden = false;
     sortSelect.value = "match";
 

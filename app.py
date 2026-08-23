@@ -89,6 +89,7 @@ def api_jobs():
     resume_title_terms = [t.lower() for t in request.args.getlist("resume_title_term") if t.strip()]
     resume_skill_terms = [t.lower() for t in request.args.getlist("resume_skill_term") if t.strip()]
     resume_us_based = request.args.get("resume_us_based") == "1"
+    resume_metro_terms = [t.lower() for t in request.args.getlist("resume_metro_term") if t.strip()]
 
     def _int_or_none(name):
         v = request.args.get(name, "")
@@ -109,6 +110,7 @@ def api_jobs():
                                       resume_title_terms=resume_title_terms,
                                       resume_skill_terms=resume_skill_terms,
                                       resume_us_based=resume_us_based,
+                                      resume_metro_terms=resume_metro_terms,
                                       salary_min=salary_min, salary_max=salary_max,
                                       yoe_min=yoe_min, yoe_max=yoe_max,
                                       page=page, per_page=per_page)

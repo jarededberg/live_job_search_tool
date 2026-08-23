@@ -193,6 +193,41 @@ Measured across an 800-company sample: ~45% of scraped jobs end up with a
 salary figure (department coverage is ~100% now that Greenhouse's
 `content=true` is back on — see Memory section below for why that's safe).
 
+**Follow-up fix: the regex was giving up too easily on real postings.**
+Pulled live job descriptions from several real Greenhouse boards
+(Redwood Materials, Brex, Samsara, Instacart, Gusto — ~920 postings) to
+audit `extract_salary()` against actual text rather than assumptions, and
+found the extractor was quietly returning `(None, None)` on real,
+extractable comp figures in two situations:
+
+1. **"$X/yr to $Y/yr" format** (each number carrying its own `/yr` suffix,
+   rather than one shared suffix at the end) broke the existing range
+   regex entirely — the `/yr` in between the number and `to`/`-` isn't
+   accounted for by a plain `<num> - <num>` separator pattern, so it fell
+   through to `_SINGLE_RE` and only ever grabbed the two numbers as
+   separate, unpaired single values. Added `_RANGE_YR_RE` specifically for
+   this shape.
+2. **First-match-only meant one bad number sank a whole valid range
+   nearby.** A real Gusto posting had a typo — "`$179,000,000/yr to
+   $220,000/yr` in Denver..., and `$210,000/yr to $260,000/yr` for San
+   Francisco..." (clearly meant `$179,000` — the extra `,000` is a
+   posting-authoring mistake). The old code called `.search()` once per
+   pattern, got the `179,000,000` pair, correctly rejected it as
+   unreasonable (`_valid_pair`), and then gave up on the WHOLE pattern
+   instead of continuing on to the second, perfectly valid `$210,000-
+   $260,000` range later in the same text. `extract_salary()` now scans
+   every match of a pattern (`finditer`, not `search`) and returns the
+   first one that passes `_valid_pair`, only moving to the next pattern if
+   none of the current one's matches are valid — same idea multi-location
+   postings need anyway (several pay bands listed for different offices).
+
+Salary recall across that same ~920-job real sample went from roughly what
+the original conservative extractor found to 692/923 (75%) with these two
+fixes, with no new false positives — re-verified the existing CAD/"CA$"
+guard (Canadian-currency ranges correctly still return `None` rather than
+being mislabeled as USD) and the funding-amount guard (`$50,000,000 Series
+B` still correctly rejected by `MAX_REASONABLE`) both still hold.
+
 ### Company logos
 
 Clearbit's logo API (the obvious choice) is dead. Google's favicon service
@@ -324,6 +359,41 @@ dropped to ~0.4s. If you're tempted to add more context-aware regexes here,
 benchmark against real data before assuming it's fine at scale — a pattern
 that's instant on a test string can still be slow-by-orders-of-magnitude on
 a real 8KB description.
+
+**Follow-up fix: the YOE regex was missing most real phrasings.** Same
+~920-job live audit used for the salary follow-up above found
+`extract_years_experience()` was only finding a mention in 43.7% of
+postings that actually stated one — real Greenhouse text is full of
+phrasings the original pattern didn't cover:
+
+- **En/em dashes in ranges.** "1–5 years of industrial experience" (en
+  dash) wasn't recognized at all — the separator only accepted a plain
+  hyphen or the word "to". Widened to match `salary_extractor.py`'s
+  existing dash handling (`-`/`–`/`—`/`to`).
+- **Descriptive words between "years of" and "experience."** "5+ years of
+  hands-on Python development experience," "6+ years of customer
+  experience, including 1+ years in Payroll" — the original pattern only
+  matched "years of experience" verbatim (at most one "relevant" in
+  between), so any real domain/skill words in that gap broke the match.
+  Now tolerates up to 4 intervening words, capped and restricted to a
+  word-ish character class (no `.`) so it can't run past a sentence
+  boundary hunting for a stray later "experience" — same
+  anti-catastrophic-backtracking reasoning as the perf note above.
+- **Lead-in cue phrases with no "experience" word nearby at all.**
+  "Minimum 7+ years of industrial electrical experience," "at least 5+
+  years of customer-facing pre-sales experience," "more than 5 years" —
+  added explicit handling for "minimum (of)/at least/more than N years,"
+  and treat these as open-ended ("5+") even when the source text has no
+  literal "+" on the number, since the cue phrase itself already means "N
+  or more."
+
+Recall went from 403/923 (43.7%) to 634/923 (68.7%) on the same real
+dataset, with no measurable perf regression (0.32ms/job — the anti-
+backtracking design from the note above held up under the wider pattern)
+and zero false positives found on manual review of a random sample of the
+newly-caught matches (checked specifically for company-age/funding
+language like "founded," "in business," "raised $" sneaking in via the
+loosened "N years" matching — none did).
 
 ### Sort control
 
@@ -467,9 +537,7 @@ label ("Remote (Canada)"/"(UK)"/"(Europe)") — is force-set to `"poor"`
 before any title/skill scoring happens, regardless of how well the title
 matches. Blank locations and unqualified/ambiguous "Remote" (no region
 specified) are deliberately given the benefit of the doubt and left alone,
-since they might still be US-eligible; `is_clearly_non_us()`'s docstring
-also notes a known gap (no APAC/LatAm classifier yet, so an unlabeled
-"Remote - APAC" wouldn't be caught). If the resume parser couldn't
+since they might still be US-eligible. If the resume parser couldn't
 confidently place the candidate in the US, `resume_us_based` stays false
 and location is left out of scoring entirely — same behavior as before
 this fix, rather than guessing.
@@ -481,6 +549,61 @@ Phoenix posting scores `"best"`; both Prague and Remote-Canada drop to
 `"poor"`. With `resume_us_based=False` (or omitted), all three still score
 `"best"` — confirming the gate only engages when the app is actually
 confident about the candidate's location, not by default.
+
+**Follow-up: onsite-but-wrong-metro roles were still slipping through.**
+The fix above only ever checked "is this US-viable at all" — it stopped
+Prague and Remote-Canada, but real feedback showed it wasn't nearly
+enough: a Phoenix, AZ resume was still getting "best match" on onsite
+roles in Denver, Salt Lake City, San Francisco, and Tysons, VA, plus a
+"Remote, Mexico" posting — all technically-US-passable-or-unrecognized
+locations that a Phoenix-based candidate can't actually take without
+relocating. Two separate bugs, both fixed:
+
+1. **LatAm wasn't a recognized disqualifying remote region.**
+   `is_clearly_non_us()` only special-cased Canada/UK/Europe as explicitly
+   non-US remote labels; anything else (including "Remote, Mexico") fell
+   into the "unqualified remote, benefit of the doubt" branch and was
+   never flagged. Added a `LATAM_COUNTRY_NAMES` set (Mexico, Brazil,
+   Argentina, Colombia, etc.) and a `_mentions_latam()` check, same
+   pattern as the existing Canada/Europe checks. APAC is still an
+   acknowledged gap — there's no classifier for it yet, so an unlabeled
+   "Remote - APAC" still wouldn't be caught.
+2. **Onsite roles had no proximity check at all.** `_match_info()` gained
+   a `metro_terms` parameter: lowercased "city, st" strings for the
+   candidate's home metro, reusing the exact same nearby-metro list
+   `metro_areas.py` already builds for the "Narrow to Phoenix, AZ area"
+   suggestion button (see "Resume location auto-populate" below). When
+   `us_based` is true and `metro_terms` is given, a job is also demoted to
+   `"poor"` if it's **not remote at all** (remote roles are exempt — they
+   were already filtered down to US-viable-or-ambiguous ones by the
+   `is_clearly_non_us` check) and its location **doesn't contain any of
+   the candidate's metro cities** as a substring. Threaded through the
+   same way as the other resume flags: `/api/parse-resume`'s
+   `location_terms` response is captured into `app.js`'s
+   `resumeMetroTerms`, sent as repeated `resume_metro_term` params
+   whenever a resume is active, read by `app.py`, and passed into
+   `db.search_jobs(resume_metro_terms=...)`.
+
+   Hit a real matching bug while wiring this up: metro_areas.py's curated
+   lists are all written as abbreviated state codes ("Phoenix, AZ"), but
+   real scraped job locations often spell the state out in full
+   ("Phoenix, Arizona, United States") — a literal "Phoenix, AZ, United
+   States" resume role never matches "phoenix, az" as a plain substring
+   against "phoenix, arizona, united states". A synthetic test that
+   included the literal same-city job caught this immediately (it came
+   back `"poor"`, which is exactly backwards). Fixed with a new
+   `location_groups.city_state_variants()` helper and a
+   `STATE_ABBR_TO_NAME` lookup table: each metro term is expanded to both
+   spellings before matching, so either format works.
+
+   Verified against the exact screenshot that reported this: a Phoenix
+   metro-term list against onsite postings in Denver, Tysons VA, San
+   Francisco, Salt Lake City, and "Remote, Mexico" (all now correctly
+   `"poor"`), alongside onsite-in-Phoenix (both state-abbreviated and
+   full-name spellings), "Remote - US", and unqualified "Remote" (all
+   correctly still `"best"`). Also re-ran the earlier Prague/Remote-Canada
+   regression test and the salary/YOE range-filter tests afterward to
+   confirm neither this fix nor the LatAm change broke anything upstream.
 
 ### Match sort (server-side)
 
