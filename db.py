@@ -5,6 +5,7 @@ db.py — tiny SQLite layer for the job cache.
 import sqlite3
 import os
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from boolean_search import parse_query, evaluate, leaf_terms
@@ -22,8 +23,32 @@ def get_conn():
     return conn
 
 
+@contextmanager
+def conn_ctx():
+    """Like get_conn(), but actually closes the connection afterward.
+
+    `with sqlite3.connect(...) as conn:` only commits/rolls back on exit —
+    it does NOT close the connection. Every function below used to rely on
+    that pattern, which meant every call (hundreds of times per scrape, via
+    upsert_jobs) leaked an open connection that never got closed. Those piled
+    up holding locks on the WAL file, which is what caused "database is
+    locked" errors on ordinary reads while a scrape was running. This wraps
+    get_conn() so callers get commit-on-success/rollback-on-error AND a
+    guaranteed close.
+    """
+    conn = get_conn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def init_db():
-    with get_conn() as conn:
+    with conn_ctx() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
                 url TEXT PRIMARY KEY,
@@ -67,7 +92,7 @@ def upsert_jobs(jobs):
     """Insert new jobs / refresh last_seen for jobs still open. Returns count of brand-new rows."""
     now = datetime.now(timezone.utc).isoformat()
     new_count = 0
-    with _lock, get_conn() as conn:
+    with _lock, conn_ctx() as conn:
         for j in jobs:
             dept = j.get("department", "")
             commit_ = j.get("commitment", "")
@@ -95,14 +120,14 @@ def prune_stale(max_age_days=10):
     """Drop jobs not seen in the last N scrape cycles (i.e. likely closed/filled)."""
     from datetime import timedelta
     cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
-    with _lock, get_conn() as conn:
+    with _lock, conn_ctx() as conn:
         cur = conn.execute("DELETE FROM jobs WHERE last_seen < ?", (cutoff,))
         conn.commit()
         return cur.rowcount
 
 
 def record_run(started_at, finished_at, status, stats, jobs_in_db_after):
-    with get_conn() as conn:
+    with conn_ctx() as conn:
         conn.execute(
             "INSERT INTO scrape_runs (started_at, finished_at, status, companies_scanned, "
             "companies_with_jobs, jobs_scraped, jobs_in_db_after) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -113,13 +138,13 @@ def record_run(started_at, finished_at, status, stats, jobs_in_db_after):
 
 
 def last_run():
-    with get_conn() as conn:
+    with conn_ctx() as conn:
         row = conn.execute("SELECT * FROM scrape_runs ORDER BY id DESC LIMIT 1").fetchone()
         return dict(row) if row else None
 
 
 def total_jobs():
-    with get_conn() as conn:
+    with conn_ctx() as conn:
         return conn.execute("SELECT COUNT(*) AS c FROM jobs").fetchone()["c"]
 
 
@@ -162,7 +187,7 @@ def search_jobs(query="", location="", days=None, department="", commitment="", 
 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
-    with get_conn() as conn:
+    with conn_ctx() as conn:
         rows = conn.execute(
             f"SELECT * FROM jobs {where_sql} ORDER BY (posted IS NULL), posted DESC, company ASC "
             f"LIMIT ?",
@@ -182,7 +207,7 @@ def search_jobs(query="", location="", days=None, department="", commitment="", 
 def distinct_facet_values(column, limit=30):
     """Top N non-empty distinct values for a facet column, ordered by frequency."""
     assert column in ("department", "commitment")
-    with get_conn() as conn:
+    with conn_ctx() as conn:
         rows = conn.execute(
             f"SELECT {column} AS v, COUNT(*) AS c FROM jobs WHERE {column} != '' "
             f"GROUP BY {column} ORDER BY c DESC LIMIT ?",

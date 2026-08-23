@@ -124,6 +124,20 @@ Railway or Fly.io work the same way — any host that runs a long-lived Python
 process (not a stateless serverless function, since the scheduler needs to
 keep running) will work.
 
+### "database is locked" errors
+
+If you ever see this on `/api/jobs` (typically while a scrape is running),
+it's a connection leak, not a concurrency limitation of SQLite itself.
+`db.py` originally used `with sqlite3.connect(...) as conn:` everywhere —
+that pattern only commits/rolls back on exit, it does **not** close the
+connection. `upsert_jobs()` gets called on the order of hundreds of times
+per full scrape (once per 100-job batch), so every scrape leaked hundreds of
+open connections holding locks on the WAL file, eventually blocking ordinary
+reads. Fixed by routing every DB function through `conn_ctx()`, a context
+manager that guarantees `conn.close()` on the way out. Stress-tested with 2
+threads continuously writing 100-job batches against 6 threads continuously
+reading, for 8 seconds straight — zero lock errors.
+
 **Important:** use only 1 gunicorn worker (as set in the `Procfile`). Each
 worker process would run its own copy of the APScheduler background job,
 duplicating the scrape. If you need more concurrency for traffic, add
