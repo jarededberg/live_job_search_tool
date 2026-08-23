@@ -84,7 +84,7 @@ for the first several minutes.
 
 ### Memory
 
-This went through two real rounds of fixing after hitting Render's memory
+This went through three real rounds of fixing after hitting Render's memory
 limit in production, worth understanding if you ever tune it further:
 
 1. **Greenhouse's `?content=true` flag** was dropped from requests. That flag
@@ -98,18 +98,27 @@ limit in production, worth understanding if you ever tune it further:
    writing anything to disk. It now flushes to SQLite every `batch_size`
    (default 100) jobs and forces a GC pass after each flush, so peak memory
    no longer grows with how much of the company list has been scanned.
+3. **Streaming the Lever/Ashby JSON parse itself.** Unlike Greenhouse, Lever
+   and Ashby have no opt-out for full HTML+plain-text job descriptions
+   (~17-19KB per job, no flag to drop them) — a single large company's raw
+   API response can be several MB. Fixes #1 and #2 above didn't touch this:
+   each company's full response was still being `json.loads()`'d into memory
+   before being thrown away, and that's what kept crashing the app even after
+   the batching fix shipped. `scraper.py` now parses Greenhouse, Lever, and
+   Ashby responses with `ijson` (streaming JSON parser) via `open_stream()` /
+   `stream_items()`, extracting only the ~6 fields actually used per job
+   instead of materializing the whole response. Verified this doesn't change
+   any extracted data (identical output vs. the old parser on several
+   companies) and cut peak memory for the single worst-case company tested
+   (Palantir, 308 Lever jobs, 5.8MB raw payload) from an estimated 15-20MB+
+   down to under 1MB.
 
-Even with both fixes, memory does still grow somewhat with company count
-(measured ~274 MB scanning 800 of the ~4,300 companies at
-`SCRAPE_MAX_WORKERS=4`) — a full run wasn't fully load-tested end-to-end due
-to tooling constraints while building this, so treat the current defaults as
-a solid improvement, not a guarantee. `SCRAPE_MAX_WORKERS` and `batch_size`
-(in the `scrape_all()` call in `app.py`) are the two levers if it's still
-tight; realistically, if Render flags memory again after this, the
-straightforward fix is bumping the instance from the smallest tier
-(512 MB) to the next one up — 4,300 companies and ~80-100k jobs is a
-legitimately non-trivial amount of data to hold and index, not just a bug
-to keep chasing.
+With all three fixes, a run of 797 of the ~4,300 companies
+(`SCRAPE_MAX_WORKERS=4`, `batch_size=100`) peaked at **56MB** RSS — down from
+274MB before fix #3, and comfortably under Render's 512MB Starter-tier limit.
+`SCRAPE_MAX_WORKERS` and `batch_size` (in the `scrape_all()` call in
+`app.py`) are still the two levers if memory ever gets tight again, but at
+this point there's real headroom.
 
 Railway or Fly.io work the same way — any host that runs a long-lived Python
 process (not a stateless serverless function, since the scheduler needs to

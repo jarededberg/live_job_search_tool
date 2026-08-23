@@ -17,9 +17,45 @@ from datetime import datetime, timezone
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
+import ijson
+
 from companies_data import COMPANIES
 
 _LOCAL = threading.local()
+
+
+def open_stream(url, timeout=10):
+    """Open a URL for streaming (does NOT read the body). Returns the response
+    object on success, or None if the URL isn't reachable at all (so callers
+    can distinguish "board doesn't exist" from "board exists but is empty",
+    same contract as fetch())."""
+    headers = {"User-Agent": "Mozilla/5.0 JobSearchWebApp/1.0"}
+    req = Request(url, headers=headers, method="GET")
+    try:
+        return urlopen(req, timeout=timeout)
+    except HTTPError:
+        return None
+    except Exception:
+        return None
+
+
+def stream_items(resp, item_path):
+    """Yield JSON items at `item_path` (e.g. 'item' for a top-level array,
+    'jobs.item' for {"jobs": [...]}) from an open response, one at a time via
+    ijson, without ever materializing the full response in memory at once.
+
+    This matters specifically for Lever and Ashby: unlike Greenhouse, neither
+    has an opt-out for the full HTML+plain-text job description on every
+    posting (measured ~17-19KB/job on average), so a single large company's
+    response can be several MB. Streaming means peak memory per request is
+    roughly "one job's worth" instead of "the whole company's worth", which
+    is what was still causing OOM restarts on Render even after the
+    Greenhouse fix.
+    """
+    try:
+        yield from ijson.items(resp, item_path)
+    except Exception:
+        return  # malformed / truncated mid-stream — return whatever we already yielded
 
 
 def fetch(url, timeout=8):
@@ -92,74 +128,82 @@ def try_greenhouse(company, slug):
     # `departments` field, so Greenhouse-sourced jobs won't populate the
     # department facet (Lever/Ashby still do) — but content=true was
     # returning several MB per company (full HTML job descriptions we never
-    # use), and was the main driver of the memory spikes that got this app
+    # use), and was a major driver of the memory spikes that got this app
     # OOM-killed on Render. `metadata` (used for commitment) is still
-    # returned without the flag, so that facet is unaffected.
-    data = fetch(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs")
-    if data is None:
+    # returned without the flag, so that facet is unaffected. Streamed for
+    # consistency/safety even though this endpoint is already small.
+    resp = open_stream(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs")
+    if resp is None:
         return None
     results = []
-    for job in data.get("jobs", []):
-        title = job.get("title", "")
-        location = job.get("location", {}).get("name", "")
-        job_url = job.get("absolute_url", "")
-        posted = parse_ts(job.get("updated_at") or job.get("created_at"))
-        depts = job.get("departments") or []
-        department = depts[0].get("name", "") if depts else ""
-        commitment = ""
-        for meta in job.get("metadata") or []:
-            if (meta.get("name") or "").strip().lower() in ("employment type", "job type", "commitment"):
-                commitment = str(meta.get("value") or "")
-                break
-        if title and job_url:
-            results.append(make_job(title, company, location, posted, job_url, "Greenhouse",
-                                     department, commitment))
+    with resp:
+        for job in stream_items(resp, "jobs.item"):
+            title = job.get("title", "")
+            location = job.get("location", {}).get("name", "")
+            job_url = job.get("absolute_url", "")
+            posted = parse_ts(job.get("updated_at") or job.get("created_at"))
+            depts = job.get("departments") or []
+            department = depts[0].get("name", "") if depts else ""
+            commitment = ""
+            for meta in job.get("metadata") or []:
+                if (meta.get("name") or "").strip().lower() in ("employment type", "job type", "commitment"):
+                    commitment = str(meta.get("value") or "")
+                    break
+            if title and job_url:
+                results.append(make_job(title, company, location, posted, job_url, "Greenhouse",
+                                         department, commitment))
     return results
 
 
 def try_lever(company, slug):
-    data = fetch(f"https://api.lever.co/v0/postings/{slug}?mode=json")
-    if data is None:
-        return None
-    if isinstance(data, dict):
-        data = data.get("postings", [])
-    if not isinstance(data, list):
+    # Lever has no opt-out for description fields — every posting always
+    # includes full description/descriptionPlain/descriptionBody/
+    # descriptionBodyPlain HTML+text (measured ~19KB/job average). Streamed
+    # so we only ever hold one job's worth of that in memory at a time
+    # instead of a whole company's response (which can be several MB).
+    resp = open_stream(f"https://api.lever.co/v0/postings/{slug}?mode=json")
+    if resp is None:
         return None
     results = []
-    for job in data:
-        title = job.get("text", "")
-        cats = job.get("categories", {}) or {}
-        locs = cats.get("allLocations") or []
-        location = locs[0] if locs else cats.get("location", "")
-        job_url = job.get("hostedUrl", "")
-        posted = parse_ts(job.get("createdAt"))
-        department = cats.get("team", "") or cats.get("department", "")
-        commitment = cats.get("commitment", "")
-        if title and job_url:
-            results.append(make_job(title, company, location, posted, job_url, "Lever",
-                                     department, commitment))
+    with resp:
+        for job in stream_items(resp, "item"):
+            if not isinstance(job, dict):
+                continue
+            title = job.get("text", "")
+            cats = job.get("categories", {}) or {}
+            locs = cats.get("allLocations") or []
+            location = locs[0] if locs else cats.get("location", "")
+            job_url = job.get("hostedUrl", "")
+            posted = parse_ts(job.get("createdAt"))
+            department = cats.get("team", "") or cats.get("department", "")
+            commitment = cats.get("commitment", "")
+            if title and job_url:
+                results.append(make_job(title, company, location, posted, job_url, "Lever",
+                                         department, commitment))
     return results
 
 
 def try_ashby(company, slug):
-    data = fetch(f"https://api.ashbyhq.com/posting-api/job-board/{slug}")
-    if data is None:
+    # Same story as Lever — descriptionHtml/descriptionPlain are always
+    # present on every posting (~17.5KB/job average), no opt-out. Streamed.
+    resp = open_stream(f"https://api.ashbyhq.com/posting-api/job-board/{slug}")
+    if resp is None:
         return None
-    postings = data.get("jobs") or data.get("jobPostings") or []
     results = []
-    for job in postings:
-        title = job.get("title", "")
-        location = job.get("location", "") or job.get("locationName", "")
-        job_url = job.get("jobUrl", "")
-        if not job_url:
-            path = job.get("jobPostingPath", "")
-            job_url = f"https://jobs.ashbyhq.com/{slug}{path}" if path and not path.startswith("http") else path
-        posted = parse_ts(job.get("publishedAt") or job.get("createdAt"))
-        department = job.get("department", "") or job.get("team", "")
-        commitment = job.get("employmentType", "")
-        if title and job_url:
-            results.append(make_job(title, company, location, posted, job_url, "Ashby",
-                                     department, commitment))
+    with resp:
+        for job in stream_items(resp, "jobs.item"):
+            title = job.get("title", "")
+            location = job.get("location", "") or job.get("locationName", "")
+            job_url = job.get("jobUrl", "")
+            if not job_url:
+                path = job.get("jobPostingPath", "")
+                job_url = f"https://jobs.ashbyhq.com/{slug}{path}" if path and not path.startswith("http") else path
+            posted = parse_ts(job.get("publishedAt") or job.get("createdAt"))
+            department = job.get("department", "") or job.get("team", "")
+            commitment = job.get("employmentType", "")
+            if title and job_url:
+                results.append(make_job(title, company, location, posted, job_url, "Ashby",
+                                         department, commitment))
     return results
 
 
