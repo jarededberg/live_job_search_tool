@@ -50,6 +50,12 @@ RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "Open Roles Finder <onbo
 # which is fine for local dev but should be set explicitly in production.
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "").rstrip("/")
 RESET_TOKEN_TTL_HOURS = 1
+# Optional GA4 traffic tracking -- off unless set, same graceful-
+# degradation pattern as everything else here. Injected client-side (see
+# GET /api/site-config + app.js's loadSiteConfig()) rather than baked into
+# static/index.html directly, so the measurement ID isn't hardcoded into
+# version control and can be changed via env var alone.
+GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID", "")
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = MAX_RESUME_BYTES
@@ -331,6 +337,16 @@ def api_location_groups():
     strings — see location_groups.py for why these exist."""
     from location_groups import LOCATION_GROUPS
     return jsonify({"groups": [{"key": k, "label": v["label"]} for k, v in LOCATION_GROUPS.items()]})
+
+
+@app.route("/api/site-config")
+def api_site_config():
+    """Public, non-account config the frontend needs on every page load --
+    currently just the GA4 measurement ID (safe to expose; it's a public
+    tracking ID, not a secret). Empty string means analytics isn't
+    configured on this deployment, and app.js skips injecting gtag.js
+    entirely -- same graceful-degradation pattern as Turnstile/Resend."""
+    return jsonify({"ga_measurement_id": GA_MEASUREMENT_ID})
 
 
 @app.route("/api/status")

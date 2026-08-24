@@ -841,6 +841,9 @@ for the first several minutes.
    - `RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `APP_BASE_URL` — optional
      password reset, see "Password reset" under "User accounts" below; the
      site runs fine without these, just without a "Forgot password?" link.
+   - `GA_MEASUREMENT_ID` — optional Google Analytics tracking, see
+     "Analytics" below; the site runs fine without it, just without
+     traffic tracking.
 
 ## User accounts (saved searches, applied-job tracking)
 
@@ -1164,6 +1167,27 @@ original script's `main()` loop, so that's what's ported here. The others
 could be added later, but LinkedIn scraping in particular is fragile and
 against LinkedIn's terms of service, so it's intentionally left out of the
 public version.
+
+## Analytics (optional Google Analytics)
+
+Off by default, same pattern as everything else in this README. Set
+`GA_MEASUREMENT_ID` (looks like `G-XXXXXXXXXX`, from a GA4 property's
+**Admin → Data collection → Web stream**) as an env var on the web
+service, and every page load starts sending traffic to that property —
+nothing else to configure, no code changes needed.
+
+Deliberately not baked into `static/index.html` as a hardcoded `<script>`
+tag, even though that's the "standard" way Google's own install
+instructions show it — that would mean the measurement ID lives in the
+repo (and in this zip, and in git history) rather than only in Render's
+env vars. Instead, `GET /api/site-config` exposes the ID (it's a public
+tracking identifier, not a secret, so this is safe), and `app.js`'s
+`loadSiteConfig()` injects the two `gtag.js` script tags into `<head>` at
+runtime only if it got a non-empty ID back. A deployment without
+`GA_MEASUREMENT_ID` set just never touches Google's tracking script at
+all — verified directly: `/api/site-config` returns
+`{"ga_measurement_id": ""}` when unset and the real ID when set, checked
+against a live local run of the app in both states.
 
 ## Branding
 

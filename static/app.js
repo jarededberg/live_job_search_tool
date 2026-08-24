@@ -1303,6 +1303,36 @@ function appliedJobRow(job) {
   `;
 }
 
+// ---- analytics (optional GA4) ----
+
+// Injected at runtime rather than baked into index.html, so the
+// measurement ID lives only in an env var (GA_MEASUREMENT_ID on the
+// server), not committed to the repo -- same reasoning as
+// turnstileSiteKey. A deployment with it unset just never adds the
+// script tags below, and this whole thing is a silent no-op.
+async function loadSiteConfig() {
+  try {
+    const res = await fetch("/api/site-config");
+    const data = await res.json();
+    const gaId = data.ga_measurement_id;
+    if (!gaId) return;
+
+    const gtagScript = document.createElement("script");
+    gtagScript.async = true;
+    gtagScript.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(gaId)}`;
+    document.head.appendChild(gtagScript);
+
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { window.dataLayer.push(arguments); }
+    window.gtag = gtag;
+    gtag("js", new Date());
+    gtag("config", gaId);
+  } catch (e) {
+    // Analytics is the last thing that should ever break the site --
+    // fail silent, same as every other nice-to-have fetch here.
+  }
+}
+
 // ---- misc UI wiring ----
 
 syntaxHelpBtn.addEventListener("click", () => {
@@ -1324,6 +1354,7 @@ loadFacets();
 loadLocationGroups();
 loadAuthConfig();
 loadStatus();
+loadSiteConfig();
 checkForResetToken();
 setInterval(loadStatus, 30000);
 // Waits on the auth check specifically (fast -- one query, or an
