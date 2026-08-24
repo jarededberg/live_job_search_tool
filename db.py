@@ -334,7 +334,15 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     filter; if both are given, `departments` wins. A value that isn't a
     recognized canonical label is matched literally against the raw
     department column instead (keeps old saved searches, from before this
-    grouping existed, working unchanged).
+    grouping existed, working unchanged). Matched entirely in Python
+    against already-fetched candidate rows (classify_department() called
+    per-row), NOT as a SQL WHERE clause — an earlier version expanded each
+    requested label into every matching raw department string and bound
+    them all as SQL parameters, which is exactly what crashed production:
+    a popular bucket like "Engineering" expands to far more than SQLite's
+    default ~999-parameter limit once there are thousands of companies'
+    worth of raw spelling variants in the real dataset. Keep department
+    filtering in Python going forward for this reason.
 
     `location_groups`, if given, is a list of canonical group keys from
     location_groups.py (e.g. "remote_us") — a job matches if its raw
@@ -433,24 +441,22 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         where.append("(posted >= ? OR posted IS NULL OR posted = '')")
         params.append(cutoff)
 
+    # Department filtering happens entirely in Python, post-fetch (see
+    # `_dept_matches` below) rather than as a SQL WHERE clause -- an
+    # earlier version expanded each requested canonical label ("Engineering")
+    # to every matching raw department string and OR'd them as SQL
+    # parameters, which crashed the whole site in production
+    # ("too many SQL variables") the moment a popular canonical bucket
+    # expanded to more raw spellings than SQLite's default ~999 bound-
+    # parameter limit across a real ~4,300-company dataset -- something a
+    # small local test dataset never had enough distinct raw values to
+    # surface. Filtering candidates in Python after they're already
+    # fetched (same approach `group_list` location matching below uses)
+    # sidesteps the whole class of bug: no SQL parameter count that scales
+    # with how many raw spellings happen to exist.
     dept_list = [d.strip() for d in (departments or []) if d and d.strip()]
     if not dept_list and department.strip():
         dept_list = [department.strip()]
-    if dept_list:
-        # `dept_list` holds canonical department labels ("Engineering",
-        # "Sales", ...) now, not raw scraped strings -- expand each to
-        # every raw department value currently in the DB that classifies
-        # into it (see department_groups.py), then OR-match against those.
-        # A label that isn't a recognized canonical one (an old saved
-        # search from before this grouping existed, storing a raw scraped
-        # string) falls back to being matched literally, so it keeps
-        # working exactly as before.
-        raw_values = _department_group_raw_values(dept_list)
-        if raw_values:
-            where.append("(" + " OR ".join("department = ?" for _ in raw_values) + ")")
-            params.extend(raw_values)
-        else:
-            where.append("1 = 0")  # requested group matches nothing currently in the DB
 
     if commitment.strip():
         where.append("commitment = ?")
@@ -499,6 +505,29 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     # single request.
     if ast is not None:
         candidates = [r for r in candidates if evaluate(ast, r["title"])]
+
+    if dept_list:
+        # Canonical labels ("Engineering", "Sales", ..., plus the
+        # synthetic "Other" bucket) are matched via classify_department();
+        # anything in dept_list that ISN'T a recognized canonical label is
+        # an old saved search storing a raw scraped department string from
+        # before this grouping existed, and gets matched literally instead
+        # -- no migration needed for those to keep working.
+        canonical_wanted = {d for d in dept_list if d in DEPARTMENT_DISPLAY_ORDER or d == "Other"}
+        literal_wanted = {d for d in dept_list if d not in DEPARTMENT_DISPLAY_ORDER and d != "Other"}
+
+        def _dept_matches(r):
+            raw = r.get("department") or ""
+            if raw in literal_wanted:
+                return True
+            if not canonical_wanted:
+                return False
+            if _JUNK_DEPARTMENT_RE.search(raw):
+                return False  # cohort/program tags never count toward any bucket, including "Other"
+            label = classify_department(raw)
+            return (label in canonical_wanted) if label else ("Other" in canonical_wanted)
+
+        candidates = [r for r in candidates if _dept_matches(r)]
 
     if group_list:
         # The SQL prefilter above was deliberately loose (any "remote"
@@ -695,10 +724,13 @@ _JUNK_DEPARTMENT_RE = re.compile(r"'\d{2}\b")
 def _raw_department_values():
     """Every distinct non-empty raw `department` string currently in the
     DB, with the junk cohort/program-tag values (see _JUNK_DEPARTMENT_RE)
-    already excluded -- shared by department_group_facets() (building the
-    picker's option list) and _department_group_raw_values() (expanding a
-    picked canonical label back to the raw values it covers, for
-    filtering)."""
+    already excluded -- used by department_group_facets() to build the
+    picker's option list. (Filtering itself -- matching a job against a
+    requested canonical label -- happens per-candidate in Python inside
+    search_jobs(), via classify_department() directly on each row's own
+    department value, not by pre-computing this list and expanding it into
+    SQL parameters -- see search_jobs()'s docstring/comments for why that
+    approach was actually tried first and had to be reverted.)"""
     with conn_ctx() as conn:
         rows = conn.execute(
             "SELECT DISTINCT department AS v FROM jobs WHERE department != ''"
@@ -726,31 +758,6 @@ def department_group_facets(limit=30):
     if has_other:
         ordered.append("Other")
     return ordered[:limit]
-
-
-def _department_group_raw_values(labels):
-    """Raw department strings currently in the DB that fall under ANY of
-    the given canonical department labels. A label that isn't one of
-    department_groups.py's recognized canonical labels (including the
-    synthetic "Other" bucket) is treated as a literal raw department
-    string instead -- this is what keeps old saved searches, saved back
-    when the department filter stored a raw scraped value directly,
-    still filtering correctly with no migration needed."""
-    raws = _raw_department_values()
-    result = []
-    seen = set()
-    for label in labels:
-        if label == "Other":
-            matches = [v for v in raws if classify_department(v) is None]
-        elif label in DEPARTMENT_DISPLAY_ORDER:
-            matches = [v for v in raws if classify_department(v) == label]
-        else:
-            matches = [label]
-        for v in matches:
-            if v not in seen:
-                seen.add(v)
-                result.append(v)
-    return result
 
 
 def distinct_facet_values(column, limit=30):
