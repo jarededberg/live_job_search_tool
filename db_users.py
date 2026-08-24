@@ -27,9 +27,18 @@ try:
     import psycopg2
     import psycopg2.extras
     import psycopg2.errors
-except ImportError:  # psycopg2 itself might not be installed in a
+except ImportError as e:  # psycopg2 itself might not be installed in a
     # deployment that never intends to use accounts -- keep that a soft
-    # failure too, same as a missing DATABASE_URL.
+    # failure too, same as a missing DATABASE_URL. But log WHY, since this
+    # used to fail silently and get misreported by app.py's startup message
+    # as "DATABASE_URL not set" even when DATABASE_URL was actually fine --
+    # the real cause (psycopg2 failing to import, e.g. a Python version
+    # newer than the pinned psycopg2-binary wheel supports -- see the
+    # .python-version file) was invisible without this print.
+    print(f"[db_users] WARNING: psycopg2 failed to import ({e}) -- user "
+          f"accounts will be disabled even if DATABASE_URL is set. This "
+          f"usually means the deployed Python version doesn't have a "
+          f"matching psycopg2-binary wheel; check .python-version.")
     psycopg2 = None
 
 DATABASE_URL = os.environ.get("DATABASE_URL")

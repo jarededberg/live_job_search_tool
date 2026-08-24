@@ -814,6 +814,16 @@ for the first several minutes.
 1. Push this folder to a new GitHub repo.
 2. In Render: **New > Web Service**, connect the repo.
 3. Build command: `pip install -r requirements.txt`
+   - `.python-version` pins the build to Python 3.12 — deliberately, not
+     Render's newest default. Hit this the hard way: Render defaulted to
+     3.14 (its current latest), which has no matching `psycopg2-binary`
+     wheel for the pinned `2.9.9` version in `requirements.txt`. That import
+     failure was getting silently swallowed by `db_users.py`'s
+     `except ImportError: psycopg2 = None` (fixed to at least log now, but
+     the real fix is avoiding the mismatch in the first place) — the
+     symptom was `DATABASE_URL` looking completely correct in the Render
+     dashboard while the app insisted it wasn't set. If you ever bump
+     `psycopg2-binary` to a version with real 3.14 wheels, this pin can go.
 4. Start command: (auto-detected from `Procfile`) or set explicitly:
    `gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120`
 5. Add a **persistent disk** (Render dashboard > Disks) mounted at, e.g.,
