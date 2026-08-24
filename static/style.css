@@ -447,6 +447,27 @@ code {
   text-align: center;
 }
 
+.hero-badges {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 4px 11px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
 .hero h1 {
   margin: 0 auto 14px;
   font-family: var(--font-serif);
@@ -690,6 +711,72 @@ main {
 
 .location-option-group { font-weight: 600; }
 .location-option-group::before { content: "★ "; color: var(--accent); }
+
+/* ---------- Department multi-select (checkbox dropdown) ---------- */
+/* Same visual footprint as the plain <select> filters next to it, but a
+   custom checkbox menu instead of a native <select> -- a native
+   <select multiple> renders as an always-open listbox rather than a
+   closed dropdown and needs ctrl/cmd-click most people don't know about,
+   which doesn't fit in this filter row. */
+
+.multi-select {
+  position: relative;
+  flex: 1;
+  min-width: 150px;
+}
+
+.multi-select-trigger {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 0.84rem;
+  background: var(--bg);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.multi-select-trigger:hover { border-color: var(--accent); }
+.multi-select-trigger-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.multi-select-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: var(--shadow-md);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 20;
+  padding: 4px 0;
+}
+.multi-select-menu.hidden { display: none; }
+
+.multi-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: 0.83rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.multi-select-option:hover { background: var(--bg-subtle); color: var(--ink); }
+.multi-select-option input { accent-color: var(--accent); }
+
+.multi-select-empty {
+  padding: 10px 12px;
+  font-size: 0.8rem;
+  color: var(--muted-light);
+}
 
 /* ---------- Salary / YOE dual-range sliders ---------- */
 
@@ -1094,6 +1181,19 @@ main {
   padding: 0 2px;
 }
 
+.page-jump {
+  margin-left: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  background: var(--bg);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.page-jump:focus { outline: none; border-color: var(--accent); }
+
 /* ---------- Footer ---------- */
 
 footer {
@@ -1199,6 +1299,52 @@ footer {
   max-width: 560px;
 }
 
+.about-body p {
+  font-size: 0.95rem;
+  color: var(--ink-soft);
+  line-height: 1.7;
+  max-width: 640px;
+  margin: 0 0 18px;
+}
+.about-body a { color: var(--accent); text-decoration: none; }
+.about-body a:hover { text-decoration: underline; }
+
+/* Standalone-page form (contact.html) -- same visual language as the
+   modal forms (.modal-content label/input), just not scoped under
+   .modal-content since this page has no modal wrapper around it. */
+.page-form {
+  max-width: 480px;
+}
+.page-form label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin: 16px 0 4px;
+}
+.page-form label:first-child { margin-top: 0; }
+.page-form input,
+.page-form select,
+.page-form textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  color: var(--ink);
+  background: var(--bg-subtle);
+}
+.page-form textarea { resize: vertical; }
+.page-form input:focus,
+.page-form select:focus,
+.page-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg);
+}
+.page-form .btn-primary { margin-top: 18px; padding: 10px 24px; }
+
 .faq-list { display: flex; flex-direction: column; gap: 8px; }
 
 .faq-page-list .faq-item {
@@ -1223,7 +1369,7 @@ footer {
   margin: 0;
 }
 
-/* ---------- AI Search button (circular, stacked above Search) ---------- */
+/* ---------- AI Search button (single pill, stacked above Search) ---------- */
 
 .search-btn-stack {
   display: flex;
@@ -1232,35 +1378,31 @@ footer {
   gap: 5px;
 }
 
-.ai-search-badge {
-  background: var(--maroon);
-  color: white;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  padding: 2px 8px;
-  border-radius: 10px;
-  white-space: nowrap;
-}
-
-.ai-search-circle {
-  width: 38px;
-  height: 38px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: var(--maroon);
-  color: white;
-  border: none;
+/* One combined element (icon + "AI Search" label) instead of a separate
+   text badge sitting on top of a bare icon circle -- those used to be two
+   stacked pieces that read as unrelated at a glance. */
+.ai-search-pill {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 13px;
+  background: var(--maroon);
+  color: white;
+  border: none;
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
   transition: background 0.15s, transform 0.1s;
 }
-.ai-search-circle:hover { background: var(--maroon-dark); }
-.ai-search-circle:active { transform: scale(0.94); }
+.ai-search-pill:hover { background: var(--maroon-dark); }
+.ai-search-pill:active { transform: scale(0.96); }
 
 /* .btn-primary normally gets its height from stretching against
    .query-row's other flex item (the input) -- see the base .btn-primary
@@ -1327,6 +1469,15 @@ footer {
 }
 .assistant-chip:hover { background: var(--accent); color: white; }
 
+/* Toggled/selected state for multi-pick wizard chips (department, added
+   locations) -- filled solid rather than the default outline look, so a
+   picked value stays visually distinct without hovering over it. */
+.assistant-chip-active {
+  background: var(--accent);
+  color: white;
+}
+.assistant-chip-active:hover { background: var(--maroon-dark); }
+
 .wizard-inline-select {
   width: 100%;
   border: 1px solid var(--border);
@@ -1337,6 +1488,14 @@ footer {
   background: var(--bg-subtle);
   color: var(--ink);
   margin-bottom: 6px;
+}
+
+/* Currency picker sits inline with the salary bucket chips rather than
+   taking a full row like the department/commitment/days dropdowns do. */
+.wizard-currency-select {
+  width: auto;
+  min-width: 84px;
+  margin-bottom: 0;
 }
 
 .assistant-form {

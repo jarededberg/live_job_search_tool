@@ -2,6 +2,7 @@
 db.py — tiny SQLite layer for the job cache.
 """
 
+import re
 import sqlite3
 import os
 import json
@@ -307,7 +308,7 @@ def _match_info(job, title_terms, skill_terms):
 
 
 def search_jobs(query="", location="", locations=None, location_groups=None, days=None,
-                 department="", commitment="", sort=DEFAULT_SORT,
+                 department="", departments=None, commitment="", sort=DEFAULT_SORT,
                  resume_title_terms=None, resume_skill_terms=None, resume_us_based=False,
                  resume_metro_terms=None,
                  salary_min=None, salary_max=None, yoe_min=None, yoe_max=None,
@@ -323,6 +324,12 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     matches if its location contains ANY of them. `location` (singular) is
     kept for backward compatibility as a single substring filter; if both
     are given, `locations` wins.
+
+    `departments`, if given, is a list of exact department values
+    (multi-select, same OR-across-the-list convention as `locations`) — a
+    job matches if its department is ANY of them. `department` (singular)
+    is kept for backward compatibility as a single-value filter; if both
+    are given, `departments` wins.
 
     `location_groups`, if given, is a list of canonical group keys from
     location_groups.py (e.g. "remote_us") — a job matches if its raw
@@ -421,9 +428,12 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         where.append("(posted >= ? OR posted IS NULL OR posted = '')")
         params.append(cutoff)
 
-    if department.strip():
-        where.append("department = ?")
-        params.append(department.strip())
+    dept_list = [d.strip() for d in (departments or []) if d and d.strip()]
+    if not dept_list and department.strip():
+        dept_list = [department.strip()]
+    if dept_list:
+        where.append("(" + " OR ".join("department = ?" for _ in dept_list) + ")")
+        params.extend(dept_list)
 
     if commitment.strip():
         where.append("commitment = ?")
@@ -654,16 +664,35 @@ def years_bounds():
     return 0, YOE_SLIDER_MAX
 
 
+# Some scraped "department" values are cohort/program tags, not real
+# departments -- e.g. "EMEA '24"/"EMEA '25" (an intern/grad program class
+# year, not a department a candidate would ever filter by), flagged by a
+# real user as confusing to see in the department picker. Matched by an
+# apostrophe immediately followed by a 2-digit year rather than a fixed
+# list of company-specific program names, since new ones show up as more
+# companies get scraped and a hardcoded blocklist would just keep missing
+# the next one.
+_JUNK_DEPARTMENT_RE = re.compile(r"'\d{2}\b")
+
+
 def distinct_facet_values(column, limit=30):
-    """Top N non-empty distinct values for a facet column, ordered by frequency."""
+    """Top N non-empty distinct values for a facet column, ordered by
+    frequency. For `department`, over-fetches (2x `limit`) before filtering
+    out junk cohort-tag values (see _JUNK_DEPARTMENT_RE) so real,
+    lower-frequency departments still fill out the list instead of the
+    filter just shrinking it below `limit`."""
     assert column in ("department", "commitment")
+    fetch_limit = limit * 2 if column == "department" else limit
     with conn_ctx() as conn:
         rows = conn.execute(
             f"SELECT {column} AS v, COUNT(*) AS c FROM jobs WHERE {column} != '' "
             f"GROUP BY {column} ORDER BY c DESC LIMIT ?",
-            (limit,),
+            (fetch_limit,),
         ).fetchall()
-        return [row["v"] for row in rows]
+        values = [row["v"] for row in rows]
+        if column == "department":
+            values = [v for v in values if v and not _JUNK_DEPARTMENT_RE.search(v)]
+        return values[:limit]
 
 
 def distinct_locations(prefix="", limit=20):

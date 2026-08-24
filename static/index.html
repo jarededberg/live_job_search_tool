@@ -11,7 +11,7 @@
      change. Without it, browsers that already cached the old files can
      keep running old JS against new HTML after a deploy (mismatched IDs,
      "nothing happens" clicks) until the cache separately expires. -->
-<link rel="stylesheet" href="style.css?v=4" />
+<link rel="stylesheet" href="style.css?v=5" />
 </head>
 <body>
   <nav class="topnav">
@@ -22,8 +22,9 @@
       </div>
       <div class="topnav-right">
         <nav class="nav-links">
+          <a href="/about">About</a>
           <a href="/faq">FAQ</a>
-          <a href="#" id="nav-contact-link">Contact</a>
+          <a href="/contact">Contact</a>
         </nav>
         <div class="auth-area" id="auth-area"></div>
         <a class="brand-link" href="https://www.linkedin.com/in/jared-edberg" target="_blank" rel="noopener">
@@ -42,8 +43,12 @@
 
   <header class="hero">
     <div class="hero-inner">
+      <div class="hero-badges">
+        <span class="hero-badge">✦ AI-powered search</span>
+        <span class="hero-badge">⚡ Easy-apply only</span>
+      </div>
       <h1>Search 4,300+ company job boards <em>directly</em></h1>
-      <p class="tagline">Pulled straight from Greenhouse, Lever, and Ashby career pages — refreshed automatically, no stale listings, no job-board middleman.</p>
+      <p class="tagline">Pulled straight from Greenhouse, Lever, and Ashby career pages — never Workday, iCIMS, or Oracle. No re-typing your resume into a new account for the twentieth time, no stale listings, no job-board middleman.</p>
     </div>
   </header>
 
@@ -58,9 +63,9 @@
             <button type="button" id="syntax-help-btn" aria-label="Search syntax help">Syntax</button>
           </div>
           <div class="search-btn-stack">
-            <span class="ai-search-badge">AI Search</span>
-            <button type="button" class="ai-search-circle" id="ai-search-btn" title="AI Search" aria-label="AI Search">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.8 2.8M14.9 14.9l2.8 2.8M6.3 17.7l2.8-2.8M14.9 9.1l2.8-2.8"/></svg>
+            <button type="button" class="ai-search-pill" id="ai-search-btn" title="AI Search" aria-label="AI Search">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.8 2.8M14.9 14.9l2.8 2.8M6.3 17.7l2.8-2.8M14.9 9.1l2.8-2.8"/></svg>
+              <span>AI Search</span>
             </button>
             <button type="submit" class="btn-primary">Search</button>
           </div>
@@ -85,9 +90,10 @@
             <option value="30" selected>Last 30 days</option>
             <option value="90">Last 90 days</option>
           </select>
-          <select id="department">
-            <option value="">Any department</option>
-          </select>
+          <div class="multi-select" id="department-select">
+            <button type="button" class="multi-select-trigger" id="department-trigger">Any department</button>
+            <div class="multi-select-menu hidden" id="department-menu"></div>
+          </div>
           <select id="commitment">
             <option value="">Any commitment</option>
           </select>
@@ -178,6 +184,6 @@
        happens if /api/auth-config returns a site key. See README's "User
        accounts" section. -->
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

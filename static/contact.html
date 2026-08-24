@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Contact — Skip The Boards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=5" />
+</head>
+<body>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <div class="brand">
+        <a href="/" style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;">
+          <span class="brand-mark">◆</span>
+          <span class="brand-name">Skip The Boards</span>
+        </a>
+      </div>
+      <div class="topnav-right">
+        <nav class="nav-links">
+          <a href="/about">About</a>
+          <a href="/faq">FAQ</a>
+          <a href="/contact">Contact</a>
+        </nav>
+        <a class="brand-link" href="/">← Back to search</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="content-page">
+    <h1>Get in touch</h1>
+    <p class="content-page-intro">
+      Questions, a company job board to add, a role that's missing or broken, a bug — all of it lands
+      in the same inbox and gets read by an actual person (Jared).
+    </p>
+
+    <div id="contact-page-body">Loading…</div>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p class="footer-byline">
+        <strong>Jared Edberg</strong> · <a href="https://www.linkedin.com/in/jared-edberg" target="_blank" rel="noopener">LinkedIn ↗</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+    function escapeAttr(s) { return escapeHtml(s); }
+
+    async function init() {
+      const body = document.getElementById("contact-page-body");
+      let contactEnabled = false;
+      let contactEmail = "";
+      try {
+        const res = await fetch("/api/site-config");
+        const data = await res.json();
+        contactEnabled = Boolean(data.contact_enabled);
+        contactEmail = data.contact_email || "";
+      } catch (e) {
+        /* fall through to the mailto fallback below */
+      }
+
+      if (!contactEnabled) {
+        body.innerHTML = `
+          <p class="modal-plain-text">
+            Reach me directly at <a href="mailto:${escapeAttr(contactEmail || "jarededberg@gmail.com")}">${escapeHtml(contactEmail || "jarededberg@gmail.com")}</a>.
+          </p>
+        `;
+        return;
+      }
+
+      body.innerHTML = `
+        <form id="contact-form" class="page-form">
+          <label for="contact-reason">What's this about?</label>
+          <select id="contact-reason">
+            <option value="General question">General question</option>
+            <option value="Add my company's job board">Add my company's job board to the search</option>
+            <option value="Add a specific role">Flag a specific role that's missing or wrong</option>
+            <option value="Bug report">Bug report</option>
+            <option value="Other">Other</option>
+          </select>
+          <label for="contact-name">Name</label>
+          <input type="text" id="contact-name" required maxlength="120" autocomplete="name" />
+          <label for="contact-email">Email</label>
+          <input type="email" id="contact-email" required autocomplete="email" />
+          <label for="contact-message">Message</label>
+          <textarea id="contact-message" required maxlength="4000" rows="6"
+            placeholder="Tell me a bit more -- e.g. company name and career page URL, or the role/link in question."></textarea>
+          <div class="auth-error" id="contact-error"></div>
+          <div class="auth-success hidden" id="contact-success"></div>
+          <button type="submit" class="btn-primary">Send</button>
+        </form>
+      `;
+
+      document.getElementById("contact-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const reason = document.getElementById("contact-reason").value;
+        const name = document.getElementById("contact-name").value.trim();
+        const email = document.getElementById("contact-email").value.trim();
+        const message = document.getElementById("contact-message").value.trim();
+        const errorEl = document.getElementById("contact-error");
+        const successEl = document.getElementById("contact-success");
+        const submitBtn = form.querySelector("button[type=submit]");
+        errorEl.textContent = "";
+        submitBtn.disabled = true;
+        try {
+          const res = await fetch("/api/contact", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason, name, email, message }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            errorEl.textContent = data.message || "Something went wrong. Try again.";
+            submitBtn.disabled = false;
+            return;
+          }
+          successEl.textContent = data.message || "Thanks -- message sent.";
+          successEl.classList.remove("hidden");
+          form.querySelectorAll("input, select, textarea").forEach((el) => { el.disabled = true; });
+          submitBtn.textContent = "Sent";
+        } catch (err) {
+          errorEl.textContent = "Something went wrong. Try again.";
+          submitBtn.disabled = false;
+        }
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>

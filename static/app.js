@@ -3,7 +3,9 @@ const resultsEl = document.getElementById("results");
 const statusLine = document.getElementById("status-line");
 const paginationEl = document.getElementById("pagination");
 const footerStatus = document.getElementById("footer-status");
-const departmentSelect = document.getElementById("department");
+const departmentSelectEl = document.getElementById("department-select");
+const departmentTrigger = document.getElementById("department-trigger");
+const departmentMenu = document.getElementById("department-menu");
 const commitmentSelect = document.getElementById("commitment");
 const sortSelect = document.getElementById("sort");
 const locationInput = document.getElementById("location-input");
@@ -34,6 +36,16 @@ let yoeRange = null; // { lo, hi, min, max }
 // scraped-location substring, or { type: "group", value: "remote_us",
 // label: "Remote (US)" } for a canonical group chip (see location_groups.py)
 let selectedLocations = [];
+// Department is multi-select (a real ATS "department" facet is wonky
+// enough -- inconsistent naming, occasional junk cohort-tag values, see
+// db.py's _JUNK_DEPARTMENT_RE -- that limiting a candidate to picking just
+// one was a real complaint). Plain array of the exact department strings
+// as returned by /api/facets, checked against by the custom dropdown menu
+// below (a native <select multiple> was ruled out -- it renders as an
+// always-expanded listbox rather than a closed dropdown, and requires
+// ctrl/cmd-click that most people don't know about).
+let selectedDepartments = [];
+let departmentOptions = []; // raw list from /api/facets, shared by the main-page menu and the wizard's department step
 let logoCache = {};
 let logoCacheLoaded = false;
 let locationGroupList = []; // [{key, label}] fetched from /api/location-groups
@@ -72,11 +84,55 @@ function qs(params) {
     .join("&");
 }
 
+// ---- department multi-select ----
+
+function departmentTriggerLabel() {
+  if (!selectedDepartments.length) return "Any department";
+  if (selectedDepartments.length === 1) return selectedDepartments[0];
+  return `${selectedDepartments.length} departments`;
+}
+
+function renderDepartmentMenu() {
+  departmentTrigger.textContent = departmentTriggerLabel();
+  departmentTrigger.classList.toggle("multi-select-trigger-active", selectedDepartments.length > 0);
+  if (!departmentOptions.length) {
+    departmentMenu.innerHTML = `<div class="multi-select-empty">No department data yet</div>`;
+    return;
+  }
+  departmentMenu.innerHTML = departmentOptions
+    .map((dept) => {
+      const checked = selectedDepartments.includes(dept) ? "checked" : "";
+      return `<label class="multi-select-option">
+        <input type="checkbox" value="${escapeAttr(dept)}" ${checked} />
+        <span>${escapeHtml(dept)}</span>
+      </label>`;
+    })
+    .join("");
+  departmentMenu.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      if (cb.checked) {
+        if (!selectedDepartments.includes(cb.value)) selectedDepartments.push(cb.value);
+      } else {
+        selectedDepartments = selectedDepartments.filter((d) => d !== cb.value);
+      }
+      departmentTrigger.textContent = departmentTriggerLabel();
+      departmentTrigger.classList.toggle("multi-select-trigger-active", selectedDepartments.length > 0);
+    });
+  });
+}
+
+departmentTrigger.addEventListener("click", () => {
+  departmentMenu.classList.toggle("hidden");
+});
+
+document.addEventListener("click", (e) => {
+  if (!departmentSelectEl.contains(e.target)) departmentMenu.classList.add("hidden");
+});
+
 async function search(page = 1) {
   currentPage = page;
   const q = document.getElementById("q").value.trim();
   const days = document.getElementById("days").value;
-  const department = departmentSelect.value;
   const commitment = commitmentSelect.value;
   const sort = sortSelect.value;
 
@@ -85,13 +141,14 @@ async function search(page = 1) {
   paginationEl.innerHTML = "";
 
   const params = new URLSearchParams();
-  qs({ q, days, department, commitment, sort, page, per_page: 50 })
+  qs({ q, days, commitment, sort, page, per_page: 50 })
     .split("&")
     .filter(Boolean)
     .forEach((pair) => {
       const [k, v] = pair.split("=");
       params.append(decodeURIComponent(k), decodeURIComponent(v));
     });
+  selectedDepartments.forEach((d) => params.append("department", d));
   selectedLocations.forEach((loc) => {
     params.append(loc.type === "group" ? "location_group" : "location", loc.value);
   });
@@ -170,10 +227,21 @@ function renderResults(data) {
         : `<button class="page-num${n === data.page ? " active" : ""}" ${n === data.page ? "disabled" : ""} onclick="search(${n})">${n}</button>`
     )
     .join("");
+  // A jump-to-page dropdown alongside the arrows/numbers -- handy once
+  // there are more pages than the windowed number list shows at once
+  // (see pageNumbers()'s "…" collapsing) and someone wants page 40
+  // without clicking Next 39 times.
+  const jumpOptionsHtml = Array.from({ length: data.pages }, (_, i) => i + 1)
+    .map((n) => `<option value="${n}" ${n === data.page ? "selected" : ""}>Page ${n}</option>`)
+    .join("");
+  const jumpHtml = data.pages > 1
+    ? `<select class="page-jump" aria-label="Jump to page" onchange="search(Number(this.value))">${jumpOptionsHtml}</select>`
+    : "";
   paginationEl.innerHTML = `
     <button ${prevDisabled} onclick="search(${data.page - 1})">← Prev</button>
     <div class="page-numbers">${numbersHtml}</div>
     <button ${nextDisabled} onclick="search(${data.page + 1})">Next →</button>
+    ${jumpHtml}
   `;
 }
 
@@ -357,7 +425,8 @@ async function loadFacets() {
   try {
     const res = await fetch("/api/facets");
     const data = await res.json();
-    fillSelect(departmentSelect, data.departments, "Any department");
+    departmentOptions = data.departments || [];
+    renderDepartmentMenu();
     fillSelect(commitmentSelect, data.commitments, "Any commitment");
     if (data.salary_bounds && data.yoe_bounds) {
       initRangeSliders(data.salary_bounds, data.yoe_bounds);
@@ -1127,7 +1196,7 @@ function currentSearchParams() {
   const params = {
     q: document.getElementById("q").value.trim(),
     days: document.getElementById("days").value,
-    department: departmentSelect.value,
+    departments: selectedDepartments.slice(),
     commitment: commitmentSelect.value,
     sort: sortSelect.value === "match" ? "newest" : sortSelect.value,
     locations: selectedLocations,
@@ -1146,7 +1215,11 @@ function currentSearchParams() {
 function loadSavedSearch(params) {
   document.getElementById("q").value = params.q || "";
   document.getElementById("days").value = params.days || "";
-  if (params.department) departmentSelect.value = params.department;
+  // `departments` (array) is the current shape -- `department` (singular
+  // string) is kept for backward compatibility with searches saved before
+  // department became multi-select.
+  selectedDepartments = params.departments || (params.department ? [params.department] : []);
+  renderDepartmentMenu();
   if (params.commitment) commitmentSelect.value = params.commitment;
   sortSelect.value = params.sort || "newest";
   selectedLocations = params.locations || [];
@@ -1310,16 +1383,15 @@ function appliedJobRow(job) {
 // server), not committed to the repo -- same reasoning as
 // turnstileSiteKey. A deployment with it unset just never adds the
 // script tags below, and this whole thing is a silent no-op.
-let contactEnabled = false;
-let contactEmail = "";
-
+//
+// Contact is now its own page (static/contact.html, same treatment as
+// /faq) rather than a modal -- it fetches /api/site-config itself to
+// decide form-vs-mailto, so this page no longer needs contact_enabled/
+// contact_email at all.
 async function loadSiteConfig() {
   try {
     const res = await fetch("/api/site-config");
     const data = await res.json();
-
-    contactEnabled = Boolean(data.contact_enabled);
-    contactEmail = data.contact_email || "";
 
     const gaId = data.ga_measurement_id;
     if (!gaId) return;
@@ -1335,100 +1407,9 @@ async function loadSiteConfig() {
     gtag("js", new Date());
     gtag("config", gaId);
   } catch (e) {
-    // Analytics/contact are nice-to-haves -- fail silent, same as every
-    // other config fetch here. Their respective UI stays hidden/disabled,
-    // matching the "unset env var" state. (The search wizard below needs
-    // no config at all -- it's purely client-side.)
+    // Analytics is a nice-to-have -- fail silent, same as every other
+    // config fetch here.
   }
-}
-
-// ---- contact form ----
-
-function openContactModal() {
-  if (!contactEnabled) {
-    // No email backend configured on this deployment -- skip the form
-    // entirely and just hand over a mailto: link rather than showing a
-    // form that has nowhere to actually send its submission.
-    openModal(`
-      <h2 class="modal-title">Contact</h2>
-      <p class="modal-plain-text">
-        Reach me directly at <a href="mailto:${escapeAttr(contactEmail)}">${escapeHtml(contactEmail)}</a>.
-      </p>
-    `);
-    return;
-  }
-  openModal(`
-    <h2 class="modal-title">Contact</h2>
-    <form id="contact-form">
-      <label for="contact-reason">What's this about?</label>
-      <select id="contact-reason" class="wizard-inline-select">
-        <option value="General question">General question</option>
-        <option value="Add my company's job board">Add my company's job board to the search</option>
-        <option value="Add a specific role">Flag a specific role that's missing or wrong</option>
-        <option value="Bug report">Bug report</option>
-        <option value="Other">Other</option>
-      </select>
-      <label for="contact-name">Name</label>
-      <input type="text" id="contact-name" required maxlength="120" autocomplete="name" />
-      <label for="contact-email">Email</label>
-      <input type="email" id="contact-email" required autocomplete="email" />
-      <label for="contact-message">Message</label>
-      <textarea id="contact-message" required maxlength="4000" rows="5"
-        placeholder="Tell me a bit more -- e.g. company name and career page URL, or the role/link in question."></textarea>
-      <div class="auth-error" id="contact-error"></div>
-      <div class="auth-success hidden" id="contact-success"></div>
-      <button type="submit" class="btn-primary">Send</button>
-    </form>
-  `);
-  document.getElementById("contact-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const form = e.target;
-    const reason = document.getElementById("contact-reason").value;
-    const name = document.getElementById("contact-name").value.trim();
-    const email = document.getElementById("contact-email").value.trim();
-    const message = document.getElementById("contact-message").value.trim();
-    const errorEl = document.getElementById("contact-error");
-    const successEl = document.getElementById("contact-success");
-    const submitBtn = form.querySelector("button[type=submit]");
-    errorEl.textContent = "";
-    submitBtn.disabled = true;
-    try {
-      const res = await fetch("/api/contact", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason, name, email, message }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        errorEl.textContent = data.message || "Something went wrong. Try again.";
-        submitBtn.disabled = false;
-        return;
-      }
-      successEl.textContent = data.message || "Thanks -- message sent.";
-      successEl.classList.remove("hidden");
-      form.querySelectorAll("input, textarea").forEach((el) => { el.disabled = true; });
-      submitBtn.textContent = "Sent";
-    } catch (err) {
-      errorEl.textContent = "Something went wrong. Try again.";
-      submitBtn.disabled = false;
-    }
-  });
-}
-
-document.getElementById("nav-contact-link").addEventListener("click", (e) => {
-  e.preventDefault();
-  openContactModal();
-});
-
-// FAQ now lives at its own /faq page (static/faq.html) instead of a modal
-// -- see app.py's faq_page() route. That page's own "Contact" link can't
-// reach openContactModal() directly (different page load), so it
-// redirects here with ?contact=1, and the init sequence below checks for
-// that flag and opens the modal automatically once this page is ready.
-function checkForContactFlag() {
-  if (new URLSearchParams(window.location.search).get("contact") !== "1") return;
-  openContactModal();
-  history.replaceState({}, "", window.location.pathname);
 }
 
 // ---- AI search assistant ----
@@ -1457,18 +1438,12 @@ function resetWizardState() {
   wizard = {
     step: "source",
     query: "",
+    currency: "USD",
     salaryMin: undefined,
     yoeMin: undefined,
-    department: "",
+    departments: [],
     commitment: "",
     days: "",
-    locationText: "",
-    useRemoteUs: false,
-    // Set while a number-entry step (salary/YOE) is active -- see
-    // wizardAskNumber()/finishNumberStep() -- and cleared once answered.
-    numericField: null,
-    numericNext: null,
-    numericFormat: null,
   };
 }
 
@@ -1485,9 +1460,9 @@ function wizardBotSay(text) { addAssistantMessage("assistant", text); }
 function wizardUserSay(text) { addAssistantMessage("user", text); }
 
 // Renders a row of button choices under the transcript and disables free
-// text entry until a step re-enables it (awaiting_terms/awaiting_location
-// below) -- keeps the input from looking usable when the step expects a
-// button click instead.
+// text entry until a step re-enables it (awaiting_terms, or salary/yoe/
+// location's own render*Step() functions below) -- keeps the input from
+// looking usable when the step expects a button click instead.
 function setWizardChoices(options) {
   assistantChoices.innerHTML = "";
   assistantInput.disabled = true;
@@ -1512,10 +1487,11 @@ function setWizardChoices(options) {
 }
 
 // Clones the live <option> list from an existing filter <select> (so the
-// wizard's department/commitment/recency choices always match whatever
-// values actually exist in the current dataset) into an inline dropdown
-// plus a Continue button, rather than hand-maintaining a second list of
-// department names that could drift out of sync with the real facets.
+// wizard's choices always match whatever values actually exist in the
+// current dataset) into an inline dropdown plus a Continue button. Now
+// only used for wizardAskDays() -- department became its own multi-select
+// toggle-chip step (renderWizardDepartmentStep()) and commitment grew
+// quick bubbles alongside a clone of this same pattern (wizardAskCommitment()).
 function wizardAskFromSelect(promptText, sourceSelect, onApply, nextFn) {
   wizardBotSay(promptText);
   assistantChoices.innerHTML = "";
@@ -1544,23 +1520,70 @@ function wizardAskFromSelect(promptText, sourceSelect, onApply, nextFn) {
   assistantChoices.classList.remove("hidden");
 }
 
-// A real number input, not preset chips -- salary in particular used to
-// offer 3 auto-computed presets (25th/50th/75th percentile of the live
-// salary_bounds()), which broke badly whenever the underlying data had a
-// high outlier: the lowest of the 3 presets could itself land at an
-// unreasonably high number (reported: "$250k+" as the LOWEST option),
-// with no way to ask for anything lower. A plain number box sidesteps
-// the whole problem -- no bounds computation, no outlier sensitivity,
-// and it's what people actually expect to type into a salary/experience
-// filter. Skip is still one click away for anyone who doesn't care.
-function wizardAskNumber(promptText, placeholder, field, formatFn, nextFn) {
-  wizardBotSay(promptText);
-  wizard.step = "awaiting_number";
-  wizard.numericField = field;
-  wizard.numericNext = nextFn;
-  wizard.numericFormat = formatFn;
+// Currencies are for the person's own reference, not converted -- the
+// dataset doesn't track a per-posting currency (salary_min/max in db.py
+// are plain numbers), so picking EUR/GBP/CAD here just changes the symbol
+// shown, not what actually gets compared against the (effectively
+// USD-denominated) listing data. Called out explicitly in the prompt text
+// below so this isn't a silent trap.
+const CURRENCY_OPTIONS = [
+  { code: "USD", symbol: "$" },
+  { code: "EUR", symbol: "€" },
+  { code: "GBP", symbol: "£" },
+  { code: "CAD", symbol: "C$" },
+];
+function currencySymbol(code) {
+  return (CURRENCY_OPTIONS.find((c) => c.code === code) || CURRENCY_OPTIONS[0]).symbol;
+}
+function formatAmountShort(n) {
+  return `${Math.round(n / 1000)}k`;
+}
 
+// Fixed bucket values, not computed from the live salary_bounds() range --
+// this used to be 3 auto-computed presets (25th/50th/75th percentile of
+// the data), which broke badly whenever the data had a high outlier: the
+// LOWEST of the 3 presets could itself land at an unreasonably high number
+// ("$250k+" reported as the lowest option, with no way to ask for
+// anything lower). Fixed values sidestep that entirely -- plus the number
+// box below still covers anyone these don't fit.
+const SALARY_BUCKETS = [100000, 150000, 200000, 250000];
+
+function wizardAskSalary() {
+  wizard.step = "salary";
+  wizardBotSay("What's the minimum salary you're looking for? Pick a range, type your own, or skip.");
+  renderWizardSalaryStep();
+}
+
+function renderWizardSalaryStep() {
   assistantChoices.innerHTML = "";
+
+  const currencySelect = document.createElement("select");
+  currencySelect.className = "wizard-inline-select wizard-currency-select";
+  currencySelect.setAttribute("aria-label", "Currency");
+  currencySelect.innerHTML = CURRENCY_OPTIONS
+    .map((c) => `<option value="${c.code}" ${c.code === wizard.currency ? "selected" : ""}>${c.code}</option>`)
+    .join("");
+  currencySelect.addEventListener("change", () => {
+    wizard.currency = currencySelect.value;
+    renderWizardSalaryStep(); // redraw so bucket labels pick up the new symbol
+  });
+  assistantChoices.appendChild(currencySelect);
+
+  SALARY_BUCKETS.forEach((amt) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "assistant-chip";
+    btn.textContent = `${currencySymbol(wizard.currency)}${formatAmountShort(amt)}+`;
+    btn.addEventListener("click", () => {
+      wizard.salaryMin = amt;
+      wizardUserSay(`${currencySymbol(wizard.currency)}${formatAmountShort(amt)}+ (${wizard.currency})`);
+      assistantChoices.classList.add("hidden");
+      assistantChoices.innerHTML = "";
+      wizardAskYoe();
+    });
+    assistantChoices.appendChild(btn);
+  });
+
   const skipBtn = document.createElement("button");
   skipBtn.type = "button";
   skipBtn.className = "assistant-chip";
@@ -1569,7 +1592,7 @@ function wizardAskNumber(promptText, placeholder, field, formatFn, nextFn) {
     wizardUserSay("Skip");
     assistantChoices.classList.add("hidden");
     assistantChoices.innerHTML = "";
-    finishNumberStep(null);
+    wizardAskYoe();
   });
   assistantChoices.appendChild(skipBtn);
   assistantChoices.classList.remove("hidden");
@@ -1578,21 +1601,60 @@ function wizardAskNumber(promptText, placeholder, field, formatFn, nextFn) {
   assistantInput.type = "number";
   assistantInput.min = "0";
   assistantInput.value = "";
-  assistantInput.placeholder = placeholder;
+  assistantInput.placeholder = "Or type your own amount…";
   assistantInput.focus();
 }
 
-function finishNumberStep(n) {
-  const { numericField, numericNext, numericFormat } = wizard;
-  assistantInput.type = "text"; // restore for later free-text steps (query/city)
-  if (n !== null && !Number.isNaN(n) && n > 0) {
-    wizard[numericField] = n;
-    wizardUserSay(numericFormat(n));
-  }
-  wizard.numericField = null;
-  wizard.numericNext = null;
-  wizard.numericFormat = null;
-  numericNext();
+const YOE_BUCKETS = [
+  { label: "Entry-level (0+)", value: 0 },
+  { label: "Mid-level (3+)", value: 3 },
+  { label: "Senior (6+)", value: 6 },
+  { label: "Staff/Principal (10+)", value: 10 },
+];
+
+function wizardAskYoe() {
+  wizard.step = "yoe";
+  wizardBotSay("Minimum years of experience? Pick a level, type your own, or skip.");
+  renderWizardYoeStep();
+}
+
+function renderWizardYoeStep() {
+  assistantChoices.innerHTML = "";
+
+  YOE_BUCKETS.forEach((b) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "assistant-chip";
+    btn.textContent = b.label;
+    btn.addEventListener("click", () => {
+      wizard.yoeMin = b.value;
+      wizardUserSay(`${b.value}+ yrs`);
+      assistantChoices.classList.add("hidden");
+      assistantChoices.innerHTML = "";
+      wizardAskDepartment();
+    });
+    assistantChoices.appendChild(btn);
+  });
+
+  const skipBtn = document.createElement("button");
+  skipBtn.type = "button";
+  skipBtn.className = "assistant-chip";
+  skipBtn.textContent = "Skip";
+  skipBtn.addEventListener("click", () => {
+    wizardUserSay("Skip");
+    assistantChoices.classList.add("hidden");
+    assistantChoices.innerHTML = "";
+    wizardAskDepartment();
+  });
+  assistantChoices.appendChild(skipBtn);
+  assistantChoices.classList.remove("hidden");
+
+  assistantInput.disabled = false;
+  assistantInput.type = "number";
+  assistantInput.min = "0";
+  assistantInput.value = "";
+  assistantInput.placeholder = "Or type your own number…";
+  assistantInput.focus();
 }
 
 function wizardAskSource() {
@@ -1617,56 +1679,166 @@ function wizardAskSource() {
   ]);
 }
 
-function wizardAskSalary() {
-  wizard.step = "salary";
-  wizardAskNumber(
-    "What's the minimum salary you're looking for? Type a number, or skip.",
-    "e.g. 120000",
-    "salaryMin",
-    (n) => `${formatSalaryShort(n)}+`,
-    wizardAskYoe,
-  );
-}
-
-function wizardAskYoe() {
-  wizard.step = "yoe";
-  wizardAskNumber(
-    "Minimum years of experience?",
-    "e.g. 5",
-    "yoeMin",
-    (n) => `${n}+ yrs`,
-    wizardAskDepartment,
-  );
-}
-
+// Multi-select toggle chips, sourced from departmentOptions (the same
+// cleaned, frequency-ordered list the main page's department menu uses --
+// see loadFacets()/renderDepartmentMenu()) rather than a single-pick
+// dropdown, since limiting a candidate to one department was a real
+// complaint. Clicking a chip toggles it on/off; Continue moves on with
+// however many (including zero) are selected.
 function wizardAskDepartment() {
   wizard.step = "department";
-  wizardAskFromSelect("Any particular department?", departmentSelect, (val) => { wizard.department = val; }, wizardAskCommitment);
+  wizardBotSay("Any particular department? Pick as many as you'd like, then hit Continue.");
+  renderWizardDepartmentStep();
 }
 
+function renderWizardDepartmentStep() {
+  assistantChoices.innerHTML = "";
+  assistantInput.disabled = true;
+  assistantInput.placeholder = "Use the buttons above ↑";
+
+  departmentOptions.forEach((dept) => {
+    const active = wizard.departments.includes(dept);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "assistant-chip" + (active ? " assistant-chip-active" : "");
+    btn.textContent = active ? `✓ ${dept}` : dept;
+    btn.addEventListener("click", () => {
+      wizard.departments = active
+        ? wizard.departments.filter((d) => d !== dept)
+        : [...wizard.departments, dept];
+      renderWizardDepartmentStep();
+    });
+    assistantChoices.appendChild(btn);
+  });
+
+  const continueBtn = document.createElement("button");
+  continueBtn.type = "button";
+  continueBtn.className = "assistant-chip";
+  continueBtn.textContent = "Continue";
+  continueBtn.addEventListener("click", () => {
+    wizardUserSay(wizard.departments.length ? wizard.departments.join(", ") : "Skip");
+    assistantChoices.classList.add("hidden");
+    assistantChoices.innerHTML = "";
+    wizardAskCommitment();
+  });
+  assistantChoices.appendChild(continueBtn);
+  assistantChoices.classList.remove("hidden");
+}
+
+// Quick one-click bubbles for the live commitment values (frequency-
+// ordered, same as the main page's #commitment select) PLUS the full
+// dropdown+Continue underneath for anything not worth its own bubble --
+// either path advances the step.
 function wizardAskCommitment() {
   wizard.step = "commitment";
-  wizardAskFromSelect("Full-time, contract, something else?", commitmentSelect, (val) => { wizard.commitment = val; }, wizardAskLocation);
+  wizardBotSay("Full-time, contract, something else?");
+  assistantChoices.innerHTML = "";
+  assistantInput.disabled = true;
+  assistantInput.placeholder = "Use the buttons above ↑";
+
+  Array.from(commitmentSelect.options)
+    .filter((o) => o.value)
+    .slice(0, 6)
+    .forEach((opt) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "assistant-chip";
+      btn.textContent = opt.text;
+      btn.addEventListener("click", () => {
+        wizardUserSay(opt.text);
+        wizard.commitment = opt.value;
+        assistantChoices.classList.add("hidden");
+        assistantChoices.innerHTML = "";
+        wizardAskLocation();
+      });
+      assistantChoices.appendChild(btn);
+    });
+
+  const select = document.createElement("select");
+  select.className = "wizard-inline-select";
+  select.innerHTML = commitmentSelect.innerHTML;
+  const continueBtn = document.createElement("button");
+  continueBtn.type = "button";
+  continueBtn.className = "assistant-chip";
+  continueBtn.textContent = "Continue";
+  continueBtn.addEventListener("click", () => {
+    const val = select.value;
+    const label = select.options[select.selectedIndex] ? select.options[select.selectedIndex].text : "Skip";
+    wizardUserSay(val ? label : "Skip");
+    wizard.commitment = val;
+    assistantChoices.classList.add("hidden");
+    assistantChoices.innerHTML = "";
+    wizardAskLocation();
+  });
+  assistantChoices.appendChild(select);
+  assistantChoices.appendChild(continueBtn);
+  assistantChoices.classList.remove("hidden");
 }
 
+// Multiple locations per run -- toggle "Remote (US)" and/or type any
+// number of cities (Enter adds one and stays on this step), each pushed
+// straight into the real selectedLocations array as it's picked (same
+// dedup rules pickLocation() uses elsewhere) rather than staged in wizard
+// state and merged in later, so the chips above the main search box
+// update live while the wizard is still open.
 function wizardAskLocation() {
   wizard.step = "location";
-  wizardBotSay("Any location preference?");
-  setWizardChoices([
-    { label: "Remote (US)", onClick: () => { wizardUserSay("Remote (US)"); wizard.useRemoteUs = true; wizardAskDays(); } },
-    {
-      label: "Type a city",
-      onClick: () => {
-        wizardUserSay("Type a city");
-        wizardBotSay("Go ahead — type a city, state, or region below.");
-        wizard.step = "awaiting_location";
-        assistantInput.disabled = false;
-        assistantInput.placeholder = "e.g. Austin, TX";
-        assistantInput.focus();
-      },
-    },
-    { label: "Skip", onClick: () => { wizardUserSay("Skip"); wizardAskDays(); } },
-  ]);
+  wizardBotSay("Any location preferences? Click Remote (US), type a city and press Enter, or both — then hit Done.");
+  renderWizardLocationStep();
+}
+
+function renderWizardLocationStep() {
+  assistantChoices.innerHTML = "";
+
+  const remoteActive = selectedLocations.some((s) => s.type === "group" && s.value === "remote_us");
+  const remoteBtn = document.createElement("button");
+  remoteBtn.type = "button";
+  remoteBtn.className = "assistant-chip" + (remoteActive ? " assistant-chip-active" : "");
+  remoteBtn.textContent = remoteActive ? "✓ Remote (US)" : "Remote (US)";
+  remoteBtn.addEventListener("click", () => {
+    if (remoteActive) {
+      selectedLocations = selectedLocations.filter((s) => !(s.type === "group" && s.value === "remote_us"));
+    } else if (locationGroupLabels.remote_us) {
+      selectedLocations.push({ type: "group", value: "remote_us", label: locationGroupLabels.remote_us });
+    }
+    renderLocationChips();
+    renderWizardLocationStep();
+  });
+  assistantChoices.appendChild(remoteBtn);
+
+  selectedLocations.filter((s) => s.type === "text").forEach((loc) => {
+    const tag = document.createElement("button");
+    tag.type = "button";
+    tag.className = "assistant-chip assistant-chip-active";
+    tag.textContent = `✓ ${loc.label || loc.value}`;
+    tag.addEventListener("click", () => {
+      selectedLocations = selectedLocations.filter((s) => s !== loc);
+      renderLocationChips();
+      renderWizardLocationStep();
+    });
+    assistantChoices.appendChild(tag);
+  });
+
+  const doneBtn = document.createElement("button");
+  doneBtn.type = "button";
+  doneBtn.className = "assistant-chip";
+  doneBtn.textContent = "Done";
+  doneBtn.addEventListener("click", () => {
+    const anyPicked = selectedLocations.some((s) => s.type === "group" && s.value === "remote_us")
+      || selectedLocations.some((s) => s.type === "text");
+    wizardUserSay(anyPicked ? "Done choosing locations" : "Skip");
+    assistantChoices.classList.add("hidden");
+    assistantChoices.innerHTML = "";
+    wizardAskDays();
+  });
+  assistantChoices.appendChild(doneBtn);
+  assistantChoices.classList.remove("hidden");
+
+  assistantInput.disabled = false;
+  assistantInput.type = "text";
+  assistantInput.value = "";
+  assistantInput.placeholder = "Type a city, state, or region, then press Enter to add…";
+  assistantInput.focus();
 }
 
 function wizardAskDays() {
@@ -1679,17 +1851,16 @@ function wizardFinish() {
 
   if (wizard.query) document.getElementById("q").value = wizard.query;
   if (wizard.days) document.getElementById("days").value = wizard.days;
-  if (wizard.department) departmentSelect.value = wizard.department;
   if (wizard.commitment) commitmentSelect.value = wizard.commitment;
+  if (wizard.departments && wizard.departments.length) {
+    selectedDepartments = wizard.departments.slice();
+    renderDepartmentMenu();
+  }
 
-  if (wizard.useRemoteUs && locationGroupLabels.remote_us
-      && !selectedLocations.some((s) => s.type === "group" && s.value === "remote_us")) {
-    selectedLocations.push({ type: "group", value: "remote_us", label: locationGroupLabels.remote_us });
-  }
-  if (wizard.locationText && !selectedLocations.some((s) => s.type === "text" && s.value === wizard.locationText)) {
-    selectedLocations.push({ type: "text", value: wizard.locationText });
-  }
-  renderLocationChips();
+  // Locations were already pushed into the real selectedLocations array
+  // live as they were picked in wizardAskLocation()/renderWizardLocationStep()
+  // -- nothing left to merge in here, unlike department/commitment/salary/
+  // YOE which only ever live in wizard state until this step.
 
   // Both are typed minimums with no ceiling requested -- hi stays at
   // whatever the slider's own real max already is (== "no upper bound"),
@@ -1766,27 +1937,45 @@ function openWizardModal() {
     e.preventDefault();
     if (!wizard || assistantInput.disabled) return;
     const text = assistantInput.value.trim();
+    if (!text) return; // no free pass for a blank Enter -- use the Skip/Done buttons explicitly
 
-    if (wizard.step === "awaiting_number") {
-      // Empty submit here just re-triggers Skip's own logic (no free
-      // pass for a blank Enter-press to silently count as "answered").
+    if (wizard.step === "salary") {
+      assistantInput.value = "";
+      const n = parseInt(text, 10);
+      if (!Number.isNaN(n) && n > 0) {
+        wizard.salaryMin = n;
+        wizardUserSay(`${currencySymbol(wizard.currency)}${formatAmountShort(n)}+ (${wizard.currency})`);
+      } else {
+        wizardUserSay(text);
+      }
       assistantChoices.classList.add("hidden");
       assistantChoices.innerHTML = "";
-      const n = text === "" ? null : parseInt(text, 10);
-      finishNumberStep(Number.isNaN(n) ? null : n);
-      return;
-    }
-    if (!text) return;
-    if (wizard.step === "awaiting_terms") {
+      wizardAskYoe();
+    } else if (wizard.step === "yoe") {
+      assistantInput.value = "";
+      const n = parseInt(text, 10);
+      if (!Number.isNaN(n) && n >= 0) {
+        wizard.yoeMin = n;
+        wizardUserSay(`${n}+ yrs`);
+      } else {
+        wizardUserSay(text);
+      }
+      assistantChoices.classList.add("hidden");
+      assistantChoices.innerHTML = "";
+      wizardAskDepartment();
+    } else if (wizard.step === "location") {
+      assistantInput.value = "";
+      if (!selectedLocations.some((s) => s.type === "text" && s.value === text)) {
+        selectedLocations.push({ type: "text", value: text, label: text });
+      }
+      renderLocationChips();
+      wizardUserSay(text);
+      renderWizardLocationStep(); // stay on this step -- Done is a separate explicit action
+    } else if (wizard.step === "awaiting_terms") {
       assistantInput.value = "";
       wizardUserSay(text);
       wizard.query = text;
       wizardAskSalary();
-    } else if (wizard.step === "awaiting_location") {
-      assistantInput.value = "";
-      wizardUserSay(text);
-      wizard.locationText = text;
-      wizardAskDays();
     }
   });
 
@@ -1818,7 +2007,7 @@ loadFacets();
 loadLocationGroups();
 loadAuthConfig();
 loadStatus();
-loadSiteConfig().then(checkForContactFlag);
+loadSiteConfig();
 checkForResetToken();
 setInterval(loadStatus, 30000);
 // Waits on the auth check specifically (fast -- one query, or an

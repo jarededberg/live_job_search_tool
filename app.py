@@ -320,7 +320,12 @@ def api_jobs():
     locations = request.args.getlist("location")  # repeated ?location=a&location=b, multi-select
     location_groups = request.args.getlist("location_group")  # canonical "Remote (US)" etc. chips
     days = request.args.get("days", "")
-    department = request.args.get("department", "")
+    # Repeated ?department=a&department=b, multi-select -- same convention
+    # as `location` above. Single-value callers (old saved searches, direct
+    # API use) still work: db.search_jobs() falls back to the first/only
+    # value when only one is sent.
+    departments = request.args.getlist("department")
+    department = departments[0] if departments else ""
     commitment = request.args.get("commitment", "")
     sort = request.args.get("sort", db.DEFAULT_SORT)
     resume_title_terms = [t.lower() for t in request.args.getlist("resume_title_term") if t.strip()]
@@ -342,7 +347,7 @@ def api_jobs():
     days_val = int(days) if days.strip().isdigit() else None
     try:
         jobs, total = db.search_jobs(query=q, locations=locations, location_groups=location_groups,
-                                      days=days_val, department=department,
+                                      days=days_val, departments=departments,
                                       commitment=commitment, sort=sort,
                                       resume_title_terms=resume_title_terms,
                                       resume_skill_terms=resume_skill_terms,
@@ -803,6 +808,20 @@ def faq_page():
     # homepage -- separate URL, linkable, indexable, no JS required to
     # read it.
     return send_from_directory(STATIC_DIR, "faq.html")
+
+
+@app.route("/contact")
+def contact_page():
+    # Same treatment as /faq -- a real page (static/contact.html) instead
+    # of a modal, so it's linkable/indexable and doesn't need the homepage
+    # loaded first. The page's own inline script hits /api/site-config
+    # itself to decide whether to show the real form or a mailto: fallback.
+    return send_from_directory(STATIC_DIR, "contact.html")
+
+
+@app.route("/about")
+def about_page():
+    return send_from_directory(STATIC_DIR, "about.html")
 
 
 @app.route("/reset-password")

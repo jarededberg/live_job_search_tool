@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=4" />
+<link rel="stylesheet" href="style.css?v=5" />
 </head>
 <body>
   <nav class="topnav">
@@ -20,8 +20,9 @@
       </div>
       <div class="topnav-right">
         <nav class="nav-links">
+          <a href="/about">About</a>
           <a href="/faq">FAQ</a>
-          <a href="/" id="page-contact-link">Contact</a>
+          <a href="/contact">Contact</a>
         </nav>
         <a class="brand-link" href="/">← Back to search</a>
       </div>
@@ -112,15 +113,5 @@
       </p>
     </div>
   </footer>
-
-  <script>
-    // "Contact" in the nav here opens the real contact form, which lives
-    // on the homepage's modal system -- send people there with a flag
-    // telling app.js to open it automatically once loaded.
-    document.getElementById("page-contact-link").addEventListener("click", (e) => {
-      e.preventDefault();
-      window.location.href = "/?contact=1";
-    });
-  </script>
 </body>
 </html>

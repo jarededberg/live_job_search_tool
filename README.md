@@ -36,8 +36,8 @@ Built to share the tool publicly and post about it on LinkedIn.
   "Company logos" below.
 - **`app.py`** — Flask app. Runs the scraper on a schedule (every 8 hours by
   default, via APScheduler) and exposes:
-  - `GET /api/jobs?q=...&location=...&location=...&days=...&department=...&commitment=...&sort=...&page=...` — search (repeat `location` for multi-select; `sort` is one of `newest`/`oldest`/`company`/`salary_high`/`salary_low`, default `newest`)
-  - `GET /api/facets` — distinct department/commitment values for the filter dropdowns
+  - `GET /api/jobs?q=...&location=...&location=...&days=...&department=...&department=...&commitment=...&sort=...&page=...` — search (repeat `location`/`department` for multi-select; `sort` is one of `newest`/`oldest`/`company`/`salary_high`/`salary_low`, default `newest`)
+  - `GET /api/facets` — distinct department/commitment values for the filter dropdowns (department values are cleaned of cohort/program tags like "EMEA '24" — see "Department cleanup" under AI Search below)
   - `GET /api/locations?q=...` — location typeahead suggestions, ranked by role count
   - `GET /api/status` — dataset freshness / scrape progress
   - `POST /api/refresh` — manually trigger a scrape (blocked if one's already running)
@@ -1196,73 +1196,125 @@ and `CONTACT_EMAIL` are set. `CONTACT_EMAIL` defaults to
 `jarededberg@gmail.com`; override it via env var if that should ever
 change.
 
-`GET /api/site-config` exposes `contact_enabled` and `contact_email`
-(the address is public anyway — it's already in the footer byline/
-LinkedIn — so there's no harm exposing it). The footer's "Contact" link
-opens a modal: a real form (name/email/message, `POST /api/contact`,
-rate limited to 3/hour/IP same as forgot-password) if `contact_enabled`
-is true, or just a `mailto:` link to `contact_email` if it's false — so
-the link is never a dead end either way. Submissions are emailed to
-`CONTACT_EMAIL` via Resend with `reply_to` set to the sender's own
-address, so replying from your inbox goes straight back to them.
+Contact is a real standalone page (`static/contact.html`, served by
+`/contact` in `app.py`), not a modal — same treatment as `/faq` and
+`/about` below: linkable, indexable, doesn't need the homepage loaded
+first. The page's own inline script fetches `GET /api/site-config` (which
+exposes `contact_enabled`/`contact_email` — the address is public anyway,
+it's already in the footer byline/LinkedIn) and shows a real form (reason
+dropdown, name/email/message, `POST /api/contact`, rate limited to
+3/hour/IP same as forgot-password) if `contact_enabled` is true, or a
+`mailto:` link to `contact_email` if it's false — never a dead end either
+way. Submissions are emailed to `CONTACT_EMAIL` via Resend with
+`reply_to` set to the sender's own address, so replying from your inbox
+goes straight back to them. The reason dropdown (`CONTACT_REASONS` in
+`app.py`) is validated server-side and falls back to "Other" if missing
+or tampered with; name/email/message are HTML-escaped before being
+embedded in the outgoing email body.
 
-## FAQ
+## FAQ / About
 
-Static content, no backend involved — the "FAQ" link in the top-right of
-the nav bar (`#nav-faq-link`) opens a modal with a plain accordion
-(`FAQ_ITEMS` array near the top of the "FAQ" section in `static/app.js`).
-The questions/answers are written directly from this README's own
-documented behavior (salary/YOE data being best-effort parses, match
-tiers being a keyword heuristic, resumes not being stored server-side,
-etc.) — if any of that behavior changes, update `FAQ_ITEMS` to match.
-The "Contact" link right next to it (`#nav-contact-link`) opens the
-contact form described above.
+Both static content, no backend involved beyond the page routes
+themselves (`/faq` → `static/faq.html`, `/about` → `static/about.html`,
+both `send_from_directory` calls in `app.py`). FAQ's questions/answers
+are written directly from this README's own documented behavior
+(salary/YOE data being best-effort parses, match tiers being a keyword
+heuristic, resumes not being stored server-side, department cohort-tag
+cleanup, etc.) — if any of that behavior changes, update
+`static/faq.html` to match. About is a short first-person bio/why-this-
+exists page; edit `static/about.html` directly to update it. All three
+content pages (About/FAQ/Contact) share the same nav (`.nav-links`) and
+`.content-page`/`.page-form` CSS rules in `static/style.css`.
 
 ## AI Search (guided wizard — no AI, no external API, always on)
 
-A prominent button at the top of the search panel/dashboard
-(`#ai-search-btn` in `static/index.html`, labeled "AI Search"), which
-opens the wizard inside the same modal system FAQ/Contact/login use. This
-is a scripted decision tree, not a real conversation — there's no LLM
-involved, no API key, no cost, and nothing to configure, so unlike every
-other feature in this README there's no env var gating it on/off. (It's
-named "AI Search" for the person using it, not because it calls an AI
-model — worth knowing if this ever needs explaining to someone reading
-the code.)
+A single combined pill button at the top of the search panel/dashboard
+(`#ai-search-btn`/`.ai-search-pill` in `static/index.html`, icon + "AI
+Search" label in one element), which opens the wizard inside the same
+modal system used elsewhere. This is a scripted decision tree, not a real
+conversation — there's no LLM involved, no API key, no cost, and nothing
+to configure, so unlike every other feature in this README there's no env
+var gating it on/off. (It's named "AI Search" for the person using it,
+not because it calls an AI model — worth knowing if this ever needs
+explaining to someone reading the code. The hero also now explicitly
+brands the site as "AI-powered" and "easy-apply only" — see Branding
+below.)
 
 **Flow**: (1) ask whether to upload a resume or type search terms —
 resume goes through the existing `handleResumeFile()`/`/api/parse-resume`
 path (same as the main dropzone), search terms populate the query box
-directly; (2) a short run of optional quick-reply questions — salary
-minimum, experience level, department, commitment type, location, and
-how recently posted — each skippable with one click, department/
-commitment/recency choices are cloned live from the real `<select>`
-options so they can never drift out of sync with the actual filters;
-(3) everything collected gets applied to the real filter controls and
-`search()` is called once at the end, so the wizard is just a guided
-way of filling in the same search box, sliders, and dropdowns already on
-the page — never a separate/parallel search path.
+directly; (2) salary minimum — a currency picker (cosmetic only, see
+below) plus four fixed buckets ($100k/$150k/$200k/$250k+) plus a number
+box for a custom amount; (3) years of experience — four preset levels
+(Entry/Mid/Senior/Staff) plus a number box; (4) department — multi-select
+toggle chips sourced from the same cleaned, frequency-ordered list the
+main page's department picker uses (see "Department cleanup" below), so
+picks can never drift out of sync with real facets or include junk
+values; (5) commitment type — quick one-click bubbles for the most common
+live values plus a full dropdown+Continue underneath for anything else;
+(6) location — toggle "Remote (US)" and/or type any number of cities
+(each added live to the real location-chip state as you go, so the chips
+above the search box update while the wizard is still open), then hit
+Done; (7) how recently posted. Everything skippable, and (8) it all gets
+applied to the real filter controls and `search()` is called once at the
+end — the wizard is just a guided way of filling in the same search box,
+sliders, and dropdowns already on the page, never a separate/parallel
+search path.
+
+Currency in the salary step is for the person's own reference only — the
+dataset has no per-posting currency field (`salary_min`/`salary_max` in
+`db.py` are plain numbers, effectively USD since the indexed companies
+are overwhelmingly US-based), so picking EUR/GBP/CAD changes the symbol
+shown, not what the number is actually compared against. Called out in
+the wizard's own prompt text so it isn't a silent trap.
+
+**Department cleanup**: `db.distinct_facet_values()` filters out
+cohort/program-tag values that showed up in scraped department data
+(e.g. `"EMEA '24"`, an intern/grad program class year, not a real
+department) via `_JUNK_DEPARTMENT_RE` — an apostrophe followed by a
+2-digit year, rather than a hardcoded per-company blocklist, so new ones
+get caught automatically as more companies are scraped. Department is
+multi-select everywhere it appears: `db.search_jobs(departments=[...])`
+and `GET /api/jobs?department=a&department=b` (repeated param, same
+convention as `location`) OR-match across the list; the main page's
+department picker (`#department-select` in `static/index.html`) is a
+custom checkbox dropdown (`renderDepartmentMenu()` in `app.js`) rather
+than a native `<select multiple>`, since a native multi-select renders as
+an always-open listbox and needs ctrl/cmd-click most people don't know
+about.
+
+**Pagination**: in addition to Prev/Next and numbered page buttons,
+`renderResults()` appends a `<select class="page-jump">` with one option
+per page whenever there's more than one page — handy for jumping straight
+to, say, page 40 of results without clicking Next 39 times.
 
 **Implementation notes**: `openWizardModal()` (near the end of
 `static/app.js`) builds the modal content and re-queries
 `assistantMessages`/`assistantChoices`/`assistantForm`/`assistantInput`
 each time it opens, since `openModal()` replaces `#modal-content`'s
-`innerHTML` on every call — these were plain top-level `const`s back
-when the wizard lived in a persistent floating widget, but now need to
-be `let`s rebound per-open. `wizard` (a small state object) then tracks
+`innerHTML` on every call. `wizard` (a small state object) tracks
 progress through `wizardAskSource()` → `wizardAskSalary()` →
 `wizardAskYoe()` → `wizardAskDepartment()` → `wizardAskCommitment()` →
-`wizardAskLocation()` → `wizardAskDays()` → `wizardFinish()`. Each step
-either renders button choices (`setWizardChoices()`) or a cloned
-`<select>` plus a Continue button (`wizardAskFromSelect()`), except the
-two free-text steps (search terms, a typed city) which briefly re-enable
-the text input. `wizardFinish()` reuses the exact same filter-application
-patterns `loadSavedSearch()` already used for saved searches, then offers
-"See results" (closes the modal) or "Start a new search" (replays the
-flow from the top).
+`wizardAskLocation()` → `wizardAskDays()` → `wizardFinish()`. Most steps
+render their own custom mix of toggle chips/bubbles/dropdown/number-or-
+text input (`renderWizardSalaryStep()`, `renderWizardYoeStep()`,
+`renderWizardDepartmentStep()`, `renderWizardLocationStep()`) rather than
+the older uniform "one dropdown + Continue" pattern
+(`wizardAskFromSelect()`, still used for the recency step).
+`wizardFinish()` reuses the exact same filter-application patterns
+`loadSavedSearch()` already used for saved searches, then offers "See
+results" (closes the modal) or "Start a new search" (replays the flow
+from the top).
 
 ## Branding
 
-The header in `static/index.html` includes an "About" blurb and a LinkedIn
-link. Edit the `<div class="about">` block there to change the framing, or
-swap the LinkedIn URL.
+The hero in `static/index.html` (`.hero-badges`, `.hero h1`, `.tagline`)
+leads with two things: this only indexes Greenhouse/Lever/Ashby career
+pages — by construction, never Workday, iCIMS, or Oracle, which is the
+actual differentiator worth calling out (those platforms are usually the
+annoying multi-page-application, create-another-account experience
+LinkedIn/Indeed results route through) — and the "AI-powered" framing for
+the guided search wizard. The footer includes a short "why this exists"
+blurb and a LinkedIn link; the fuller version of that story lives on
+`/about` (`static/about.html`). Edit these directly to change the
+framing, or swap the LinkedIn/GitHub URLs.
