@@ -513,7 +513,41 @@ too (and adding `strategy & operations`/`strategy and operations`/
 `strategy & business operations` as additional triggers for that same
 group), so the expansion now works in both directions.
 
-### Location-aware match tiers
+### Location-aware filtering (excludes, doesn't just badge)
+
+**Current behavior, read this first if the section below looks like it
+contradicts itself:** as of the latest round of feedback, a job whose
+location doesn't work for the candidate (not viable for a US-based
+candidate at all, or an onsite role outside their home metro) is removed
+from search results ENTIRELY, not just badged "poor" and left visible at
+the bottom of the list. This was a deliberate choice, made after the
+original "poor but still visible" design (described in detail below, kept
+for the history) drew the opposite complaint in practice: onsite roles the
+candidate can't actually take were still cluttering the results.
+
+The exclusion logic itself is unchanged from the "poor" classification
+below — same `is_clearly_non_us()` / metro-distance rule, same
+`resume_us_based`/`resume_metro_terms` gating so it only ever kicks in
+when we're confident about the candidate's location. What changed is
+`_is_location_excluded()` is now applied as a hard filter on the candidate
+list in `search_jobs()`, before match-tier scoring, rather than inside
+`_match_info()` as a tier override. `_match_info()`'s "poor" tier is now
+purely about weak title/skill overlap — a job that reaches scoring at all
+has already had its location judged fine (or location wasn't a factor
+because the candidate's location wasn't confidently known).
+
+Worth remembering if this ever gets revisited: the earlier "resume upload
+showing too few total results" bug (see below) is exactly the failure
+mode to watch for if this filter ever ends up layered together with other
+automatic narrowing — that bug came from stacking an auto-applied query
+narrowing AND an auto-applied location filter, which compounded into a
+600-job search returning 7 results. This filter is deliberately scoped to
+*only* remove jobs whose location is actually wrong for the candidate,
+never title/skill mismatches (a weak-title-match "Registered Nurse"
+posting in the candidate's own city still shows up, just tagged "poor" —
+only genuinely wrong-location jobs get removed).
+
+### Location-aware match tiers (superseded by the exclusion above — kept for history)
 
 Title/skill overlap alone can still badge a job "best match" that's
 obviously off for the candidate — the case that surfaced this: a Phoenix-
@@ -747,6 +781,15 @@ Cards are laid out in a responsive grid — 5 across at full desktop width,
 stepping down to 4 / 3 / 2 / 1 as the viewport narrows (see `.results-grid`
 in `style.css`). The site's overall max-width grew from 1100px to 1360px to
 give 5 columns reasonable breathing room.
+
+Pagination shows numbered page buttons now instead of just Prev/Next
+arrows — `pageNumbers(current, total)` in `app.js` builds a classic
+"windowed" list: page 1, the last page, and a small window 2 pages either
+side of the current one, collapsing any bigger gap into a single "…" (a
+gap of exactly one page shows that page number instead, since an ellipsis
+there wouldn't save any space). Caps out around 9 visible buttons even
+across hundreds of pages of results, rather than either rendering every
+page number or leaving arrows as the only way to jump around.
 
 ## Run locally
 

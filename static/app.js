@@ -157,11 +157,50 @@ function renderResults(data) {
 
   const prevDisabled = data.page <= 1 ? "disabled" : "";
   const nextDisabled = data.page >= data.pages ? "disabled" : "";
+  const numbersHtml = pageNumbers(data.page, data.pages)
+    .map((n) =>
+      n === "…"
+        ? `<span class="page-ellipsis">…</span>`
+        : `<button class="page-num${n === data.page ? " active" : ""}" ${n === data.page ? "disabled" : ""} onclick="search(${n})">${n}</button>`
+    )
+    .join("");
   paginationEl.innerHTML = `
     <button ${prevDisabled} onclick="search(${data.page - 1})">← Prev</button>
-    <span class="page-indicator">Page ${data.page.toLocaleString()} of ${data.pages.toLocaleString()}</span>
+    <div class="page-numbers">${numbersHtml}</div>
     <button ${nextDisabled} onclick="search(${data.page + 1})">Next →</button>
   `;
+}
+
+// Classic "windowed" page-number list: always show page 1 and the last
+// page, plus a small window around the current page (2 on each side),
+// collapsing any gap into a single "…". Caps out at ~9 visible number
+// buttons even when there are hundreds of pages, rather than either
+// rendering every page number (unusable past a few dozen pages) or only
+// ever showing Prev/Next (the thing this replaces).
+function pageNumbers(current, total) {
+  if (total <= 1) return [1];
+  const delta = 2;
+  const pages = [];
+  for (let i = 1; i <= total; i++) {
+    if (i === 1 || i === total || (i >= current - delta && i <= current + delta)) {
+      pages.push(i);
+    }
+  }
+  const withGaps = [];
+  let prev = null;
+  for (const p of pages) {
+    if (prev !== null) {
+      // A gap of exactly one skipped page ("1 2 3 [skip 4] 5") shows the
+      // number itself instead of "…" -- collapsing a single page into an
+      // ellipsis doesn't save any visual space and just looks like a
+      // missing button.
+      if (p - prev === 2) withGaps.push(prev + 1);
+      else if (p - prev > 2) withGaps.push("…");
+    }
+    withGaps.push(p);
+    prev = p;
+  }
+  return withGaps;
 }
 
 function formatSalary(job) {

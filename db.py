@@ -192,11 +192,54 @@ DEFAULT_SORT = "newest"
 _GENERIC_TERMS = {"operations", "ops", "strategy", "management"}
 
 
-def _match_info(job, title_terms, skill_terms, us_based=False, metro_terms=None):
+def _is_location_excluded(job, us_based, metro_terms):
+    """True if `job` should be excluded from results entirely because its
+    location doesn't work for the candidate: not viable for a US-based
+    candidate at all (location_groups.is_clearly_non_us), or -- when
+    `metro_terms` is given -- an onsite (non-remote) role outside the
+    candidate's home metro. Same classification `_match_info` originally
+    used to badge a job "poor" with; pulled out into its own function so
+    `search_jobs()` can use it as a hard filter instead.
+
+    This used to only ever demote a tier, never remove a result — visible
+    but buried felt like the safer default after an earlier bug where
+    auto-applying a location filter on resume upload collapsed a 600-job
+    search down to 7 (see "Resume upload showing too few total results" in
+    the README). But real usage showed the opposite complaint: users
+    wanted onsite roles they can't actually take (wrong city, wrong
+    country) out of the list entirely, not just pushed to the bottom.
+    de-duplicated from `_match_info` so the exact same rule governs both
+    places it's used to matter (this filter, and match-tier scoring below
+    for whatever's left after the filter runs)."""
+    if not us_based:
+        return False
+    loc = job.get("location") or ""
+    if is_clearly_non_us(loc):
+        return True
+    if metro_terms and loc and not is_remote(loc):
+        loc_lower = loc.lower()
+        if not any(term in loc_lower for term in metro_terms):
+            return True
+    return False
+
+
+def _match_info(job, title_terms, skill_terms):
     """Classify a job against resume-derived terms (both already lowercased)
     into a ("best"/"good"/"poor"/None) tier plus a sortable ordinal score
     (higher = better match). Returns (None, 0) if no resume terms were
     supplied at all (no resume uploaded).
+
+    Location used to be checked in here too (a job whose location didn't
+    work for the candidate got force-set to "poor" regardless of title/
+    skill overlap). It's been pulled out into `_is_location_excluded()`
+    and is now applied as an actual filter in `search_jobs()`, BEFORE this
+    function ever runs — per explicit user choice, a job the candidate
+    can't take shouldn't just be buried at the bottom of the list, it
+    shouldn't be in the results at all. So by the time a job reaches here,
+    its location has already been judged fine (or location wasn't a
+    factor because we never confidently placed the candidate). "poor" from
+    this function now means "title/skill overlap was weak," never
+    "location was wrong."
 
     This replaced an earlier version that scored `matched_terms /
     len(all_terms)` against title+blurb only, which produced far too few
@@ -235,44 +278,10 @@ def _match_info(job, title_terms, skill_terms, us_based=False, metro_terms=None)
     this carve-out is specifically about role_synonyms.py's bare catch-all
     entries, not extraction bugs.)
 
-    `us_based`: when True (the resume's contact info parsed to a "City, ST"
-    US address — see resume_parser.extract_location), a job whose location
-    reads as clearly not viable for a US-based candidate
-    (location_groups.is_clearly_non_us) is forced to "poor" regardless of
-    title/skill overlap. Added after real feedback: a Phoenix, AZ resume
-    was getting "Best Match" badges on roles in Prague and "Remote -
-    Canada" purely because the titles lined up — title/skill overlap alone
-    was never enough, a job someone can't actually take isn't a match at
-    any tier above poor. Only applied when we're confident the candidate is
-    US-based; with no detected home location, no assumption is made either
-    way and every location is left alone.
-
-    `metro_terms`: lowercased "city, st" substrings for the candidate's
-    home metro (resume_parser.extract_location's nearby-metro list, e.g.
-    Phoenix -> ["phoenix, az", "scottsdale, az", "tempe, az", ...]).
-    Added after real feedback on the `us_based` fix above: it stopped
-    Prague/Remote-Canada from badging "best," but onsite roles technically
-    IN the US and nowhere near the candidate -- Denver, Tysons VA, Salt
-    Lake City, San Francisco, for a Phoenix, AZ resume -- were still
-    sailing through untouched, since "clearly non-US" was never the actual
-    problem with those. When `metro_terms` is given and the job's location
-    is (a) not remote at all, and (b) doesn't contain any of the
-    candidate's metro cities as a substring, it's forced to "poor" the
-    same way a non-US location is -- a title match on an onsite job the
-    candidate would have to relocate for isn't a "best"/"good" match
-    either. Remote roles are exempt from this check entirely (already
-    filtered down to US-viable-or-ambiguous ones by the `us_based` check
-    above, and a genuinely remote job fits anywhere in the US regardless
-    of which city it's nominally HQ'd near)."""
+    (See `_is_location_excluded()` above for the location rule itself and
+    the history of why it moved from a demotion to a hard filter.)"""
     if not title_terms and not skill_terms:
         return None, 0
-    loc = job.get("location") or ""
-    if us_based and is_clearly_non_us(loc):
-        return "poor", 0
-    if us_based and metro_terms and loc and not is_remote(loc):
-        loc_lower = loc.lower()
-        if not any(term in loc_lower for term in metro_terms):
-            return "poor", 0
     title_lower = (job.get("title") or "").lower()
     body = f"{(job.get('blurb') or '').lower()} {(job.get('department') or '').lower()}"
 
@@ -334,24 +343,34 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     `sort="match"` quietly falls back to newest-first rather than raising,
     since both only ever come from query params a user could hand-edit.
 
-    `resume_us_based`, if True, tells `_match_info` the candidate is
-    US-based (their resume's location was successfully parsed to a US
-    city) — this demotes any job whose location reads as clearly non-US
-    (a bare foreign city like "Prague"/"Peterborough", or an explicitly
-    non-US remote label like "Remote (Canada)") straight to `"poor"`,
-    regardless of title/skill overlap, via
-    `location_groups.is_clearly_non_us`. False (the default, and what's
-    sent whenever the resume parser couldn't confidently place the
-    candidate in the US) leaves location out of scoring entirely, same as
-    before this param existed.
+    `resume_us_based`, if True, means the candidate's resume was
+    successfully parsed to a US city — this removes any job whose location
+    doesn't work for them from the results ENTIRELY (not just a "poor"
+    badge): a bare foreign city with no US signal ("Prague",
+    "Peterborough"), an explicitly non-US remote label ("Remote (Canada)"/
+    "(UK)"/"(Europe)"/LatAm), or (when `resume_metro_terms` is also given)
+    an onsite role outside the candidate's home metro. See
+    `_is_location_excluded()` for the exact rule. False (the default, and
+    what's sent whenever the resume parser couldn't confidently place the
+    candidate in the US) leaves location out of filtering entirely, same
+    as before this param existed — nothing gets removed on account of
+    location unless we're actually confident where the candidate is.
 
-    `resume_metro_terms`, if given (lowercased "city, st" substrings for
-    the candidate's home metro area — see resume_parser.extract_location's
-    nearby-metro list), additionally demotes onsite (non-remote) jobs to
-    `"poor"` if their location doesn't contain any of those substrings —
-    see `_match_info`'s docstring for the full reasoning. Only takes effect
-    when `resume_us_based` is also True; ignored otherwise, same
-    "only act when we're actually confident" gating as that param.
+    This used to only demote a job's match tier to "poor" rather than
+    remove it, on the theory that a still-visible-but-buried job preserves
+    optionality (maybe the candidate would relocate, maybe a "remote"
+    label is just poorly written). Changed to an outright filter per
+    explicit user feedback: they wanted roles they can't actually take out
+    of the list, not just sorted to the bottom of it. Worth remembering if
+    this behavior ever gets revisited — the earlier "too few results" bug
+    (see the README) is exactly the failure mode to watch for if location
+    filtering like this ever gets layered together with other automatic
+    narrowing again.
+
+    `resume_metro_terms`: lowercased "city, st" substrings for the
+    candidate's home metro area (resume_parser.extract_location's
+    nearby-metro list). Only takes effect when `resume_us_based` is also
+    True; ignored otherwise.
 
     `salary_min`/`salary_max` and `yoe_min`/`yoe_max` are range-slider
     filters (see the frontend's dual-thumb sliders, sized against
@@ -471,6 +490,27 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
 
         candidates = [r for r in candidates if _loc_matches(r)]
 
+    # Expand each "city, st" term to also cover the state spelled out in
+    # full ("phoenix, az" -> also "phoenix, arizona") -- real scraped job
+    # locations use both forms inconsistently, and metro_areas.py's
+    # curated lists are all abbreviated. See city_state_variants()'s
+    # docstring for the real bug this fixes.
+    metro_terms = set()
+    for t in (resume_metro_terms or []):
+        if t:
+            metro_terms |= city_state_variants(t)
+
+    if resume_us_based:
+        # Hard filter, not a badge demotion -- per explicit user choice, a
+        # job whose location doesn't work for the candidate (not viable
+        # for a US-based candidate at all, or an onsite role outside their
+        # home metro) is removed from the results entirely rather than
+        # kept around tagged "poor match." Runs whenever we're confident
+        # about the candidate's location, independent of `sort` -- this
+        # is a real filter on what's shown, not a scoring detail that only
+        # matters for match-sorted results.
+        candidates = [r for r in candidates if not _is_location_excluded(r, resume_us_based, metro_terms)]
+
     if yoe_min is not None or yoe_max is not None:
         # Same range-overlap idea as the salary filter above, but done in
         # Python post-fetch instead of SQL, since `years_experience` is
@@ -496,15 +536,6 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
 
     title_terms = [t.lower() for t in (resume_title_terms or []) if t]
     skill_terms = [t.lower() for t in (resume_skill_terms or []) if t]
-    # Expand each "city, st" term to also cover the state spelled out in
-    # full ("phoenix, az" -> also "phoenix, arizona") -- real scraped job
-    # locations use both forms inconsistently, and metro_areas.py's
-    # curated lists are all abbreviated. See city_state_variants()'s
-    # docstring for the real bug this fixes.
-    metro_terms = set()
-    for t in (resume_metro_terms or []):
-        if t:
-            metro_terms |= city_state_variants(t)
     has_resume_terms = bool(title_terms or skill_terms)
 
     if has_resume_terms and sort == "match":
@@ -513,8 +544,7 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         # depends on the score — the browser can't reorder page 3 relative
         # to page 1 on its own, so this has to happen before pagination.
         for r in candidates:
-            tier, score = _match_info(r, title_terms, skill_terms,
-                                       us_based=resume_us_based, metro_terms=metro_terms)
+            tier, score = _match_info(r, title_terms, skill_terms)
             r["match_tier"] = tier
             r["_match_score"] = score
         # Two stable sorts = one two-key sort: establish newest-first as the
@@ -539,8 +569,7 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         # once that auto-filter was removed and searches started scoring
         # the full unfiltered dataset on every request.
         for r in page_rows:
-            tier, _score = _match_info(r, title_terms, skill_terms,
-                                        us_based=resume_us_based, metro_terms=metro_terms)
+            tier, _score = _match_info(r, title_terms, skill_terms)
             r["match_tier"] = tier
 
     for r in page_rows:

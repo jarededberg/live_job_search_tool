@@ -696,6 +696,40 @@ main {
   color: var(--muted);
 }
 
+.page-numbers {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.page-num {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.83rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.page-num:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.page-num.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: white;
+  cursor: default;
+}
+
+.page-ellipsis {
+  color: var(--muted-light);
+  font-size: 0.83rem;
+  padding: 0 2px;
+}
+
 /* ---------- Footer ---------- */
 
 footer {
