@@ -1362,6 +1362,70 @@ footer {
 }
 .page-form .btn-primary { margin-top: 18px; padding: 10px 24px; }
 
+/* ---- admin dashboard ---- */
+.admin-page { max-width: 760px; }
+.admin-state.hidden, #admin-content.hidden { display: none; }
+.admin-state {
+  padding: 32px 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.admin-state a { color: var(--accent); }
+.admin-state code {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.88em;
+}
+.admin-stat-row {
+  display: flex;
+  gap: 14px;
+  margin: 20px 0 32px;
+  flex-wrap: wrap;
+}
+.admin-stat-card {
+  flex: 1 1 160px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+}
+.admin-stat-value {
+  font-size: 1.9rem;
+  font-weight: 700;
+  color: var(--maroon);
+  font-family: "IBM Plex Mono", monospace;
+}
+.admin-stat-label {
+  margin-top: 4px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+.admin-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.admin-chart-header h2 { font-size: 1.05rem; margin: 0; }
+.admin-chart-header select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--bg);
+  font-size: 0.88rem;
+  font-family: inherit;
+}
+.admin-chart-wrap {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+}
+
 .faq-list { display: flex; flex-direction: column; gap: 8px; }
 
 .faq-page-list .faq-item {

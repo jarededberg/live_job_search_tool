@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Admin — Skip The Boards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=6" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+</head>
+<body>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <div class="brand">
+        <a href="/" style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;">
+          <span class="brand-mark">◆</span>
+          <span class="brand-name">Skip The Boards</span>
+        </a>
+      </div>
+      <div class="topnav-right">
+        <nav class="nav-links">
+          <a href="/">Home</a>
+          <a href="/about">About</a>
+          <a href="/faq">FAQ</a>
+          <a href="/contact">Contact</a>
+        </nav>
+        <a class="brand-link" href="/">← Back to search</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="content-page admin-page">
+    <h1>Admin</h1>
+    <p class="content-page-intro">Account signups.</p>
+
+    <div id="admin-loading" class="admin-state">Loading…</div>
+
+    <div id="admin-unauthorized" class="admin-state hidden">
+      <p>You need to be logged in as the admin account to see this.</p>
+      <p><a href="/">Go log in on the home page</a>, then come back to this page.</p>
+    </div>
+
+    <div id="admin-disabled" class="admin-state hidden">
+      <p>Accounts aren't configured on this deployment (no <code>DATABASE_URL</code>), so there's nothing to show here.</p>
+    </div>
+
+    <div id="admin-content" class="hidden">
+      <div class="admin-stat-row">
+        <div class="admin-stat-card">
+          <div class="admin-stat-value" id="stat-total">—</div>
+          <div class="admin-stat-label">Total signups</div>
+        </div>
+        <div class="admin-stat-card">
+          <div class="admin-stat-value" id="stat-last7">—</div>
+          <div class="admin-stat-label">Last 7 days</div>
+        </div>
+        <div class="admin-stat-card">
+          <div class="admin-stat-value" id="stat-first">—</div>
+          <div class="admin-stat-label">First signup</div>
+        </div>
+      </div>
+
+      <div class="admin-chart-header">
+        <h2>Signups per day</h2>
+        <select id="admin-range">
+          <option value="30">Last 30 days</option>
+          <option value="60" selected>Last 60 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="365">Last 12 months</option>
+        </select>
+      </div>
+      <div class="admin-chart-wrap">
+        <canvas id="signup-chart" height="90"></canvas>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p class="footer-byline">
+        <strong>Jared Edberg</strong> · <a href="https://www.linkedin.com/in/jared-edberg" target="_blank" rel="noopener">LinkedIn ↗</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    const loadingEl = document.getElementById("admin-loading");
+    const unauthorizedEl = document.getElementById("admin-unauthorized");
+    const disabledEl = document.getElementById("admin-disabled");
+    const contentEl = document.getElementById("admin-content");
+    const rangeSelect = document.getElementById("admin-range");
+    let chart = null;
+
+    function showOnly(el) {
+      [loadingEl, unauthorizedEl, disabledEl, contentEl].forEach((e) => {
+        e.classList.toggle("hidden", e !== el);
+      });
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    }
+
+    async function loadStats(days) {
+      let res;
+      try {
+        res = await fetch(`/api/admin/stats?days=${days}`);
+      } catch (e) {
+        showOnly(unauthorizedEl);
+        return;
+      }
+      if (res.status === 503) { showOnly(disabledEl); return; }
+      if (res.status === 401 || res.status === 403) { showOnly(unauthorizedEl); return; }
+      if (!res.ok) { showOnly(unauthorizedEl); return; }
+
+      const data = await res.json();
+      if (!data.ok) { showOnly(unauthorizedEl); return; }
+
+      const stats = data.stats;
+      document.getElementById("stat-total").textContent = stats.total.toLocaleString();
+      document.getElementById("stat-last7").textContent = stats.last_7_days.toLocaleString();
+      document.getElementById("stat-first").textContent = fmtDate(stats.first_signup);
+
+      const labels = stats.daily.map((d) => d.day.slice(5)); // MM-DD
+      const counts = stats.daily.map((d) => d.count);
+
+      const ctx = document.getElementById("signup-chart").getContext("2d");
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [{
+            label: "Signups",
+            data: counts,
+            backgroundColor: "#7a1f2e",
+            borderRadius: 3,
+            maxBarThickness: 18,
+          }],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 }, grid: { display: false } },
+            y: { beginAtZero: true, ticks: { precision: 0 } },
+          },
+        },
+      });
+
+      showOnly(contentEl);
+    }
+
+    rangeSelect.addEventListener("change", () => loadStats(rangeSelect.value));
+    loadStats(rangeSelect.value);
+  </script>
+</body>
+</html>

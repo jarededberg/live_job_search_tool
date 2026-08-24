@@ -1212,6 +1212,34 @@ goes straight back to them. The reason dropdown (`CONTACT_REASONS` in
 or tampered with; name/email/message are HTML-escaped before being
 embedded in the outgoing email body.
 
+## Admin dashboard (signup tracking)
+
+`/admin` shows total account signups and a per-day chart, for a quick
+answer to "how many people have signed up." It's a real page
+(`static/admin.html`, served by `/admin` in `app.py`) but the page itself
+carries no auth check — it just calls `GET /api/admin/stats` on load and
+shows an "unauthorized" state if that call 401s/403s, same shell-vs-data
+split as the rest of the account system.
+
+The actual gate is server-side: `/api/admin/stats` is stacked with
+`@accounts_required @login_required @admin_required` (`app.py`), so it
+403s anyone whose logged-in session email doesn't match `ADMIN_EMAIL`
+(defaults to `jarededberg@gmail.com`, override via env var), 401s anyone
+not logged in at all, and 503s if this deployment has no `DATABASE_URL`
+configured — same three-state pattern as saved searches/applied jobs.
+There's no separate admin password to manage; log in on the homepage with
+the admin account, then visit `/admin`.
+
+`db_users.get_user_stats(days=60)` (in `db_users.py`) does the actual
+querying: a total count, signups in the last 7 days, the first-ever
+signup's timestamp, and a daily series built with `generate_series()` +
+`LEFT JOIN` rather than a plain `GROUP BY` — days with zero signups still
+come back as explicit `{"day": ..., "count": 0}` entries instead of just
+being absent, since a gap in the array reads as "no data" to Chart.js
+(which `admin.html` loads from cdnjs), not "zero." The chart's date range
+is adjustable (30/60/90/365 days) via a `?days=` query param on the same
+endpoint, clamped server-side to 7–365 to keep the query bounded.
+
 ## FAQ / About
 
 Both static content, no backend involved beyond the page routes

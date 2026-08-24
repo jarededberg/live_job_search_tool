@@ -167,6 +167,51 @@ def update_password(user_id, password_hash):
             cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (password_hash, user_id))
 
 
+def get_user_stats(days=60):
+    """Powers the /admin dashboard: a total user count plus a daily signup
+    series for the trailing `days` days (default 60). The series is built
+    with generate_series() and a LEFT JOIN rather than just grouping the
+    matching rows, so days with zero signups still show up as explicit
+    zeros in the chart instead of silently disappearing -- a gap in the
+    x-axis reads as "no data" to a chart library, not "zero," which made
+    an early version of this look broken on any day with no new users."""
+    with conn_ctx() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT COUNT(*) AS total FROM users")
+            total = cur.fetchone()["total"]
+
+            cur.execute(
+                """
+                SELECT to_char(day, 'YYYY-MM-DD') AS day, COUNT(u.id) AS count
+                FROM generate_series(
+                    (CURRENT_DATE - (%s || ' days')::interval)::date,
+                    CURRENT_DATE,
+                    '1 day'
+                ) AS day
+                LEFT JOIN users u ON u.created_at::date = day
+                GROUP BY day
+                ORDER BY day
+                """,
+                (days - 1,),
+            )
+            daily = [dict(r) for r in cur.fetchall()]
+
+            cur.execute("SELECT MIN(created_at) AS first_signup FROM users")
+            first_signup = cur.fetchone()["first_signup"]
+
+            cur.execute(
+                "SELECT COUNT(*) AS count FROM users WHERE created_at >= now() - interval '7 days'"
+            )
+            last_7_days = cur.fetchone()["count"]
+
+    return {
+        "total": total,
+        "last_7_days": last_7_days,
+        "first_signup": first_signup.isoformat() if first_signup else None,
+        "daily": daily,
+    }
+
+
 # ---------------- password reset ----------------
 
 def create_password_reset_token(user_id, token_hash, expires_at):

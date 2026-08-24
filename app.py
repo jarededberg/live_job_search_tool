@@ -63,6 +63,14 @@ GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID", "")
 # is a single-operator app; override via env var if that ever changes.
 CONTACT_EMAIL = os.environ.get("CONTACT_EMAIL", "jarededberg@gmail.com")
 MAX_CONTACT_MESSAGE_LEN = 4000
+# /admin (signup-count dashboard) -- gated on the logged-in session's email
+# matching this, not a separate password, so there's no extra credential to
+# manage. Defaults to the site owner's own address for the same single-
+# operator reasoning as CONTACT_EMAIL above; override via env var if that
+# ever changes. Compared case-insensitively in admin_required() since
+# db_users.create_user() already lowercases emails on signup, but this
+# constant is operator-typed and shouldn't have to match that casing.
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "jarededberg@gmail.com").strip().lower()
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = MAX_RESUME_BYTES
@@ -252,6 +260,23 @@ def accounts_required(f):
     def wrapper(*args, **kwargs):
         if not db_users.accounts_enabled():
             return jsonify({"ok": False, "message": "Accounts aren't set up on this deployment yet."}), 503
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def admin_required(f):
+    """Gates /api/admin/* routes to the single account whose email matches
+    ADMIN_EMAIL. Stacked *after* accounts_required + login_required (so it
+    can assume session["user_id"] exists and accounts are configured) on
+    every admin route. Returns 403 rather than a redirect or a rendered
+    "not authorized" page -- this only guards a JSON API; admin.html itself
+    is a static file anyone can request, but it renders nothing until this
+    endpoint returns real data, so serving the static shell isn't a leak."""
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        user = db_users.get_user_by_id(session["user_id"])
+        if not user or user["email"].strip().lower() != ADMIN_EMAIL:
+            return jsonify({"ok": False, "message": "Not authorized."}), 403
         return f(*args, **kwargs)
     return wrapper
 
@@ -691,6 +716,20 @@ def api_me():
     return jsonify({"ok": True, "email": user["email"]})
 
 
+# ---------------- admin dashboard ----------------
+
+@app.route("/api/admin/stats")
+@accounts_required
+@login_required
+@admin_required
+def api_admin_stats():
+    days = request.args.get("days", default=60, type=int)
+    days = max(7, min(days, 365))  # clamp -- generate_series() with an
+    # unbounded ?days= from the query string could otherwise be used to
+    # force an expensive/huge series; there's no real use case above a year
+    return jsonify({"ok": True, "stats": db_users.get_user_stats(days=days)})
+
+
 # ---------------- accounts: saved searches ----------------
 
 @app.route("/api/saved-searches", methods=["GET"])
@@ -822,6 +861,14 @@ def contact_page():
 @app.route("/about")
 def about_page():
     return send_from_directory(STATIC_DIR, "about.html")
+
+
+@app.route("/admin")
+def admin_page():
+    # No server-side auth check here -- see admin_required()'s docstring:
+    # this just serves the static shell, which fetches /api/admin/stats on
+    # load and shows its own "not authorized" state if that 401s/403s.
+    return send_from_directory(STATIC_DIR, "admin.html")
 
 
 @app.route("/reset-password")
