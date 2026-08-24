@@ -3,7 +3,7 @@
 A small web app that scrapes the Greenhouse / Lever / Ashby career-page APIs of
 ~4,300 companies (curated by Jared Edberg during his own job search) and lets
 any visitor search the cached results by keyword, location, and recency.
-Built to share the tool publicly and post about it on LinkedIn.
+Built to share the tool publicly.
 
 ## How it works
 
