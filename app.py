@@ -10,6 +10,7 @@ Then open http://localhost:8000
 
 import functools
 import hashlib
+import html
 import json
 import os
 import re
@@ -259,23 +260,43 @@ def contact_enabled():
     return bool(RESEND_API_KEY and CONTACT_EMAIL)
 
 
-def send_contact_email(name, from_email, message):
+CONTACT_REASONS = (
+    "General question",
+    "Add my company's job board",
+    "Add a specific role",
+    "Bug report",
+    "Other",
+)
+
+
+def send_contact_email(reason, name, from_email, message):
     """Sends a contact-form submission to CONTACT_EMAIL via Resend, same
     urllib pattern as send_password_reset_email(). Sets reply_to to the
     submitter's own address so replying from the inbox goes straight back
     to them, rather than to Resend's From address. Returns True/False;
     the caller always shows the same success message to the browser
     regardless (see api_contact) so a delivery failure only ever shows up
-    in server logs."""
+    in server logs. `reason` is put in the subject line so submissions
+    (general questions vs. "add my company" vs. bug reports, etc.) are
+    triageable from the inbox without opening every one."""
+    # Escaped before going into the HTML body -- reason/name/message are
+    # all user-supplied, and this is the one email-sending path on the
+    # site where the sender picks the content freely (unlike the
+    # password-reset email, which never embeds anything user-typed).
+    safe_reason = html.escape(reason)
+    safe_name = html.escape(name)
+    safe_email = html.escape(from_email)
+    safe_message = html.escape(message).replace("\n", "<br>")
     payload = json.dumps({
         "from": RESEND_FROM_EMAIL,
         "to": [CONTACT_EMAIL],
         "reply_to": from_email,
-        "subject": f"Skip The Boards contact form: {name}",
+        "subject": f"Skip The Boards contact form: {reason} ({name})",
         "html": (
-            f"<p><strong>From:</strong> {name} ({from_email})</p>"
-            f"<p>{message}</p>"
-        ).replace("\n", "<br>"),
+            f"<p><strong>Reason:</strong> {safe_reason}</p>"
+            f"<p><strong>From:</strong> {safe_name} ({safe_email})</p>"
+            f"<p>{safe_message}</p>"
+        ),
     }).encode("utf-8")
     req = urllib.request.Request(
         "https://api.resend.com/emails", data=payload,
@@ -412,6 +433,12 @@ def api_contact():
         return jsonify({"ok": False, "message": "The contact form isn't set up on this deployment yet."}), 503
 
     data = request.get_json(silent=True) or {}
+    reason = (data.get("reason") or "").strip()
+    if reason not in CONTACT_REASONS:
+        # Anyone hitting the API directly (not through the dropdown) gets
+        # bucketed into "Other" rather than rejected -- the reason is a
+        # triage label for the inbox, not something worth 400-ing over.
+        reason = "Other"
     name = (data.get("name") or "").strip()
     email = (data.get("email") or "").strip().lower()
     message = (data.get("message") or "").strip()
@@ -425,7 +452,7 @@ def api_contact():
     if len(message) > MAX_CONTACT_MESSAGE_LEN:
         return jsonify({"ok": False, "message": f"That message is too long (max {MAX_CONTACT_MESSAGE_LEN} characters)."}), 400
 
-    if not send_contact_email(name, email, message):
+    if not send_contact_email(reason, name, email, message):
         # Real failure reason (bad RESEND_API_KEY, Resend sandbox
         # restriction, etc.) only ever shows up in server logs -- see
         # send_contact_email()'s own logging -- but unlike login/forgot-
@@ -768,6 +795,14 @@ def rate_limited(e):
 @app.route("/")
 def index():
     return send_from_directory(STATIC_DIR, "index.html")
+
+
+@app.route("/faq")
+def faq_page():
+    # A real standalone page (static/faq.html), not a modal over the
+    # homepage -- separate URL, linkable, indexable, no JS required to
+    # read it.
+    return send_from_directory(STATIC_DIR, "faq.html")
 
 
 @app.route("/reset-password")

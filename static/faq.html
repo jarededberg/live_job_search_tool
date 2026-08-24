@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FAQ — Skip The Boards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=4" />
+</head>
+<body>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <div class="brand">
+        <a href="/" style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;">
+          <span class="brand-mark">◆</span>
+          <span class="brand-name">Skip The Boards</span>
+        </a>
+      </div>
+      <div class="topnav-right">
+        <nav class="nav-links">
+          <a href="/faq">FAQ</a>
+          <a href="/" id="page-contact-link">Contact</a>
+        </nav>
+        <a class="brand-link" href="/">← Back to search</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="content-page">
+      <h1>Frequently asked questions</h1>
+      <p class="content-page-intro">
+        How Skip The Boards actually works, in plain terms — including the parts that are best-effort
+        rather than guaranteed.
+      </p>
+
+      <div class="faq-list faq-page-list">
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">Is this actually free?</h2>
+          <p class="faq-static-answer">Yes — searching is free with no account required. Creating an account is optional and only unlocks saved searches and applied-job tracking.</p>
+        </div>
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">Where do the listings come from?</h2>
+          <p class="faq-static-answer">Pulled directly from roughly 4,300 companies' own Greenhouse, Lever, and Ashby career pages — not scraped or re-posted from other job boards — so there's no middleman and no stale duplicates.</p>
+        </div>
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">How often does the data refresh?</h2>
+          <p class="faq-static-answer">Automatically, on a schedule, straight from those company career pages. If a posting's been taken down, it drops out of results too.</p>
+        </div>
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">How accurate is the salary data?</h2>
+          <p class="faq-static-answer">Only shown when the employer discloses it directly on the posting — that's roughly 45% of listings. Figures are parsed from free text and marked with "~" as a best-effort read, not a guaranteed-exact number.</p>
+        </div>
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">What does the years-of-experience badge mean?</h2>
+          <p class="faq-static-answer">Same idea as salary — a best-effort parse of the posting's own text, not verified data. The filter box accepts any minimum you type, regardless of what's actually in the data.</p>
+        </div>
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">What do the match badges (best/good/poor) mean?</h2>
+          <p class="faq-static-answer">They only appear after you upload a resume, and they're a keyword-overlap heuristic against the titles and skills pulled from it — not deep semantic matching. Treat them as a rough sort, not a verdict.</p>
+        </div>
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">Does uploading my resume store it anywhere?</h2>
+          <p class="faq-static-answer">No — it's parsed in memory to extract search terms and a rough location, and the file itself is never saved on the server.</p>
+        </div>
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">Why do some locations disappear from my results?</h2>
+          <p class="faq-static-answer">If your resume places you in the US, roles that clearly aren't viable for you (a bare foreign city, remote-outside-the-US labels, etc.) are removed entirely rather than just ranked lower — so the list only shows things you could actually take.</p>
+        </div>
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">Can I use boolean search syntax?</h2>
+          <p class="faq-static-answer">Yes — bare words are an implicit AND, plus OR, NOT, quoted phrases for exact matches, and parentheses to group. Click "Syntax" next to the search box on the homepage for an example.</p>
+        </div>
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">What's "AI Search"?</h2>
+          <p class="faq-static-answer">A guided, click-through way to set up a search — it asks a few quick questions (resume or search terms, salary, experience, department, location, how recent) and fills in the real search filters for you. It's a scripted set of questions, not an AI model — no account or API key involved.</p>
+        </div>
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">Is my account data safe?</h2>
+          <p class="faq-static-answer">Passwords are hashed, never stored in plain text. Password reset links are single-use and expire after an hour.</p>
+        </div>
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">Can I get my company's job board added?</h2>
+          <p class="faq-static-answer">Yes — use the Contact link and choose "Add my company's job board," with your career page URL. New Greenhouse, Lever, and Ashby boards are straightforward to add.</p>
+        </div>
+
+        <div class="faq-item">
+          <h2 class="faq-static-question">Who built this?</h2>
+          <p class="faq-static-answer">One person — Jared Edberg, while running his own job search. See the LinkedIn link in the footer.</p>
+        </div>
+
+      </div>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p class="footer-byline">
+        <strong>Jared Edberg</strong> · <a href="https://www.linkedin.com/in/jared-edberg" target="_blank" rel="noopener">LinkedIn ↗</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    // "Contact" in the nav here opens the real contact form, which lives
+    // on the homepage's modal system -- send people there with a flag
+    // telling app.js to open it automatically once loaded.
+    document.getElementById("page-contact-link").addEventListener("click", (e) => {
+      e.preventDefault();
+      window.location.href = "/?contact=1";
+    });
+  </script>
+</body>
+</html>

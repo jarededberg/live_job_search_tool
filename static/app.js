@@ -1360,12 +1360,21 @@ function openContactModal() {
   openModal(`
     <h2 class="modal-title">Contact</h2>
     <form id="contact-form">
+      <label for="contact-reason">What's this about?</label>
+      <select id="contact-reason" class="wizard-inline-select">
+        <option value="General question">General question</option>
+        <option value="Add my company's job board">Add my company's job board to the search</option>
+        <option value="Add a specific role">Flag a specific role that's missing or wrong</option>
+        <option value="Bug report">Bug report</option>
+        <option value="Other">Other</option>
+      </select>
       <label for="contact-name">Name</label>
       <input type="text" id="contact-name" required maxlength="120" autocomplete="name" />
       <label for="contact-email">Email</label>
       <input type="email" id="contact-email" required autocomplete="email" />
       <label for="contact-message">Message</label>
-      <textarea id="contact-message" required maxlength="4000" rows="5"></textarea>
+      <textarea id="contact-message" required maxlength="4000" rows="5"
+        placeholder="Tell me a bit more -- e.g. company name and career page URL, or the role/link in question."></textarea>
       <div class="auth-error" id="contact-error"></div>
       <div class="auth-success hidden" id="contact-success"></div>
       <button type="submit" class="btn-primary">Send</button>
@@ -1374,6 +1383,7 @@ function openContactModal() {
   document.getElementById("contact-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const form = e.target;
+    const reason = document.getElementById("contact-reason").value;
     const name = document.getElementById("contact-name").value.trim();
     const email = document.getElementById("contact-email").value.trim();
     const message = document.getElementById("contact-message").value.trim();
@@ -1386,7 +1396,7 @@ function openContactModal() {
       const res = await fetch("/api/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, message }),
+        body: JSON.stringify({ reason, name, email, message }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
@@ -1410,46 +1420,16 @@ document.getElementById("nav-contact-link").addEventListener("click", (e) => {
   openContactModal();
 });
 
-// ---- FAQ ----
-
-const FAQ_ITEMS = [
-  ["Is this actually free?", "Yes -- searching is free with no account required. Creating an account is optional and only unlocks saved searches and applied-job tracking."],
-  ["Where do the listings come from?", "Pulled directly from roughly 4,300 companies' own Greenhouse, Lever, and Ashby career pages -- not scraped or re-posted from other job boards -- so there's no middleman and no stale duplicates."],
-  ["How often does the data refresh?", "Automatically, on a schedule, straight from those company career pages. If a posting's been taken down, it drops out of results too."],
-  ["How accurate is the salary data?", "Only shown when the employer discloses it directly on the posting -- that's roughly 45% of listings. Figures are parsed from free text and marked with \"~\" as a best-effort read, not a guaranteed-exact number."],
-  ["What does the years-of-experience badge mean?", "Same idea as salary -- a best-effort parse of the posting's own text, not verified data. The filter slider runs 0 to 20+ regardless of what's actually in the data."],
-  ["What do the match badges (best/good/poor) mean?", "They only appear after you upload a resume, and they're a keyword-overlap heuristic against the titles and skills pulled from it -- not deep semantic matching. Treat them as a rough sort, not a verdict."],
-  ["Does uploading my resume store it anywhere?", "No -- it's parsed in memory to extract search terms and a rough location, and the file itself is never saved on the server."],
-  ["Why do some locations disappear from my results?", "If your resume places you in the US, roles that clearly aren't viable for you (a bare foreign city, remote-outside-the-US labels, etc.) are removed entirely rather than just ranked lower -- so the list only shows things you could actually take."],
-  ["Can I use boolean search syntax?", "Yes -- bare words are an implicit AND, plus OR, NOT, quoted phrases for exact matches, and parentheses to group. Click \"Syntax\" next to the search box for an example."],
-  ["Is my account data safe?", "Passwords are hashed, never stored in plain text. Password reset links are single-use and expire after an hour."],
-  ["Who built this?", "One person -- Jared Edberg, while running his own job search. See the LinkedIn link in the footer."],
-];
-
-function openFaqModal() {
-  const html = FAQ_ITEMS.map(([q, a], i) => `
-    <div class="faq-item">
-      <button type="button" class="faq-question" data-faq="${i}">
-        <span>${escapeHtml(q)}</span>
-        <span class="faq-caret">⌄</span>
-      </button>
-      <div class="faq-answer hidden" id="faq-answer-${i}">${escapeHtml(a)}</div>
-    </div>
-  `).join("");
-  openModal(`<h2 class="modal-title">FAQ</h2><div class="faq-list">${html}</div>`, { wide: true });
-  document.querySelectorAll("[data-faq]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const answer = document.getElementById(`faq-answer-${btn.dataset.faq}`);
-      answer.classList.toggle("hidden");
-      btn.classList.toggle("faq-open");
-    });
-  });
+// FAQ now lives at its own /faq page (static/faq.html) instead of a modal
+// -- see app.py's faq_page() route. That page's own "Contact" link can't
+// reach openContactModal() directly (different page load), so it
+// redirects here with ?contact=1, and the init sequence below checks for
+// that flag and opens the modal automatically once this page is ready.
+function checkForContactFlag() {
+  if (new URLSearchParams(window.location.search).get("contact") !== "1") return;
+  openContactModal();
+  history.replaceState({}, "", window.location.pathname);
 }
-
-document.getElementById("nav-faq-link").addEventListener("click", (e) => {
-  e.preventDefault();
-  openFaqModal();
-});
 
 // ---- AI search assistant ----
 
@@ -1471,12 +1451,6 @@ document.getElementById("nav-faq-link").addEventListener("click", (e) => {
 
 let assistantMessages, assistantChoices, assistantForm, assistantInput, assistantResumeInput;
 
-const WIZARD_YOE_PRESETS = [
-  { label: "Entry-level (0–2 yrs)", min: 0, max: 2 },
-  { label: "Mid-level (3–5 yrs)", min: 3, max: 5 },
-  { label: "Senior (6+ yrs)", min: 6, max: null },
-];
-
 let wizard = null; // current run's collected answers; null until first opened
 
 function resetWizardState() {
@@ -1485,12 +1459,16 @@ function resetWizardState() {
     query: "",
     salaryMin: undefined,
     yoeMin: undefined,
-    yoeMax: undefined,
     department: "",
     commitment: "",
     days: "",
     locationText: "",
     useRemoteUs: false,
+    // Set while a number-entry step (salary/YOE) is active -- see
+    // wizardAskNumber()/finishNumberStep() -- and cleared once answered.
+    numericField: null,
+    numericNext: null,
+    numericFormat: null,
   };
 }
 
@@ -1566,6 +1544,57 @@ function wizardAskFromSelect(promptText, sourceSelect, onApply, nextFn) {
   assistantChoices.classList.remove("hidden");
 }
 
+// A real number input, not preset chips -- salary in particular used to
+// offer 3 auto-computed presets (25th/50th/75th percentile of the live
+// salary_bounds()), which broke badly whenever the underlying data had a
+// high outlier: the lowest of the 3 presets could itself land at an
+// unreasonably high number (reported: "$250k+" as the LOWEST option),
+// with no way to ask for anything lower. A plain number box sidesteps
+// the whole problem -- no bounds computation, no outlier sensitivity,
+// and it's what people actually expect to type into a salary/experience
+// filter. Skip is still one click away for anyone who doesn't care.
+function wizardAskNumber(promptText, placeholder, field, formatFn, nextFn) {
+  wizardBotSay(promptText);
+  wizard.step = "awaiting_number";
+  wizard.numericField = field;
+  wizard.numericNext = nextFn;
+  wizard.numericFormat = formatFn;
+
+  assistantChoices.innerHTML = "";
+  const skipBtn = document.createElement("button");
+  skipBtn.type = "button";
+  skipBtn.className = "assistant-chip";
+  skipBtn.textContent = "Skip";
+  skipBtn.addEventListener("click", () => {
+    wizardUserSay("Skip");
+    assistantChoices.classList.add("hidden");
+    assistantChoices.innerHTML = "";
+    finishNumberStep(null);
+  });
+  assistantChoices.appendChild(skipBtn);
+  assistantChoices.classList.remove("hidden");
+
+  assistantInput.disabled = false;
+  assistantInput.type = "number";
+  assistantInput.min = "0";
+  assistantInput.value = "";
+  assistantInput.placeholder = placeholder;
+  assistantInput.focus();
+}
+
+function finishNumberStep(n) {
+  const { numericField, numericNext, numericFormat } = wizard;
+  assistantInput.type = "text"; // restore for later free-text steps (query/city)
+  if (n !== null && !Number.isNaN(n) && n > 0) {
+    wizard[numericField] = n;
+    wizardUserSay(numericFormat(n));
+  }
+  wizard.numericField = null;
+  wizard.numericNext = null;
+  wizard.numericFormat = null;
+  numericNext();
+}
+
 function wizardAskSource() {
   wizard.step = "source";
   wizardBotSay("Want to upload your resume, or just tell me some search terms to start?");
@@ -1590,32 +1619,24 @@ function wizardAskSource() {
 
 function wizardAskSalary() {
   wizard.step = "salary";
-  if (!salaryRange) { wizardAskYoe(); return; } // facets not loaded yet -- skip gracefully rather than block
-  const { min, max } = salaryRange;
-  const presets = [0.25, 0.5, 0.75].map((f) => Math.round((min + (max - min) * f) / 5000) * 5000);
-  wizardBotSay("Any minimum salary?");
-  setWizardChoices([
-    ...presets.map((p) => ({ label: `${formatSalaryShort(p)}+`, onClick: () => { wizardUserSay(`${formatSalaryShort(p)}+`); wizard.salaryMin = p; wizardAskYoe(); } })),
-    { label: "Skip", onClick: () => { wizardUserSay("Skip"); wizardAskYoe(); } },
-  ]);
+  wizardAskNumber(
+    "What's the minimum salary you're looking for? Type a number, or skip.",
+    "e.g. 120000",
+    "salaryMin",
+    (n) => `${formatSalaryShort(n)}+`,
+    wizardAskYoe,
+  );
 }
 
 function wizardAskYoe() {
   wizard.step = "yoe";
-  if (!yoeRange) { wizardAskDepartment(); return; }
-  wizardBotSay("What experience level?");
-  setWizardChoices([
-    ...WIZARD_YOE_PRESETS.map((p) => ({
-      label: p.label,
-      onClick: () => {
-        wizardUserSay(p.label);
-        wizard.yoeMin = p.min;
-        wizard.yoeMax = p.max === null ? yoeRange.max : p.max;
-        wizardAskDepartment();
-      },
-    })),
-    { label: "Skip", onClick: () => { wizardUserSay("Skip"); wizardAskDepartment(); } },
-  ]);
+  wizardAskNumber(
+    "Minimum years of experience?",
+    "e.g. 5",
+    "yoeMin",
+    (n) => `${n}+ yrs`,
+    wizardAskDepartment,
+  );
 }
 
 function wizardAskDepartment() {
@@ -1670,13 +1691,21 @@ function wizardFinish() {
   }
   renderLocationChips();
 
+  // Both are typed minimums with no ceiling requested -- hi stays at
+  // whatever the slider's own real max already is (== "no upper bound"),
+  // same convention db.py/search() use everywhere else for an unsent
+  // salary_max/yoe_max. If the sliders haven't finished loading their
+  // bounds yet (rare -- only if the wizard was opened within the first
+  // instant of page load), the typed value still reaches /api/jobs via
+  // whatever the slider control ends up defaulting to; only the visual
+  // slider thumb positioning is skipped here.
   if (salarySliderCtl && salaryRange && wizard.salaryMin !== undefined) {
     salaryRange = { ...salaryRange, lo: wizard.salaryMin, hi: salaryRange.max };
     salarySliderCtl.setValues(wizard.salaryMin, salaryRange.max);
   }
   if (yoeSliderCtl && yoeRange && wizard.yoeMin !== undefined) {
-    yoeRange = { ...yoeRange, lo: wizard.yoeMin, hi: wizard.yoeMax };
-    yoeSliderCtl.setValues(wizard.yoeMin, wizard.yoeMax);
+    yoeRange = { ...yoeRange, lo: wizard.yoeMin, hi: yoeRange.max };
+    yoeSliderCtl.setValues(wizard.yoeMin, yoeRange.max);
   }
 
   search(1);
@@ -1735,8 +1764,19 @@ function openWizardModal() {
 
   assistantForm.addEventListener("submit", (e) => {
     e.preventDefault();
+    if (!wizard || assistantInput.disabled) return;
     const text = assistantInput.value.trim();
-    if (!text || !wizard || assistantInput.disabled) return;
+
+    if (wizard.step === "awaiting_number") {
+      // Empty submit here just re-triggers Skip's own logic (no free
+      // pass for a blank Enter-press to silently count as "answered").
+      assistantChoices.classList.add("hidden");
+      assistantChoices.innerHTML = "";
+      const n = text === "" ? null : parseInt(text, 10);
+      finishNumberStep(Number.isNaN(n) ? null : n);
+      return;
+    }
+    if (!text) return;
     if (wizard.step === "awaiting_terms") {
       assistantInput.value = "";
       wizardUserSay(text);
@@ -1778,7 +1818,7 @@ loadFacets();
 loadLocationGroups();
 loadAuthConfig();
 loadStatus();
-loadSiteConfig();
+loadSiteConfig().then(checkForContactFlag);
 checkForResetToken();
 setInterval(loadStatus, 30000);
 // Waits on the auth check specifically (fast -- one query, or an
