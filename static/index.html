@@ -7,7 +7,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css" />
+<!-- ?v= is a manual cache-buster -- bump it any time style.css/app.js
+     change. Without it, browsers that already cached the old files can
+     keep running old JS against new HTML after a deploy (mismatched IDs,
+     "nothing happens" clicks) until the cache separately expires. -->
+<link rel="stylesheet" href="style.css?v=2" />
 </head>
 <body>
   <nav class="topnav">
@@ -45,10 +49,6 @@
 
   <main>
     <section class="search-panel">
-      <button type="button" class="ai-search-cta" id="ai-search-btn">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.8 2.8M14.9 14.9l2.8 2.8M6.3 17.7l2.8-2.8M14.9 9.1l2.8-2.8"/></svg>
-        AI Search — answer a few quick questions and I'll set it up for you
-      </button>
       <form id="search-form">
         <div class="query-row">
           <div class="query-input-wrap">
@@ -57,7 +57,12 @@
               placeholder='("product manager" OR "program manager") AND revenue NOT intern' />
             <button type="button" id="syntax-help-btn" aria-label="Search syntax help">Syntax</button>
           </div>
-          <button type="submit" class="btn-primary">Search</button>
+          <div class="search-btn-stack">
+            <button type="button" class="ai-search-circle" id="ai-search-btn" title="AI Search" aria-label="AI Search">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.8 2.8M14.9 14.9l2.8 2.8M6.3 17.7l2.8-2.8M14.9 9.1l2.8-2.8"/></svg>
+            </button>
+            <button type="submit" class="btn-primary">Search</button>
+          </div>
         </div>
 
         <div id="syntax-help" class="syntax-help hidden">
@@ -172,6 +177,6 @@
        happens if /api/auth-config returns a site key. See README's "User
        accounts" section. -->
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=2"></script>
 </body>
 </html>
