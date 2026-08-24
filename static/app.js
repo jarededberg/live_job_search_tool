@@ -1405,7 +1405,7 @@ function openContactModal() {
   });
 }
 
-document.getElementById("footer-contact-link").addEventListener("click", (e) => {
+document.getElementById("nav-contact-link").addEventListener("click", (e) => {
   e.preventDefault();
   openContactModal();
 });
@@ -1446,7 +1446,7 @@ function openFaqModal() {
   });
 }
 
-document.getElementById("footer-faq-link").addEventListener("click", (e) => {
+document.getElementById("nav-faq-link").addEventListener("click", (e) => {
   e.preventDefault();
   openFaqModal();
 });
@@ -1461,23 +1461,15 @@ document.getElementById("footer-faq-link").addEventListener("click", (e) => {
 // Reuses handleResumeFile() (defined above, next to the main resume
 // dropzone) for the resume-upload branch rather than re-implementing
 // parsing, so both entry points behave identically.
+//
+// Runs inside the existing modal system (openModal()/closeModal(), same
+// one FAQ/Contact/auth use) rather than a standalone floating widget --
+// triggered from the "AI Search" button at the top of the search panel.
+// Because modal content is destroyed and rebuilt every time the modal
+// opens (see openModal()'s innerHTML replace), the elements below are
+// `let`s re-queried each time openWizardModal() runs, not one-time consts.
 
-const assistantToggle = document.getElementById("assistant-toggle");
-const assistantPanel = document.getElementById("assistant-panel");
-const assistantCloseBtn = document.getElementById("assistant-close");
-const assistantMessages = document.getElementById("assistant-messages");
-const assistantChoices = document.getElementById("assistant-choices");
-const assistantForm = document.getElementById("assistant-form");
-const assistantInput = document.getElementById("assistant-input");
-
-// Hidden file input dedicated to the wizard's "upload resume" branch --
-// separate element from the main page's #resume-input so choosing a file
-// here doesn't fight over the same <input>'s change listener.
-const assistantResumeInput = document.createElement("input");
-assistantResumeInput.type = "file";
-assistantResumeInput.accept = ".pdf,.docx,.txt";
-assistantResumeInput.hidden = true;
-assistantPanel.appendChild(assistantResumeInput);
+let assistantMessages, assistantChoices, assistantForm, assistantInput, assistantResumeInput;
 
 const WIZARD_YOE_PRESETS = [
   { label: "Entry-level (0–2 yrs)", min: 0, max: 2 },
@@ -1596,17 +1588,6 @@ function wizardAskSource() {
   ]);
 }
 
-assistantResumeInput.addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  e.target.value = ""; // allow re-selecting the same file later in a restarted run
-  if (!file) return;
-  wizardUserSay(`Uploaded ${file.name}`);
-  wizardBotSay("Reading your resume…");
-  await handleResumeFile(file); // sets hasResume/match terms and runs an initial search itself
-  wizardBotSay("Got it — now let's narrow it down a bit. Everything from here is optional.");
-  wizardAskSalary();
-});
-
 function wizardAskSalary() {
   wizard.step = "salary";
   if (!salaryRange) { wizardAskYoe(); return; } // facets not loaded yet -- skip gracefully rather than block
@@ -1699,8 +1680,11 @@ function wizardFinish() {
   }
 
   search(1);
-  wizardBotSay("Done — I've set up your search and run it. Scroll up to see results, or adjust any filter directly on the page.");
-  setWizardChoices([{ label: "Start a new search", onClick: restartWizard }]);
+  wizardBotSay("Done — I've set up your search and run it.");
+  setWizardChoices([
+    { label: "See results", onClick: () => closeModal() },
+    { label: "Start a new search", onClick: restartWizard },
+  ]);
 }
 
 function restartWizard() {
@@ -1710,36 +1694,68 @@ function restartWizard() {
   wizardAskSource();
 }
 
-assistantToggle.addEventListener("click", () => {
-  const wasHidden = assistantPanel.classList.contains("hidden");
-  assistantPanel.classList.toggle("hidden");
-  if (wasHidden && !assistantMessages.children.length) {
-    resetWizardState();
-    wizardBotSay("Hi! I can walk you through setting up a search -- just click through the buttons, no typing required unless you want to.");
-    wizardAskSource();
-  }
-});
+function openWizardModal() {
+  openModal(`
+    <h2 class="modal-title">AI Search</h2>
+    <div class="assistant-messages" id="assistant-messages"></div>
+    <div class="assistant-choices hidden" id="assistant-choices"></div>
+    <form id="assistant-form" class="assistant-form">
+      <input type="text" id="assistant-input" placeholder="Use the buttons above ↑" autocomplete="off" disabled />
+      <button type="submit" aria-label="Send">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+    </form>
+  `, { wide: true });
 
-assistantCloseBtn.addEventListener("click", () => {
-  assistantPanel.classList.add("hidden");
-});
+  assistantMessages = document.getElementById("assistant-messages");
+  assistantChoices = document.getElementById("assistant-choices");
+  assistantForm = document.getElementById("assistant-form");
+  assistantInput = document.getElementById("assistant-input");
 
-assistantForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const text = assistantInput.value.trim();
-  if (!text || !wizard || assistantInput.disabled) return;
-  if (wizard.step === "awaiting_terms") {
-    assistantInput.value = "";
-    wizardUserSay(text);
-    wizard.query = text;
+  // Hidden file input dedicated to the wizard's "upload resume" branch --
+  // separate element from the main page's #resume-input so choosing a
+  // file here doesn't fight over the same <input>'s change listener.
+  // Recreated each time the modal opens, same as the fields above.
+  assistantResumeInput = document.createElement("input");
+  assistantResumeInput.type = "file";
+  assistantResumeInput.accept = ".pdf,.docx,.txt";
+  assistantResumeInput.hidden = true;
+  modalContent.appendChild(assistantResumeInput);
+
+  assistantResumeInput.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = ""; // allow re-selecting the same file later in a restarted run
+    if (!file) return;
+    wizardUserSay(`Uploaded ${file.name}`);
+    wizardBotSay("Reading your resume…");
+    await handleResumeFile(file); // sets hasResume/match terms and runs an initial search itself
+    wizardBotSay("Got it — now let's narrow it down a bit. Everything from here is optional.");
     wizardAskSalary();
-  } else if (wizard.step === "awaiting_location") {
-    assistantInput.value = "";
-    wizardUserSay(text);
-    wizard.locationText = text;
-    wizardAskDays();
-  }
-});
+  });
+
+  assistantForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = assistantInput.value.trim();
+    if (!text || !wizard || assistantInput.disabled) return;
+    if (wizard.step === "awaiting_terms") {
+      assistantInput.value = "";
+      wizardUserSay(text);
+      wizard.query = text;
+      wizardAskSalary();
+    } else if (wizard.step === "awaiting_location") {
+      assistantInput.value = "";
+      wizardUserSay(text);
+      wizard.locationText = text;
+      wizardAskDays();
+    }
+  });
+
+  resetWizardState();
+  wizardBotSay("Hi! I'll walk you through setting up a search -- just click through the buttons, no typing required unless you want to.");
+  wizardAskSource();
+}
+
+document.getElementById("ai-search-btn").addEventListener("click", openWizardModal);
 
 // ---- misc UI wiring ----
 

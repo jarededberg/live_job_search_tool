@@ -1208,22 +1208,27 @@ address, so replying from your inbox goes straight back to them.
 
 ## FAQ
 
-Static content, no backend involved — the footer's "FAQ" link opens a
-modal with a plain accordion (`FAQ_ITEMS` array near the top of the
-"FAQ" section in `static/app.js`). The questions/answers are written
-directly from this README's own documented behavior (salary/YOE data
-being best-effort parses, match tiers being a keyword heuristic, resumes
-not being stored server-side, etc.) — if any of that behavior changes,
-update `FAQ_ITEMS` to match.
+Static content, no backend involved — the "FAQ" link in the top-right of
+the nav bar (`#nav-faq-link`) opens a modal with a plain accordion
+(`FAQ_ITEMS` array near the top of the "FAQ" section in `static/app.js`).
+The questions/answers are written directly from this README's own
+documented behavior (salary/YOE data being best-effort parses, match
+tiers being a keyword heuristic, resumes not being stored server-side,
+etc.) — if any of that behavior changes, update `FAQ_ITEMS` to match.
+The "Contact" link right next to it (`#nav-contact-link`) opens the
+contact form described above.
 
-## Guided search wizard (no AI, no external API, always on)
+## AI Search (guided wizard — no AI, no external API, always on)
 
-A chat-style bubble in the bottom-right corner of every page (see
-`#assistant-widget` in `static/index.html`, and the "guided search
-wizard" section near the end of `static/app.js`). This is a scripted
-decision tree, not a real conversation — there's no LLM involved, no API
-key, no cost, and nothing to configure, so unlike every other feature in
-this README there's no env var gating it on/off.
+A prominent button at the top of the search panel/dashboard
+(`#ai-search-btn` in `static/index.html`, labeled "AI Search"), which
+opens the wizard inside the same modal system FAQ/Contact/login use. This
+is a scripted decision tree, not a real conversation — there's no LLM
+involved, no API key, no cost, and nothing to configure, so unlike every
+other feature in this README there's no env var gating it on/off. (It's
+named "AI Search" for the person using it, not because it calls an AI
+model — worth knowing if this ever needs explaining to someone reading
+the code.)
 
 **Flow**: (1) ask whether to upload a resume or type search terms —
 resume goes through the existing `handleResumeFile()`/`/api/parse-resume`
@@ -1238,7 +1243,13 @@ options so they can never drift out of sync with the actual filters;
 way of filling in the same search box, sliders, and dropdowns already on
 the page — never a separate/parallel search path.
 
-**Implementation notes**: `wizard` (a small state object) tracks
+**Implementation notes**: `openWizardModal()` (near the end of
+`static/app.js`) builds the modal content and re-queries
+`assistantMessages`/`assistantChoices`/`assistantForm`/`assistantInput`
+each time it opens, since `openModal()` replaces `#modal-content`'s
+`innerHTML` on every call — these were plain top-level `const`s back
+when the wizard lived in a persistent floating widget, but now need to
+be `let`s rebound per-open. `wizard` (a small state object) then tracks
 progress through `wizardAskSource()` → `wizardAskSalary()` →
 `wizardAskYoe()` → `wizardAskDepartment()` → `wizardAskCommitment()` →
 `wizardAskLocation()` → `wizardAskDays()` → `wizardFinish()`. Each step
@@ -1246,8 +1257,9 @@ either renders button choices (`setWizardChoices()`) or a cloned
 `<select>` plus a Continue button (`wizardAskFromSelect()`), except the
 two free-text steps (search terms, a typed city) which briefly re-enable
 the text input. `wizardFinish()` reuses the exact same filter-application
-patterns `loadSavedSearch()` already used for saved searches. "Start a
-new search" at the end resets and replays the flow.
+patterns `loadSavedSearch()` already used for saved searches, then offers
+"See results" (closes the modal) or "Start a new search" (replays the
+flow from the top).
 
 ## Branding
 
