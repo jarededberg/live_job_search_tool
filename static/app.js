@@ -1310,10 +1310,17 @@ function appliedJobRow(job) {
 // server), not committed to the repo -- same reasoning as
 // turnstileSiteKey. A deployment with it unset just never adds the
 // script tags below, and this whole thing is a silent no-op.
+let contactEnabled = false;
+let contactEmail = "";
+
 async function loadSiteConfig() {
   try {
     const res = await fetch("/api/site-config");
     const data = await res.json();
+
+    contactEnabled = Boolean(data.contact_enabled);
+    contactEmail = data.contact_email || "";
+
     const gaId = data.ga_measurement_id;
     if (!gaId) return;
 
@@ -1328,10 +1335,411 @@ async function loadSiteConfig() {
     gtag("js", new Date());
     gtag("config", gaId);
   } catch (e) {
-    // Analytics is the last thing that should ever break the site --
-    // fail silent, same as every other nice-to-have fetch here.
+    // Analytics/contact are nice-to-haves -- fail silent, same as every
+    // other config fetch here. Their respective UI stays hidden/disabled,
+    // matching the "unset env var" state. (The search wizard below needs
+    // no config at all -- it's purely client-side.)
   }
 }
+
+// ---- contact form ----
+
+function openContactModal() {
+  if (!contactEnabled) {
+    // No email backend configured on this deployment -- skip the form
+    // entirely and just hand over a mailto: link rather than showing a
+    // form that has nowhere to actually send its submission.
+    openModal(`
+      <h2 class="modal-title">Contact</h2>
+      <p class="modal-plain-text">
+        Reach me directly at <a href="mailto:${escapeAttr(contactEmail)}">${escapeHtml(contactEmail)}</a>.
+      </p>
+    `);
+    return;
+  }
+  openModal(`
+    <h2 class="modal-title">Contact</h2>
+    <form id="contact-form">
+      <label for="contact-name">Name</label>
+      <input type="text" id="contact-name" required maxlength="120" autocomplete="name" />
+      <label for="contact-email">Email</label>
+      <input type="email" id="contact-email" required autocomplete="email" />
+      <label for="contact-message">Message</label>
+      <textarea id="contact-message" required maxlength="4000" rows="5"></textarea>
+      <div class="auth-error" id="contact-error"></div>
+      <div class="auth-success hidden" id="contact-success"></div>
+      <button type="submit" class="btn-primary">Send</button>
+    </form>
+  `);
+  document.getElementById("contact-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const name = document.getElementById("contact-name").value.trim();
+    const email = document.getElementById("contact-email").value.trim();
+    const message = document.getElementById("contact-message").value.trim();
+    const errorEl = document.getElementById("contact-error");
+    const successEl = document.getElementById("contact-success");
+    const submitBtn = form.querySelector("button[type=submit]");
+    errorEl.textContent = "";
+    submitBtn.disabled = true;
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, message }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        errorEl.textContent = data.message || "Something went wrong. Try again.";
+        submitBtn.disabled = false;
+        return;
+      }
+      successEl.textContent = data.message || "Thanks -- message sent.";
+      successEl.classList.remove("hidden");
+      form.querySelectorAll("input, textarea").forEach((el) => { el.disabled = true; });
+      submitBtn.textContent = "Sent";
+    } catch (err) {
+      errorEl.textContent = "Something went wrong. Try again.";
+      submitBtn.disabled = false;
+    }
+  });
+}
+
+document.getElementById("footer-contact-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  openContactModal();
+});
+
+// ---- FAQ ----
+
+const FAQ_ITEMS = [
+  ["Is this actually free?", "Yes -- searching is free with no account required. Creating an account is optional and only unlocks saved searches and applied-job tracking."],
+  ["Where do the listings come from?", "Pulled directly from roughly 4,300 companies' own Greenhouse, Lever, and Ashby career pages -- not scraped or re-posted from other job boards -- so there's no middleman and no stale duplicates."],
+  ["How often does the data refresh?", "Automatically, on a schedule, straight from those company career pages. If a posting's been taken down, it drops out of results too."],
+  ["How accurate is the salary data?", "Only shown when the employer discloses it directly on the posting -- that's roughly 45% of listings. Figures are parsed from free text and marked with \"~\" as a best-effort read, not a guaranteed-exact number."],
+  ["What does the years-of-experience badge mean?", "Same idea as salary -- a best-effort parse of the posting's own text, not verified data. The filter slider runs 0 to 20+ regardless of what's actually in the data."],
+  ["What do the match badges (best/good/poor) mean?", "They only appear after you upload a resume, and they're a keyword-overlap heuristic against the titles and skills pulled from it -- not deep semantic matching. Treat them as a rough sort, not a verdict."],
+  ["Does uploading my resume store it anywhere?", "No -- it's parsed in memory to extract search terms and a rough location, and the file itself is never saved on the server."],
+  ["Why do some locations disappear from my results?", "If your resume places you in the US, roles that clearly aren't viable for you (a bare foreign city, remote-outside-the-US labels, etc.) are removed entirely rather than just ranked lower -- so the list only shows things you could actually take."],
+  ["Can I use boolean search syntax?", "Yes -- bare words are an implicit AND, plus OR, NOT, quoted phrases for exact matches, and parentheses to group. Click \"Syntax\" next to the search box for an example."],
+  ["Is my account data safe?", "Passwords are hashed, never stored in plain text. Password reset links are single-use and expire after an hour."],
+  ["Who built this?", "One person -- Jared Edberg, while running his own job search. See the LinkedIn link in the footer."],
+];
+
+function openFaqModal() {
+  const html = FAQ_ITEMS.map(([q, a], i) => `
+    <div class="faq-item">
+      <button type="button" class="faq-question" data-faq="${i}">
+        <span>${escapeHtml(q)}</span>
+        <span class="faq-caret">⌄</span>
+      </button>
+      <div class="faq-answer hidden" id="faq-answer-${i}">${escapeHtml(a)}</div>
+    </div>
+  `).join("");
+  openModal(`<h2 class="modal-title">FAQ</h2><div class="faq-list">${html}</div>`, { wide: true });
+  document.querySelectorAll("[data-faq]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const answer = document.getElementById(`faq-answer-${btn.dataset.faq}`);
+      answer.classList.toggle("hidden");
+      btn.classList.toggle("faq-open");
+    });
+  });
+}
+
+document.getElementById("footer-faq-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  openFaqModal();
+});
+
+// ---- AI search assistant ----
+
+// A scripted decision tree, not a real conversation -- no external API,
+// no cost, nothing to configure. Every question is either a fixed set of
+// button choices or one specific piece of free text (search terms, or a
+// city), and the whole thing bottoms out in populating the real filter
+// controls and calling search() once at the end -- see wizardFinish().
+// Reuses handleResumeFile() (defined above, next to the main resume
+// dropzone) for the resume-upload branch rather than re-implementing
+// parsing, so both entry points behave identically.
+
+const assistantToggle = document.getElementById("assistant-toggle");
+const assistantPanel = document.getElementById("assistant-panel");
+const assistantCloseBtn = document.getElementById("assistant-close");
+const assistantMessages = document.getElementById("assistant-messages");
+const assistantChoices = document.getElementById("assistant-choices");
+const assistantForm = document.getElementById("assistant-form");
+const assistantInput = document.getElementById("assistant-input");
+
+// Hidden file input dedicated to the wizard's "upload resume" branch --
+// separate element from the main page's #resume-input so choosing a file
+// here doesn't fight over the same <input>'s change listener.
+const assistantResumeInput = document.createElement("input");
+assistantResumeInput.type = "file";
+assistantResumeInput.accept = ".pdf,.docx,.txt";
+assistantResumeInput.hidden = true;
+assistantPanel.appendChild(assistantResumeInput);
+
+const WIZARD_YOE_PRESETS = [
+  { label: "Entry-level (0–2 yrs)", min: 0, max: 2 },
+  { label: "Mid-level (3–5 yrs)", min: 3, max: 5 },
+  { label: "Senior (6+ yrs)", min: 6, max: null },
+];
+
+let wizard = null; // current run's collected answers; null until first opened
+
+function resetWizardState() {
+  wizard = {
+    step: "source",
+    query: "",
+    salaryMin: undefined,
+    yoeMin: undefined,
+    yoeMax: undefined,
+    department: "",
+    commitment: "",
+    days: "",
+    locationText: "",
+    useRemoteUs: false,
+  };
+}
+
+function addAssistantMessage(role, text) {
+  const div = document.createElement("div");
+  div.className = `assistant-msg assistant-msg-${role}`;
+  div.textContent = text;
+  assistantMessages.appendChild(div);
+  assistantMessages.scrollTop = assistantMessages.scrollHeight;
+  return div;
+}
+
+function wizardBotSay(text) { addAssistantMessage("assistant", text); }
+function wizardUserSay(text) { addAssistantMessage("user", text); }
+
+// Renders a row of button choices under the transcript and disables free
+// text entry until a step re-enables it (awaiting_terms/awaiting_location
+// below) -- keeps the input from looking usable when the step expects a
+// button click instead.
+function setWizardChoices(options) {
+  assistantChoices.innerHTML = "";
+  assistantInput.disabled = true;
+  assistantInput.placeholder = "Use the buttons above ↑";
+  if (!options || !options.length) {
+    assistantChoices.classList.add("hidden");
+    return;
+  }
+  options.forEach((opt) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "assistant-chip";
+    btn.textContent = opt.label;
+    btn.addEventListener("click", () => {
+      assistantChoices.classList.add("hidden");
+      assistantChoices.innerHTML = "";
+      opt.onClick();
+    });
+    assistantChoices.appendChild(btn);
+  });
+  assistantChoices.classList.remove("hidden");
+}
+
+// Clones the live <option> list from an existing filter <select> (so the
+// wizard's department/commitment/recency choices always match whatever
+// values actually exist in the current dataset) into an inline dropdown
+// plus a Continue button, rather than hand-maintaining a second list of
+// department names that could drift out of sync with the real facets.
+function wizardAskFromSelect(promptText, sourceSelect, onApply, nextFn) {
+  wizardBotSay(promptText);
+  assistantChoices.innerHTML = "";
+  assistantInput.disabled = true;
+  assistantInput.placeholder = "Use the dropdown above ↑";
+
+  const select = document.createElement("select");
+  select.className = "wizard-inline-select";
+  select.innerHTML = sourceSelect.innerHTML;
+  const continueBtn = document.createElement("button");
+  continueBtn.type = "button";
+  continueBtn.className = "assistant-chip";
+  continueBtn.textContent = "Continue";
+  continueBtn.addEventListener("click", () => {
+    const val = select.value;
+    const label = select.options[select.selectedIndex] ? select.options[select.selectedIndex].text : "Skip";
+    wizardUserSay(val ? label : "Skip");
+    assistantChoices.classList.add("hidden");
+    assistantChoices.innerHTML = "";
+    onApply(val);
+    nextFn();
+  });
+
+  assistantChoices.appendChild(select);
+  assistantChoices.appendChild(continueBtn);
+  assistantChoices.classList.remove("hidden");
+}
+
+function wizardAskSource() {
+  wizard.step = "source";
+  wizardBotSay("Want to upload your resume, or just tell me some search terms to start?");
+  setWizardChoices([
+    {
+      label: "Upload resume",
+      onClick: () => { wizardUserSay("Upload resume"); assistantResumeInput.click(); },
+    },
+    {
+      label: "Type search terms",
+      onClick: () => {
+        wizardUserSay("Type search terms");
+        wizardBotSay("Go ahead — type a title or keywords below.");
+        wizard.step = "awaiting_terms";
+        assistantInput.disabled = false;
+        assistantInput.placeholder = "e.g. product manager";
+        assistantInput.focus();
+      },
+    },
+  ]);
+}
+
+assistantResumeInput.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = ""; // allow re-selecting the same file later in a restarted run
+  if (!file) return;
+  wizardUserSay(`Uploaded ${file.name}`);
+  wizardBotSay("Reading your resume…");
+  await handleResumeFile(file); // sets hasResume/match terms and runs an initial search itself
+  wizardBotSay("Got it — now let's narrow it down a bit. Everything from here is optional.");
+  wizardAskSalary();
+});
+
+function wizardAskSalary() {
+  wizard.step = "salary";
+  if (!salaryRange) { wizardAskYoe(); return; } // facets not loaded yet -- skip gracefully rather than block
+  const { min, max } = salaryRange;
+  const presets = [0.25, 0.5, 0.75].map((f) => Math.round((min + (max - min) * f) / 5000) * 5000);
+  wizardBotSay("Any minimum salary?");
+  setWizardChoices([
+    ...presets.map((p) => ({ label: `${formatSalaryShort(p)}+`, onClick: () => { wizardUserSay(`${formatSalaryShort(p)}+`); wizard.salaryMin = p; wizardAskYoe(); } })),
+    { label: "Skip", onClick: () => { wizardUserSay("Skip"); wizardAskYoe(); } },
+  ]);
+}
+
+function wizardAskYoe() {
+  wizard.step = "yoe";
+  if (!yoeRange) { wizardAskDepartment(); return; }
+  wizardBotSay("What experience level?");
+  setWizardChoices([
+    ...WIZARD_YOE_PRESETS.map((p) => ({
+      label: p.label,
+      onClick: () => {
+        wizardUserSay(p.label);
+        wizard.yoeMin = p.min;
+        wizard.yoeMax = p.max === null ? yoeRange.max : p.max;
+        wizardAskDepartment();
+      },
+    })),
+    { label: "Skip", onClick: () => { wizardUserSay("Skip"); wizardAskDepartment(); } },
+  ]);
+}
+
+function wizardAskDepartment() {
+  wizard.step = "department";
+  wizardAskFromSelect("Any particular department?", departmentSelect, (val) => { wizard.department = val; }, wizardAskCommitment);
+}
+
+function wizardAskCommitment() {
+  wizard.step = "commitment";
+  wizardAskFromSelect("Full-time, contract, something else?", commitmentSelect, (val) => { wizard.commitment = val; }, wizardAskLocation);
+}
+
+function wizardAskLocation() {
+  wizard.step = "location";
+  wizardBotSay("Any location preference?");
+  setWizardChoices([
+    { label: "Remote (US)", onClick: () => { wizardUserSay("Remote (US)"); wizard.useRemoteUs = true; wizardAskDays(); } },
+    {
+      label: "Type a city",
+      onClick: () => {
+        wizardUserSay("Type a city");
+        wizardBotSay("Go ahead — type a city, state, or region below.");
+        wizard.step = "awaiting_location";
+        assistantInput.disabled = false;
+        assistantInput.placeholder = "e.g. Austin, TX";
+        assistantInput.focus();
+      },
+    },
+    { label: "Skip", onClick: () => { wizardUserSay("Skip"); wizardAskDays(); } },
+  ]);
+}
+
+function wizardAskDays() {
+  wizard.step = "days";
+  wizardAskFromSelect("How recently posted?", document.getElementById("days"), (val) => { wizard.days = val; }, wizardFinish);
+}
+
+function wizardFinish() {
+  wizard.step = "done";
+
+  if (wizard.query) document.getElementById("q").value = wizard.query;
+  if (wizard.days) document.getElementById("days").value = wizard.days;
+  if (wizard.department) departmentSelect.value = wizard.department;
+  if (wizard.commitment) commitmentSelect.value = wizard.commitment;
+
+  if (wizard.useRemoteUs && locationGroupLabels.remote_us
+      && !selectedLocations.some((s) => s.type === "group" && s.value === "remote_us")) {
+    selectedLocations.push({ type: "group", value: "remote_us", label: locationGroupLabels.remote_us });
+  }
+  if (wizard.locationText && !selectedLocations.some((s) => s.type === "text" && s.value === wizard.locationText)) {
+    selectedLocations.push({ type: "text", value: wizard.locationText });
+  }
+  renderLocationChips();
+
+  if (salarySliderCtl && salaryRange && wizard.salaryMin !== undefined) {
+    salaryRange = { ...salaryRange, lo: wizard.salaryMin, hi: salaryRange.max };
+    salarySliderCtl.setValues(wizard.salaryMin, salaryRange.max);
+  }
+  if (yoeSliderCtl && yoeRange && wizard.yoeMin !== undefined) {
+    yoeRange = { ...yoeRange, lo: wizard.yoeMin, hi: wizard.yoeMax };
+    yoeSliderCtl.setValues(wizard.yoeMin, wizard.yoeMax);
+  }
+
+  search(1);
+  wizardBotSay("Done — I've set up your search and run it. Scroll up to see results, or adjust any filter directly on the page.");
+  setWizardChoices([{ label: "Start a new search", onClick: restartWizard }]);
+}
+
+function restartWizard() {
+  assistantMessages.innerHTML = "";
+  resetWizardState();
+  wizardBotSay("Let's set up another search.");
+  wizardAskSource();
+}
+
+assistantToggle.addEventListener("click", () => {
+  const wasHidden = assistantPanel.classList.contains("hidden");
+  assistantPanel.classList.toggle("hidden");
+  if (wasHidden && !assistantMessages.children.length) {
+    resetWizardState();
+    wizardBotSay("Hi! I can walk you through setting up a search -- just click through the buttons, no typing required unless you want to.");
+    wizardAskSource();
+  }
+});
+
+assistantCloseBtn.addEventListener("click", () => {
+  assistantPanel.classList.add("hidden");
+});
+
+assistantForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = assistantInput.value.trim();
+  if (!text || !wizard || assistantInput.disabled) return;
+  if (wizard.step === "awaiting_terms") {
+    assistantInput.value = "";
+    wizardUserSay(text);
+    wizard.query = text;
+    wizardAskSalary();
+  } else if (wizard.step === "awaiting_location") {
+    assistantInput.value = "";
+    wizardUserSay(text);
+    wizard.locationText = text;
+    wizardAskDays();
+  }
+});
 
 // ---- misc UI wiring ----
 

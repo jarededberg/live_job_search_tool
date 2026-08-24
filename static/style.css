@@ -325,11 +325,20 @@ code {
   display: flex;
   gap: 6px;
   align-items: center;
-  flex: 1;
-  min-width: 220px;
+  flex: 1 1 220px;
+  /* Flex items default to min-width: auto, which refuses to shrink below
+     the content's natural width -- combined with the nowrap Save/Cancel
+     buttons below, that was pushing this whole group past the right edge
+     of .filters-row instead of shrinking or wrapping. min-width: 0 lets it
+     actually shrink with its flex-basis; flex-wrap is a fallback so if it
+     still doesn't fit (very narrow viewports), the buttons drop to their
+     own line instead of overflowing. */
+  min-width: 0;
+  flex-wrap: wrap;
 }
 .save-search-inline input {
-  flex: 1;
+  flex: 1 1 120px;
+  min-width: 0;
   padding: 7px 10px;
   border: 1px solid var(--accent);
   border-radius: 7px;
@@ -1106,4 +1115,253 @@ footer {
 
 @media (max-width: 600px) {
   .query-row { flex-direction: column; }
+}
+
+/* ---------- Footer links (FAQ / Contact) ---------- */
+
+.footer-links {
+  font-size: 0.83rem;
+  color: var(--muted-light);
+  margin: 0 0 10px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+.footer-links a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-weight: 500;
+}
+.footer-links a:hover { color: var(--accent); text-decoration: underline; }
+
+/* ---------- Contact modal ---------- */
+
+.modal-content textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  background: var(--bg-subtle);
+  resize: vertical;
+}
+.modal-content textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg);
+}
+.modal-plain-text {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+.modal-plain-text a { color: var(--accent); }
+
+/* ---------- FAQ accordion ---------- */
+
+.faq-list { display: flex; flex-direction: column; gap: 8px; }
+.faq-item {
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.faq-question {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-subtle);
+  border: none;
+  padding: 12px 14px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: left;
+}
+.faq-question:hover { color: var(--accent); }
+.faq-caret {
+  color: var(--muted);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+.faq-question.faq-open .faq-caret { transform: rotate(180deg); }
+.faq-answer {
+  padding: 12px 14px 14px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  line-height: 1.6;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* ---------- AI search assistant ---------- */
+
+.assistant-widget {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.assistant-toggle {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: white;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: background 0.15s;
+}
+.assistant-toggle:hover { background: var(--accent); }
+
+.assistant-panel {
+  width: 340px;
+  max-width: calc(100vw - 40px);
+  height: 440px;
+  max-height: calc(100vh - 120px);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.assistant-panel-header {
+  background: var(--ink);
+  color: white;
+  padding: 12px 14px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.assistant-panel-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.assistant-panel-close:hover { color: white; }
+
+.assistant-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.assistant-msg {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.assistant-msg-assistant {
+  align-self: flex-start;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-soft);
+  color: var(--ink);
+  border-bottom-left-radius: 3px;
+}
+.assistant-msg-user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: white;
+  border-bottom-right-radius: 3px;
+}
+.assistant-msg-thinking { color: var(--muted-light); font-style: italic; }
+
+.assistant-form {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.assistant-form input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  background: var(--bg-subtle);
+}
+.assistant-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg);
+}
+.assistant-form button {
+  width: 34px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 7px;
+  background: var(--ink);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.assistant-form button:hover { background: var(--accent); }
+
+.assistant-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 10px;
+}
+
+.assistant-chip {
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 14px;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.assistant-chip:hover { background: var(--accent); color: white; }
+
+.wizard-inline-select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 0.82rem;
+  background: var(--bg-subtle);
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+@media (max-width: 480px) {
+  .assistant-widget { right: 12px; bottom: 12px; }
+  .assistant-panel { width: calc(100vw - 24px); }
 }

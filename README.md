@@ -1189,6 +1189,66 @@ all — verified directly: `/api/site-config` returns
 `{"ga_measurement_id": ""}` when unset and the real ID when set, checked
 against a live local run of the app in both states.
 
+## Contact form (optional, Resend)
+
+Off unless both `RESEND_API_KEY` (same key used for password reset above)
+and `CONTACT_EMAIL` are set. `CONTACT_EMAIL` defaults to
+`jarededberg@gmail.com`; override it via env var if that should ever
+change.
+
+`GET /api/site-config` exposes `contact_enabled` and `contact_email`
+(the address is public anyway — it's already in the footer byline/
+LinkedIn — so there's no harm exposing it). The footer's "Contact" link
+opens a modal: a real form (name/email/message, `POST /api/contact`,
+rate limited to 3/hour/IP same as forgot-password) if `contact_enabled`
+is true, or just a `mailto:` link to `contact_email` if it's false — so
+the link is never a dead end either way. Submissions are emailed to
+`CONTACT_EMAIL` via Resend with `reply_to` set to the sender's own
+address, so replying from your inbox goes straight back to them.
+
+## FAQ
+
+Static content, no backend involved — the footer's "FAQ" link opens a
+modal with a plain accordion (`FAQ_ITEMS` array near the top of the
+"FAQ" section in `static/app.js`). The questions/answers are written
+directly from this README's own documented behavior (salary/YOE data
+being best-effort parses, match tiers being a keyword heuristic, resumes
+not being stored server-side, etc.) — if any of that behavior changes,
+update `FAQ_ITEMS` to match.
+
+## Guided search wizard (no AI, no external API, always on)
+
+A chat-style bubble in the bottom-right corner of every page (see
+`#assistant-widget` in `static/index.html`, and the "guided search
+wizard" section near the end of `static/app.js`). This is a scripted
+decision tree, not a real conversation — there's no LLM involved, no API
+key, no cost, and nothing to configure, so unlike every other feature in
+this README there's no env var gating it on/off.
+
+**Flow**: (1) ask whether to upload a resume or type search terms —
+resume goes through the existing `handleResumeFile()`/`/api/parse-resume`
+path (same as the main dropzone), search terms populate the query box
+directly; (2) a short run of optional quick-reply questions — salary
+minimum, experience level, department, commitment type, location, and
+how recently posted — each skippable with one click, department/
+commitment/recency choices are cloned live from the real `<select>`
+options so they can never drift out of sync with the actual filters;
+(3) everything collected gets applied to the real filter controls and
+`search()` is called once at the end, so the wizard is just a guided
+way of filling in the same search box, sliders, and dropdowns already on
+the page — never a separate/parallel search path.
+
+**Implementation notes**: `wizard` (a small state object) tracks
+progress through `wizardAskSource()` → `wizardAskSalary()` →
+`wizardAskYoe()` → `wizardAskDepartment()` → `wizardAskCommitment()` →
+`wizardAskLocation()` → `wizardAskDays()` → `wizardFinish()`. Each step
+either renders button choices (`setWizardChoices()`) or a cloned
+`<select>` plus a Continue button (`wizardAskFromSelect()`), except the
+two free-text steps (search terms, a typed city) which briefly re-enable
+the text input. `wizardFinish()` reuses the exact same filter-application
+patterns `loadSavedSearch()` already used for saved searches. "Start a
+new search" at the end resets and replays the flow.
+
 ## Branding
 
 The header in `static/index.html` includes an "About" blurb and a LinkedIn

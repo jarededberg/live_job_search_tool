@@ -152,11 +152,39 @@
         use it too, so here it is, free to use.
       </p>
       <p id="footer-status" class="footer-status">Loading dataset status…</p>
+      <p class="footer-links">
+        <a href="#" id="footer-faq-link">FAQ</a>
+        <span aria-hidden="true">·</span>
+        <a href="#" id="footer-contact-link">Contact</a>
+      </p>
       <p class="footer-byline">
         <strong>Jared Edberg</strong> · <a href="https://www.linkedin.com/in/jared-edberg" target="_blank" rel="noopener">LinkedIn ↗</a>
       </p>
     </div>
   </footer>
+
+  <!-- Guided search wizard widget -- a scripted decision tree (no AI, no
+       external API, no config needed), see the "guided search wizard"
+       section of app.js for the step logic. -->
+  <div class="assistant-widget" id="assistant-widget">
+    <div class="assistant-panel hidden" id="assistant-panel">
+      <div class="assistant-panel-header">
+        <span>Guided search</span>
+        <button type="button" class="assistant-panel-close" id="assistant-close" aria-label="Close">×</button>
+      </div>
+      <div class="assistant-messages" id="assistant-messages"></div>
+      <div class="assistant-choices hidden" id="assistant-choices"></div>
+      <form id="assistant-form" class="assistant-form">
+        <input type="text" id="assistant-input" placeholder="Type here…" autocomplete="off" />
+        <button type="submit" aria-label="Send">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+      </form>
+    </div>
+    <button type="button" class="assistant-toggle" id="assistant-toggle" aria-label="Open guided search">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.35 0-2.62-.32-3.75-.9L3 20l1.02-3.06A8.44 8.44 0 0 1 3 11.5 8.5 8.5 0 0 1 11.5 3 8.5 8.5 0 0 1 21 11.5Z"/></svg>
+    </button>
+  </div>
 
   <!-- Cloudflare Turnstile (bot check on signup). Loading this unconditionally
        is harmless even when Turnstile isn't configured on this deployment --

@@ -56,6 +56,12 @@ RESET_TOKEN_TTL_HOURS = 1
 # static/index.html directly, so the measurement ID isn't hardcoded into
 # version control and can be changed via env var alone.
 GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID", "")
+# Optional contact form -- off unless RESEND_API_KEY (already used for
+# password reset) AND a destination address are both set. CONTACT_EMAIL
+# defaults to the site owner's own address rather than empty, since this
+# is a single-operator app; override via env var if that ever changes.
+CONTACT_EMAIL = os.environ.get("CONTACT_EMAIL", "jarededberg@gmail.com")
+MAX_CONTACT_MESSAGE_LEN = 4000
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = MAX_RESUME_BYTES
@@ -227,7 +233,11 @@ def login_required(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
         if "user_id" not in session:
-            return jsonify({"error": "Log in to use this feature."}), 401
+            # "message" (not "error") to match every other account-route
+            # response shape -- app.js's error handling uniformly reads
+            # data.message, so a mismatched key here silently fell back to
+            # a generic "Something went wrong." instead of this actual text.
+            return jsonify({"ok": False, "message": "Log in to use this feature."}), 401
         return f(*args, **kwargs)
     return wrapper
 
@@ -240,9 +250,47 @@ def accounts_required(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
         if not db_users.accounts_enabled():
-            return jsonify({"error": "Accounts aren't set up on this deployment yet."}), 503
+            return jsonify({"ok": False, "message": "Accounts aren't set up on this deployment yet."}), 503
         return f(*args, **kwargs)
     return wrapper
+
+
+def contact_enabled():
+    return bool(RESEND_API_KEY and CONTACT_EMAIL)
+
+
+def send_contact_email(name, from_email, message):
+    """Sends a contact-form submission to CONTACT_EMAIL via Resend, same
+    urllib pattern as send_password_reset_email(). Sets reply_to to the
+    submitter's own address so replying from the inbox goes straight back
+    to them, rather than to Resend's From address. Returns True/False;
+    the caller always shows the same success message to the browser
+    regardless (see api_contact) so a delivery failure only ever shows up
+    in server logs."""
+    payload = json.dumps({
+        "from": RESEND_FROM_EMAIL,
+        "to": [CONTACT_EMAIL],
+        "reply_to": from_email,
+        "subject": f"Skip The Boards contact form: {name}",
+        "html": (
+            f"<p><strong>From:</strong> {name} ({from_email})</p>"
+            f"<p>{message}</p>"
+        ).replace("\n", "<br>"),
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.resend.com/emails", data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return 200 <= resp.status < 300
+    except Exception as e:
+        print(f"[app] contact email from {from_email} failed to send: {e}")
+        return False
 
 
 @app.route("/api/jobs")
@@ -341,12 +389,51 @@ def api_location_groups():
 
 @app.route("/api/site-config")
 def api_site_config():
-    """Public, non-account config the frontend needs on every page load --
-    currently just the GA4 measurement ID (safe to expose; it's a public
-    tracking ID, not a secret). Empty string means analytics isn't
-    configured on this deployment, and app.js skips injecting gtag.js
-    entirely -- same graceful-degradation pattern as Turnstile/Resend."""
-    return jsonify({"ga_measurement_id": GA_MEASUREMENT_ID})
+    """Public, non-account config the frontend needs on every page load:
+    the GA4 measurement ID (safe to expose; it's a public tracking ID, not
+    a secret) and whether the contact form is wired up to actually send
+    email (plus the destination address itself, which is fine to expose --
+    it's already public in the footer byline/LinkedIn). Each flag being
+    false means app.js skips that feature entirely -- same graceful-
+    degradation pattern as Turnstile/Resend/password-reset. (The guided
+    search wizard/chat widget needs no entry here -- it's a purely
+    client-side scripted flow, not an external API call.)"""
+    return jsonify({
+        "ga_measurement_id": GA_MEASUREMENT_ID,
+        "contact_enabled": contact_enabled(),
+        "contact_email": CONTACT_EMAIL,
+    })
+
+
+@app.route("/api/contact", methods=["POST"])
+@limiter.limit("3 per hour")
+def api_contact():
+    if not contact_enabled():
+        return jsonify({"ok": False, "message": "The contact form isn't set up on this deployment yet."}), 503
+
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    message = (data.get("message") or "").strip()
+
+    if not name:
+        return jsonify({"ok": False, "message": "Please enter your name."}), 400
+    if not EMAIL_RE.match(email):
+        return jsonify({"ok": False, "message": "That doesn't look like a valid email address."}), 400
+    if not message:
+        return jsonify({"ok": False, "message": "Please enter a message."}), 400
+    if len(message) > MAX_CONTACT_MESSAGE_LEN:
+        return jsonify({"ok": False, "message": f"That message is too long (max {MAX_CONTACT_MESSAGE_LEN} characters)."}), 400
+
+    if not send_contact_email(name, email, message):
+        # Real failure reason (bad RESEND_API_KEY, Resend sandbox
+        # restriction, etc.) only ever shows up in server logs -- see
+        # send_contact_email()'s own logging -- but unlike login/forgot-
+        # password there's no enumeration risk here, so it's fine to be
+        # honest with the sender that it didn't go through.
+        return jsonify({"ok": False, "message": "Couldn't send that right now -- try again in a moment."}), 502
+
+    return jsonify({"ok": True, "message": "Thanks -- message sent. I'll get back to you soon."})
 
 
 @app.route("/api/status")
@@ -708,6 +795,10 @@ if db_users.accounts_enabled() and not password_reset_enabled():
           "this deployment (signup/login/saved searches/applied jobs all "
           "still work normally). See README's 'User accounts' section to "
           "enable it.")
+if not contact_enabled():
+    print("[app] RESEND_API_KEY and/or CONTACT_EMAIL not set -- the contact "
+          "form is disabled on this deployment; the footer falls back to a "
+          "mailto: link instead. See README's 'Contact form' section.")
 _scheduler = start_scheduler()
 
 if __name__ == "__main__":
