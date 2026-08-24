@@ -1413,31 +1413,27 @@ async function loadSiteConfig() {
   }
 }
 
-// ---- AI search assistant ----
+// ---- Hunter (AI search assistant) ----
 
-// A scripted decision tree, not a real conversation -- no external API,
-// no cost, nothing to configure. Every question is either a fixed set of
-// button choices or one specific piece of free text (search terms, or a
-// city), and the whole thing bottoms out in populating the real filter
-// controls and calling search() once at the end -- see wizardFinish().
-// Reuses handleResumeFile() (defined above, next to the main resume
-// dropzone) for the resume-upload branch rather than re-implementing
-// parsing, so both entry points behave identically.
+// Hunter is a free-text chat interface: type a full sentence, and
+// hunterParseMessage() below pulls out whatever it recognizes (salary,
+// years of experience, department, commitment type, location, recency)
+// via regex/keyword matching, updates the real filter controls live, and
+// replies in character. No external API calls, nothing to configure --
+// every line Hunter says comes from the template pools in this file.
 //
 // Runs inside the existing modal system (openModal()/closeModal(), same
-// one FAQ/Contact/auth use) rather than a standalone floating widget --
-// triggered from the "AI Search" button at the top of the search panel.
-// Because modal content is destroyed and rebuilt every time the modal
-// opens (see openModal()'s innerHTML replace), the elements below are
-// `let`s re-queried each time openWizardModal() runs, not one-time consts.
+// one FAQ/Contact/auth use). Because modal content is destroyed and
+// rebuilt every time the modal opens (see openModal()'s innerHTML
+// replace), the elements below are `let`s re-queried each time
+// openHunterModal() runs, not one-time consts.
 
-let assistantMessages, assistantChoices, assistantForm, assistantInput, assistantResumeInput;
+let assistantMessages, assistantForm, assistantInput, hunterResumeInput, hunterResumeBtn;
+let hunterTypingEl = null;
+let hunterState = null; // current run's collected answers; null until first opened
 
-let wizard = null; // current run's collected answers; null until first opened
-
-function resetWizardState() {
-  wizard = {
-    step: "source",
+function resetHunterState() {
+  hunterState = {
     query: "",
     currency: "USD",
     salaryMin: undefined,
@@ -1445,6 +1441,7 @@ function resetWizardState() {
     departments: [],
     commitment: "",
     days: "",
+    askedFollowup: false,
   };
 }
 
@@ -1457,76 +1454,42 @@ function addAssistantMessage(role, text) {
   return div;
 }
 
-function wizardBotSay(text) { addAssistantMessage("assistant", text); }
-function wizardUserSay(text) { addAssistantMessage("user", text); }
+function hunterSay(text) { addAssistantMessage("assistant", text); }
+function userSay(text) { addAssistantMessage("user", text); }
 
-// Renders a row of button choices under the transcript and disables free
-// text entry until a step re-enables it (awaiting_terms, or salary/yoe/
-// location's own render*Step() functions below) -- keeps the input from
-// looking usable when the step expects a button click instead.
-function setWizardChoices(options) {
-  assistantChoices.innerHTML = "";
-  assistantInput.disabled = true;
-  assistantInput.placeholder = "Use the buttons above ↑";
-  if (!options || !options.length) {
-    assistantChoices.classList.add("hidden");
-    return;
-  }
-  options.forEach((opt) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "assistant-chip";
-    btn.textContent = opt.label;
-    btn.addEventListener("click", () => {
-      assistantChoices.classList.add("hidden");
-      assistantChoices.innerHTML = "";
-      opt.onClick();
-    });
-    assistantChoices.appendChild(btn);
-  });
-  assistantChoices.classList.remove("hidden");
+function pickOne(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// A "Hunter is typing…" bubble shown for a short, length-scaled delay
+// before each reply -- purely cosmetic (the parsing itself is instant),
+// but an instantaneous reply to a full sentence reads as obviously
+// mechanical, and a small pause reads as "considering it."
+function hunterTypingStart() {
+  hunterTypingEl = document.createElement("div");
+  hunterTypingEl.className = "assistant-msg assistant-msg-assistant assistant-typing";
+  hunterTypingEl.innerHTML = "<span></span><span></span><span></span>";
+  assistantMessages.appendChild(hunterTypingEl);
+  assistantMessages.scrollTop = assistantMessages.scrollHeight;
 }
-
-// Clones the live <option> list from an existing filter <select> (so the
-// wizard's choices always match whatever values actually exist in the
-// current dataset) into an inline dropdown plus a Continue button. Now
-// only used for wizardAskDays() -- department became its own multi-select
-// toggle-chip step (renderWizardDepartmentStep()) and commitment grew
-// quick bubbles alongside a clone of this same pattern (wizardAskCommitment()).
-function wizardAskFromSelect(promptText, sourceSelect, onApply, nextFn) {
-  wizardBotSay(promptText);
-  assistantChoices.innerHTML = "";
-  assistantInput.disabled = true;
-  assistantInput.placeholder = "Use the dropdown above ↑";
-
-  const select = document.createElement("select");
-  select.className = "wizard-inline-select";
-  select.innerHTML = sourceSelect.innerHTML;
-  const continueBtn = document.createElement("button");
-  continueBtn.type = "button";
-  continueBtn.className = "assistant-chip";
-  continueBtn.textContent = "Continue";
-  continueBtn.addEventListener("click", () => {
-    const val = select.value;
-    const label = select.options[select.selectedIndex] ? select.options[select.selectedIndex].text : "Skip";
-    wizardUserSay(val ? label : "Skip");
-    assistantChoices.classList.add("hidden");
-    assistantChoices.innerHTML = "";
-    onApply(val);
-    nextFn();
+function hunterTypingStop() {
+  if (hunterTypingEl) { hunterTypingEl.remove(); hunterTypingEl = null; }
+}
+function hunterReply(text) {
+  hunterTypingStart();
+  const delay = 300 + Math.min(text.length * 7, 850) + Math.random() * 220;
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      hunterTypingStop();
+      hunterSay(text);
+      resolve();
+    }, delay);
   });
-
-  assistantChoices.appendChild(select);
-  assistantChoices.appendChild(continueBtn);
-  assistantChoices.classList.remove("hidden");
 }
 
 // Currencies are for the person's own reference, not converted -- the
 // dataset doesn't track a per-posting currency (salary_min/max in db.py
-// are plain numbers), so picking EUR/GBP/CAD here just changes the symbol
-// shown, not what actually gets compared against the (effectively
-// USD-denominated) listing data. Called out explicitly in the prompt text
-// below so this isn't a silent trap.
+// are plain numbers), so a currency mentioned in chat just changes the
+// symbol shown, not what actually gets compared against the (effectively
+// USD-denominated) listing data.
 const CURRENCY_OPTIONS = [
   { code: "USD", symbol: "$" },
   { code: "EUR", symbol: "€" },
@@ -1540,368 +1503,353 @@ function formatAmountShort(n) {
   return `${Math.round(n / 1000)}k`;
 }
 
-// Fixed bucket values, not computed from the live salary_bounds() range --
-// this used to be 3 auto-computed presets (25th/50th/75th percentile of
-// the data), which broke badly whenever the data had a high outlier: the
-// LOWEST of the 3 presets could itself land at an unreasonably high number
-// ("$250k+" reported as the lowest option, with no way to ask for
-// anything lower). Fixed values sidestep that entirely -- plus the number
-// box below still covers anyone these don't fit.
-const SALARY_BUCKETS = [100000, 150000, 200000, 250000];
+// Canonical department labels (must match DEPARTMENT_DISPLAY_ORDER in
+// department_groups.py) mapped to phrases that signal them in a typed
+// message. Checked against the message with the salary/YOE/commitment/
+// days/location phrases already stripped out (see hunterParseMessage()),
+// so "engineering" in "5 years of engineering experience" doesn't also
+// have to fight the YOE regex for the same substring.
+const HUNTER_DEPT_KEYWORDS = {
+  "Engineering": ["engineering", "engineer", "swe", "software developer", "software eng", "backend", "front end", "frontend", "full stack", "fullstack", "devops", "site reliability"],
+  "Product": ["product manager", "product management", "product role", "product team", "pm role"],
+  "Design": ["design", "ux", "ui", "user experience"],
+  "Sales": ["sales", "account executive", "business development", "bdr", "sdr", "go to market", "go-to-market"],
+  "Marketing": ["marketing", "growth marketing", "brand", "content marketing", "seo"],
+  "Customer Success": ["customer success", "customer support", "client services"],
+  "Operations": ["operations", "business operations", "supply chain", "logistics"],
+  "Data": ["data science", "data analyst", "data analytics", "data engineer", "business intelligence"],
+  "IT": ["information technology", "helpdesk", "help desk", "it support"],
+  "Finance": ["finance", "accounting", "fp&a", "fp and a"],
+  "People": ["human resources", "recruiting", "recruiter", "talent acquisition", "people team"],
+  "Legal": ["legal", "compliance"],
+  "Professional Services": ["professional services", "consulting", "implementation"],
+  "Executive": ["executive", "chief of staff"],
+};
 
-function wizardAskSalary() {
-  wizard.step = "salary";
-  wizardBotSay("What's the minimum salary you're looking for? Pick a range, type your own, or skip.");
-  renderWizardSalaryStep();
-}
-
-function renderWizardSalaryStep() {
-  assistantChoices.innerHTML = "";
-
-  const currencySelect = document.createElement("select");
-  currencySelect.className = "wizard-inline-select wizard-currency-select";
-  currencySelect.setAttribute("aria-label", "Currency");
-  currencySelect.innerHTML = CURRENCY_OPTIONS
-    .map((c) => `<option value="${c.code}" ${c.code === wizard.currency ? "selected" : ""}>${c.code}</option>`)
-    .join("");
-  currencySelect.addEventListener("change", () => {
-    wizard.currency = currencySelect.value;
-    renderWizardSalaryStep(); // redraw so bucket labels pick up the new symbol
-  });
-  assistantChoices.appendChild(currencySelect);
-
-  SALARY_BUCKETS.forEach((amt) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "assistant-chip";
-    btn.textContent = `${currencySymbol(wizard.currency)}${formatAmountShort(amt)}+`;
-    btn.addEventListener("click", () => {
-      wizard.salaryMin = amt;
-      wizardUserSay(`${currencySymbol(wizard.currency)}${formatAmountShort(amt)}+ (${wizard.currency})`);
-      assistantChoices.classList.add("hidden");
-      assistantChoices.innerHTML = "";
-      wizardAskYoe();
-    });
-    assistantChoices.appendChild(btn);
-  });
-
-  const skipBtn = document.createElement("button");
-  skipBtn.type = "button";
-  skipBtn.className = "assistant-chip";
-  skipBtn.textContent = "Skip";
-  skipBtn.addEventListener("click", () => {
-    wizardUserSay("Skip");
-    assistantChoices.classList.add("hidden");
-    assistantChoices.innerHTML = "";
-    wizardAskYoe();
-  });
-  assistantChoices.appendChild(skipBtn);
-  assistantChoices.classList.remove("hidden");
-
-  assistantInput.disabled = false;
-  assistantInput.type = "number";
-  assistantInput.min = "0";
-  assistantInput.value = "";
-  assistantInput.placeholder = "Or type your own amount…";
-  assistantInput.focus();
-}
-
-const YOE_BUCKETS = [
-  { label: "Entry-level (0+)", value: 0 },
-  { label: "Mid-level (3+)", value: 3 },
-  { label: "Senior (6+)", value: 6 },
-  { label: "Staff/Principal (10+)", value: 10 },
+// Phrases that, if a typed message asks something like this, get a light
+// in-character deflection instead of a straight answer -- Hunter neither
+// claims to be a specific real AI model nor volunteers that it's a
+// scripted parser; it just steers back to the search. See README's
+// "Hunter" section for the reasoning.
+const HUNTER_IDENTITY_RE = /\bare you (?:a |an )?(?:real |actual |true )?(?:ai\b|a\.?i\.?\b|bot\b|robot\b|human\b|person\b|chatgpt\b|gpt\b|llm\b)|\bwho (?:made|built|created) you\b|\bwhat model are you\b|\bare you (?:chatgpt|claude|gpt)\b/i;
+const HUNTER_IDENTITY_DEFLECTIONS = [
+  "Ha — let's keep the spotlight on your job search. What role are you after?",
+  "I'd rather find you a great role than talk about myself. What are you looking for?",
+  "That's a conversation for another day. Salary, location, role — what's next?",
+  "Let's stay focused on you for now — what kind of job can I help you track down?",
 ];
 
-function wizardAskYoe() {
-  wizard.step = "yoe";
-  wizardBotSay("Minimum years of experience? Pick a level, type your own, or skip.");
-  renderWizardYoeStep();
-}
+const HUNTER_RESTART_RE = /\b(restart|start over|reset|new search)\b/i;
+const HUNTER_FINALIZE_RE = /\b(search now|run (?:it|the search)|go ahead|do it|that'?s (?:it|all|everything)|looks good|find (?:it|them|jobs)|show me|i'?m (?:done|ready)|let'?s go|just search|search please|pull (?:it|them) up)\b/i;
+const HUNTER_FILLER_RE = /^(no|none|nothing|nope|na|n\/a|meh|idk|not really)\.?!?$/i;
 
-function renderWizardYoeStep() {
-  assistantChoices.innerHTML = "";
+// The core parser. Takes one typed message and returns everything it
+// could pull out of it, plus `leftover` -- whatever text is left after
+// stripping the recognized salary/YOE/commitment/recency/location phrases
+// (department mentions are detected but NOT stripped, since a phrase like
+// "product manager" is both a department signal AND useful title text for
+// the actual keyword search). `leftover` becomes (part of) the search
+// query; everything else becomes a real filter.
+function hunterParseMessage(rawText) {
+  let working = rawText;
+  const result = { departments: [], locationsAdded: [] };
 
-  YOE_BUCKETS.forEach((b) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "assistant-chip";
-    btn.textContent = b.label;
-    btn.addEventListener("click", () => {
-      wizard.yoeMin = b.value;
-      wizardUserSay(`${b.value}+ yrs`);
-      assistantChoices.classList.add("hidden");
-      assistantChoices.innerHTML = "";
-      wizardAskDepartment();
-    });
-    assistantChoices.appendChild(btn);
-  });
-
-  const skipBtn = document.createElement("button");
-  skipBtn.type = "button";
-  skipBtn.className = "assistant-chip";
-  skipBtn.textContent = "Skip";
-  skipBtn.addEventListener("click", () => {
-    wizardUserSay("Skip");
-    assistantChoices.classList.add("hidden");
-    assistantChoices.innerHTML = "";
-    wizardAskDepartment();
-  });
-  assistantChoices.appendChild(skipBtn);
-  assistantChoices.classList.remove("hidden");
-
-  assistantInput.disabled = false;
-  assistantInput.type = "number";
-  assistantInput.min = "0";
-  assistantInput.value = "";
-  assistantInput.placeholder = "Or type your own number…";
-  assistantInput.focus();
-}
-
-function wizardAskSource() {
-  wizard.step = "source";
-  wizardBotSay("Want to upload your resume, or just tell me some search terms to start?");
-  setWizardChoices([
-    {
-      label: "Upload resume",
-      onClick: () => { wizardUserSay("Upload resume"); assistantResumeInput.click(); },
-    },
-    {
-      label: "Type search terms",
-      onClick: () => {
-        wizardUserSay("Type search terms");
-        wizardBotSay("Go ahead — type a title or keywords below.");
-        wizard.step = "awaiting_terms";
-        assistantInput.disabled = false;
-        assistantInput.placeholder = "e.g. product manager";
-        assistantInput.focus();
-      },
-    },
-  ]);
-}
-
-// Multi-select toggle chips, sourced from departmentOptions (the same
-// cleaned, frequency-ordered list the main page's department menu uses --
-// see loadFacets()/renderDepartmentMenu()) rather than a single-pick
-// dropdown, since limiting a candidate to one department was a real
-// complaint. Clicking a chip toggles it on/off; Continue moves on with
-// however many (including zero) are selected.
-function wizardAskDepartment() {
-  wizard.step = "department";
-  wizardBotSay("Any particular department? Pick as many as you'd like, then hit Continue.");
-  renderWizardDepartmentStep();
-}
-
-function renderWizardDepartmentStep() {
-  assistantChoices.innerHTML = "";
-  assistantInput.disabled = true;
-  assistantInput.placeholder = "Use the buttons above ↑";
-
-  departmentOptions.forEach((dept) => {
-    const active = wizard.departments.includes(dept);
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "assistant-chip" + (active ? " assistant-chip-active" : "");
-    btn.textContent = active ? `✓ ${dept}` : dept;
-    btn.addEventListener("click", () => {
-      wizard.departments = active
-        ? wizard.departments.filter((d) => d !== dept)
-        : [...wizard.departments, dept];
-      renderWizardDepartmentStep();
-    });
-    assistantChoices.appendChild(btn);
-  });
-
-  const continueBtn = document.createElement("button");
-  continueBtn.type = "button";
-  continueBtn.className = "assistant-chip";
-  continueBtn.textContent = "Continue";
-  continueBtn.addEventListener("click", () => {
-    wizardUserSay(wizard.departments.length ? wizard.departments.join(", ") : "Skip");
-    assistantChoices.classList.add("hidden");
-    assistantChoices.innerHTML = "";
-    wizardAskCommitment();
-  });
-  assistantChoices.appendChild(continueBtn);
-  assistantChoices.classList.remove("hidden");
-}
-
-// Quick one-click bubbles for the live commitment values (frequency-
-// ordered, same as the main page's #commitment select) PLUS the full
-// dropdown+Continue underneath for anything not worth its own bubble --
-// either path advances the step.
-function wizardAskCommitment() {
-  wizard.step = "commitment";
-  wizardBotSay("Full-time, contract, something else?");
-  assistantChoices.innerHTML = "";
-  assistantInput.disabled = true;
-  assistantInput.placeholder = "Use the buttons above ↑";
-
-  Array.from(commitmentSelect.options)
-    .filter((o) => o.value)
-    .slice(0, 6)
-    .forEach((opt) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "assistant-chip";
-      btn.textContent = opt.text;
-      btn.addEventListener("click", () => {
-        wizardUserSay(opt.text);
-        wizard.commitment = opt.value;
-        assistantChoices.classList.add("hidden");
-        assistantChoices.innerHTML = "";
-        wizardAskLocation();
-      });
-      assistantChoices.appendChild(btn);
-    });
-
-  const select = document.createElement("select");
-  select.className = "wizard-inline-select";
-  select.innerHTML = commitmentSelect.innerHTML;
-  const continueBtn = document.createElement("button");
-  continueBtn.type = "button";
-  continueBtn.className = "assistant-chip";
-  continueBtn.textContent = "Continue";
-  continueBtn.addEventListener("click", () => {
-    const val = select.value;
-    const label = select.options[select.selectedIndex] ? select.options[select.selectedIndex].text : "Skip";
-    wizardUserSay(val ? label : "Skip");
-    wizard.commitment = val;
-    assistantChoices.classList.add("hidden");
-    assistantChoices.innerHTML = "";
-    wizardAskLocation();
-  });
-  assistantChoices.appendChild(select);
-  assistantChoices.appendChild(continueBtn);
-  assistantChoices.classList.remove("hidden");
-}
-
-// Multiple locations per run -- toggle "Remote (US)" and/or type any
-// number of cities (Enter adds one and stays on this step), each pushed
-// straight into the real selectedLocations array as it's picked (same
-// dedup rules pickLocation() uses elsewhere) rather than staged in wizard
-// state and merged in later, so the chips above the main search box
-// update live while the wizard is still open.
-function wizardAskLocation() {
-  wizard.step = "location";
-  wizardBotSay("Any location preferences? Click Remote (US), type a city and press Enter, or both — then hit Done.");
-  renderWizardLocationStep();
-}
-
-function renderWizardLocationStep() {
-  assistantChoices.innerHTML = "";
-
-  const remoteActive = selectedLocations.some((s) => s.type === "group" && s.value === "remote_us");
-  const remoteBtn = document.createElement("button");
-  remoteBtn.type = "button";
-  remoteBtn.className = "assistant-chip" + (remoteActive ? " assistant-chip-active" : "");
-  remoteBtn.textContent = remoteActive ? "✓ Remote (US)" : "Remote (US)";
-  remoteBtn.addEventListener("click", () => {
-    if (remoteActive) {
-      selectedLocations = selectedLocations.filter((s) => !(s.type === "group" && s.value === "remote_us"));
-    } else if (locationGroupLabels.remote_us) {
-      selectedLocations.push({ type: "group", value: "remote_us", label: locationGroupLabels.remote_us });
+  // ---- salary ----
+  const sixFigRe = /\bsix figures?\b/i;
+  const kAmtRe = /\$?\s?(\d{2,3}(?:\.\d+)?)\s?k\b/i;
+  const commaAmtRe = /\$?\s?(\d{2,3},\d{3})\b/;
+  if (sixFigRe.test(working)) {
+    result.salaryMin = 100000;
+    working = working.replace(sixFigRe, "");
+  } else {
+    const km = working.match(kAmtRe);
+    if (km) {
+      result.salaryMin = Math.round(parseFloat(km[1]) * 1000);
+      working = working.replace(kAmtRe, "");
+    } else {
+      const cm = working.match(commaAmtRe);
+      if (cm) {
+        const n = parseInt(cm[1].replace(",", ""), 10);
+        if (n >= 20000 && n <= 2000000) {
+          result.salaryMin = n;
+          working = working.replace(commaAmtRe, "");
+        }
+      } else {
+        const bm = working.match(/\b(\d{6})\b/);
+        if (bm) {
+          const n = parseInt(bm[1], 10);
+          if (n >= 20000 && n < 1000000) {
+            result.salaryMin = n;
+            working = working.replace(bm[0], "");
+          }
+        }
+      }
     }
-    renderLocationChips();
-    renderWizardLocationStep();
-  });
-  assistantChoices.appendChild(remoteBtn);
-
-  selectedLocations.filter((s) => s.type === "text").forEach((loc) => {
-    const tag = document.createElement("button");
-    tag.type = "button";
-    tag.className = "assistant-chip assistant-chip-active";
-    tag.textContent = `✓ ${loc.label || loc.value}`;
-    tag.addEventListener("click", () => {
-      selectedLocations = selectedLocations.filter((s) => s !== loc);
-      renderLocationChips();
-      renderWizardLocationStep();
-    });
-    assistantChoices.appendChild(tag);
-  });
-
-  const doneBtn = document.createElement("button");
-  doneBtn.type = "button";
-  doneBtn.className = "assistant-chip";
-  doneBtn.textContent = "Done";
-  doneBtn.addEventListener("click", () => {
-    const anyPicked = selectedLocations.some((s) => s.type === "group" && s.value === "remote_us")
-      || selectedLocations.some((s) => s.type === "text");
-    wizardUserSay(anyPicked ? "Done choosing locations" : "Skip");
-    assistantChoices.classList.add("hidden");
-    assistantChoices.innerHTML = "";
-    wizardAskDays();
-  });
-  assistantChoices.appendChild(doneBtn);
-  assistantChoices.classList.remove("hidden");
-
-  assistantInput.disabled = false;
-  assistantInput.type = "text";
-  assistantInput.value = "";
-  assistantInput.placeholder = "Type a city, state, or region, then press Enter to add…";
-  assistantInput.focus();
-}
-
-function wizardAskDays() {
-  wizard.step = "days";
-  wizardAskFromSelect("How recently posted?", document.getElementById("days"), (val) => { wizard.days = val; }, wizardFinish);
-}
-
-function wizardFinish() {
-  wizard.step = "done";
-
-  if (wizard.query) document.getElementById("q").value = wizard.query;
-  if (wizard.days) document.getElementById("days").value = wizard.days;
-  if (wizard.commitment) commitmentSelect.value = wizard.commitment;
-  if (wizard.departments && wizard.departments.length) {
-    selectedDepartments = wizard.departments.slice();
-    renderDepartmentMenu();
+  }
+  // Mops up the other side of a typed range ("100k-150k" only had its
+  // first match consumed above) and any stray currency word left behind.
+  working = working.replace(/\$?\s?\d{2,3}(?:\.\d+)?\s?k\b/gi, "").replace(/\b(?:usd|eur|gbp|cad|dollars?)\b/gi, "");
+  const currencyHit = rawText.match(/\b(usd|eur|gbp|cad)\b/i) || rawText.match(/[€£]|\bC\$/);
+  if (currencyHit) {
+    const c = (currencyHit[1] || currencyHit[0]).toUpperCase();
+    if (c === "€" || c === "EUR") result.currency = "EUR";
+    else if (c === "£" || c === "GBP") result.currency = "GBP";
+    else if (c === "C$" || c === "CAD") result.currency = "CAD";
+    else if (c === "USD") result.currency = "USD";
   }
 
-  // Locations were already pushed into the real selectedLocations array
-  // live as they were picked in wizardAskLocation()/renderWizardLocationStep()
-  // -- nothing left to merge in here, unlike department/commitment/salary/
-  // YOE which only ever live in wizard state until this step.
+  // ---- years of experience ----
+  const yoeBuckets = [
+    [/\bentry[\s-]?level\b|\bnew grad(?:uate)?\b|\bno experience\b|\bearly[\s-]?career\b/i, 0],
+    [/\bjunior\b|\bassociate\b/i, 1],
+    [/\bmid[\s-]?level\b|\bmid[\s-]?career\b/i, 3],
+    [/\bsenior\b|\bsr\.\b/i, 6],
+    [/\bstaff\b|\bprincipal\b/i, 10],
+  ];
+  let yoeMatched = false;
+  for (const [re, val] of yoeBuckets) {
+    if (re.test(working)) {
+      result.yoeMin = val;
+      working = working.replace(re, "");
+      yoeMatched = true;
+      break;
+    }
+  }
+  if (!yoeMatched) {
+    const ym = working.match(/(\d{1,2})\+?\s*(?:years?|yrs?)(?:\s+of\s+experience)?\b/i);
+    if (ym) {
+      result.yoeMin = parseInt(ym[1], 10);
+      working = working.replace(ym[0], "");
+    }
+  }
 
+  // ---- commitment ----
+  const commitBuckets = [
+    [/\bfull[\s-]?time\b|\bfte\b/i, "full"],
+    [/\bpart[\s-]?time\b/i, "part"],
+    [/\bcontract(?:or)?\b|\bfreelance\b|\btemp(?:orary)?\b/i, "contract"],
+    [/\bintern(?:ship)?\b/i, "intern"],
+  ];
+  for (const [re, bucket] of commitBuckets) {
+    if (re.test(working)) {
+      const opt = Array.from(commitmentSelect.options).find((o) => o.value && o.text.toLowerCase().includes(bucket));
+      if (opt) result.commitment = { value: opt.value, label: opt.text };
+      working = working.replace(re, "");
+      break;
+    }
+  }
+
+  // ---- recency ----
+  const dayBuckets = [
+    [/\btoday\b|\blast 24 hours\b|\bpast day\b/i, "1", "Last 24 hours"],
+    [/\b(?:last|past)\s*3\s*days?\b/i, "3", "Last 3 days"],
+    [/\bthis week\b|\bpast week\b|\b(?:last|past)\s*(?:7\s*days?|week)\b/i, "7", "Last 7 days"],
+    [/\b(?:last|past)\s*(?:2|two)\s*weeks?\b|\b14\s*days?\b/i, "14", "Last 14 days"],
+    [/\b(?:this|last|past)\s*month\b|\b30\s*days?\b/i, "30", "Last 30 days"],
+  ];
+  for (const [re, value, label] of dayBuckets) {
+    if (re.test(working)) {
+      result.days = { value, label };
+      working = working.replace(re, "");
+      break;
+    }
+  }
+
+  // ---- locations ----
+  if (/\bremote\b/i.test(working)) {
+    result.locationsAdded.push({ type: "group", value: "remote_us", label: locationGroupLabels.remote_us || "Remote (US)" });
+    working = working.replace(/\bremote\b/gi, "");
+  }
+  locationGroupList.forEach((g) => {
+    if (g.key === "remote_us") return;
+    const label = g.label.toLowerCase();
+    if (label.length > 3 && working.toLowerCase().includes(label)) {
+      result.locationsAdded.push({ type: "group", value: g.key, label: g.label });
+      working = working.replace(new RegExp(g.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "");
+    }
+  });
+  const cityRe = /\b(?:in|near|around|based in|located in)\s+([A-Z][a-zA-Z.]+(?:\s+[A-Z][a-zA-Z.]+){0,2})/g;
+  let cm2;
+  while ((cm2 = cityRe.exec(rawText)) !== null) {
+    const city = cm2[1].trim().replace(/[.,]+$/, "");
+    if (city.length > 2) {
+      result.locationsAdded.push({ type: "text", value: city, label: city });
+      working = working.replace(cm2[0], "");
+    }
+  }
+
+  // ---- department (detected, not stripped -- see function comment) ----
+  const lowerWorking = ` ${working.toLowerCase()} `;
+  Object.entries(HUNTER_DEPT_KEYWORDS).forEach(([label, kws]) => {
+    if (kws.some((kw) => lowerWorking.includes(kw))) result.departments.push(label);
+  });
+
+  // A handful of connector/filler words that tend to survive stripping
+  // (e.g. "make it full-time, posted this week" leaves behind "make it
+  // posted" once the recognized phrases are gone) but were never
+  // meaningful title text to begin with.
+  working = working.replace(/\b(?:make it|please make it|posted|listed)\b/gi, " ");
+
+  result.leftover = working.replace(/[,+]/g, " ").replace(/\s{2,}/g, " ").trim();
+  return result;
+}
+
+// Applies whatever a parse found to the real, live filter state (department
+// menu, location chips) -- salary/YOE/commitment/days are staged on
+// hunterState and only pushed into their controls at hunterApplyToPage()
+// (end of run), same as the old wizard did, since the range sliders only
+// need to move once. Locations/departments update live so their chips are
+// visible in the chat modal's background immediately, matching how the
+// old wizard's location step behaved.
+function hunterApplyParsed(parsed) {
+  if (parsed.currency) hunterState.currency = parsed.currency;
+  if (parsed.salaryMin) hunterState.salaryMin = parsed.salaryMin;
+  if (parsed.yoeMin !== undefined) hunterState.yoeMin = parsed.yoeMin;
+  if (parsed.commitment) hunterState.commitment = parsed.commitment;
+  if (parsed.days) hunterState.days = parsed.days;
+  parsed.departments.forEach((d) => { if (!hunterState.departments.includes(d)) hunterState.departments.push(d); });
+  let locChanged = false;
+  parsed.locationsAdded.forEach((loc) => {
+    if (loc.type === "group") {
+      if (!selectedLocations.some((s) => s.type === "group" && s.value === loc.value)) {
+        selectedLocations.push(loc);
+        locChanged = true;
+      }
+    } else if (!selectedLocations.some((s) => s.type === "text" && s.value.toLowerCase() === loc.value.toLowerCase())) {
+      selectedLocations.push(loc);
+      locChanged = true;
+    }
+  });
+  if (locChanged) renderLocationChips();
+}
+
+// Builds the human-readable recap phrases ("$150k+", "6+ years experience",
+// etc.) used in Hunter's replies, from whatever a single parse just found
+// (not the full accumulated state) -- so a reply only claims credit for
+// what that specific message actually added.
+function hunterRecapBits(parsed, { includeQuery = false } = {}) {
+  const bits = [];
+  if (includeQuery && hunterState.query) bits.push(`"${hunterState.query}" roles`);
+  if (parsed.salaryMin) bits.push(`${currencySymbol(hunterState.currency)}${formatAmountShort(parsed.salaryMin)}+`);
+  if (parsed.yoeMin !== undefined) bits.push(`${parsed.yoeMin}+ years experience`);
+  if (parsed.departments.length) bits.push(parsed.departments.join("/"));
+  if (parsed.commitment) bits.push(parsed.commitment.label);
+  if (parsed.locationsAdded.length) bits.push(parsed.locationsAdded.map((l) => l.label).join(", "));
+  if (parsed.days) bits.push(parsed.days.label.toLowerCase());
+  return bits;
+}
+
+// Pushes the accumulated hunterState into the real filter controls and
+// runs the actual search -- the one place this whole feature bottoms out,
+// same role wizardFinish() played in the old click-through version.
+// Locations are already live in selectedLocations (see hunterApplyParsed);
+// everything else only ever lived in hunterState until now.
+function hunterApplyToPage() {
+  if (hunterState.query) document.getElementById("q").value = hunterState.query;
+  if (hunterState.days) document.getElementById("days").value = hunterState.days.value;
+  if (hunterState.commitment) commitmentSelect.value = hunterState.commitment.value;
+  if (hunterState.departments.length) {
+    selectedDepartments = hunterState.departments.filter((d) => departmentOptions.includes(d));
+    renderDepartmentMenu();
+  }
   // Both are typed minimums with no ceiling requested -- hi stays at
   // whatever the slider's own real max already is (== "no upper bound"),
   // same convention db.py/search() use everywhere else for an unsent
-  // salary_max/yoe_max. If the sliders haven't finished loading their
-  // bounds yet (rare -- only if the wizard was opened within the first
-  // instant of page load), the typed value still reaches /api/jobs via
-  // whatever the slider control ends up defaulting to; only the visual
-  // slider thumb positioning is skipped here.
-  if (salarySliderCtl && salaryRange && wizard.salaryMin !== undefined) {
-    salaryRange = { ...salaryRange, lo: wizard.salaryMin, hi: salaryRange.max };
-    salarySliderCtl.setValues(wizard.salaryMin, salaryRange.max);
+  // salary_max/yoe_max.
+  if (salarySliderCtl && salaryRange && hunterState.salaryMin !== undefined) {
+    salaryRange = { ...salaryRange, lo: hunterState.salaryMin, hi: salaryRange.max };
+    salarySliderCtl.setValues(hunterState.salaryMin, salaryRange.max);
   }
-  if (yoeSliderCtl && yoeRange && wizard.yoeMin !== undefined) {
-    yoeRange = { ...yoeRange, lo: wizard.yoeMin, hi: yoeRange.max };
-    yoeSliderCtl.setValues(wizard.yoeMin, yoeRange.max);
+  if (yoeSliderCtl && yoeRange && hunterState.yoeMin !== undefined) {
+    yoeRange = { ...yoeRange, lo: hunterState.yoeMin, hi: yoeRange.max };
+    yoeSliderCtl.setValues(hunterState.yoeMin, yoeRange.max);
   }
-
   search(1);
-  wizardBotSay("Done — I've set up your search and run it.");
-  setWizardChoices([
-    { label: "See results", onClick: () => closeModal() },
-    { label: "Start a new search", onClick: restartWizard },
-  ]);
 }
 
-function restartWizard() {
+async function hunterHandleMessage(text) {
+  userSay(text);
+
+  if (HUNTER_RESTART_RE.test(text)) {
+    await hunterReply(pickOne(["Sure, clean slate.", "No problem, starting fresh.", "Sure thing — starting over."]));
+    restartHunter();
+    return;
+  }
+
+  if (HUNTER_IDENTITY_RE.test(text)) {
+    await hunterReply(pickOne(HUNTER_IDENTITY_DEFLECTIONS));
+    return;
+  }
+
+  const isFirst = !hunterState.askedFollowup;
+  const parsed = hunterParseMessage(text);
+  hunterApplyParsed(parsed);
+
+  if (isFirst) {
+    hunterState.query = parsed.leftover || "";
+    hunterState.askedFollowup = true;
+  } else if (parsed.leftover && parsed.leftover.length > 2 && !HUNTER_FINALIZE_RE.test(text) && !HUNTER_FILLER_RE.test(text.trim())) {
+    hunterState.query = hunterState.query ? `${hunterState.query} ${parsed.leftover}`.trim() : parsed.leftover;
+  }
+
+  const finalize = HUNTER_FINALIZE_RE.test(text);
+  const bits = hunterRecapBits(parsed, { includeQuery: isFirst });
+
+  if (finalize) {
+    const closing = bits.length
+      ? `Got it — adding ${bits.join(", ")}. Running your search now…`
+      : pickOne(["Running your search now…", "On it — pulling that up now…", "Searching now…"]);
+    await hunterReply(closing);
+    hunterApplyToPage();
+    setTimeout(() => closeModal(), 650);
+    return;
+  }
+
+  let reply;
+  if (isFirst) {
+    reply = bits.length
+      ? `Got it — ${bits.join(", ")}. Want to narrow it down more (salary, location, experience level, department), or just say "search now" and I'll pull it up.`
+      : `Got it. Want to narrow it down — salary, location, experience level, department — or just say "search now."`;
+  } else if (bits.length) {
+    reply = pickOne([
+      `Noted — added ${bits.join(", ")}. Anything else, or should I search now?`,
+      `Got it, ${bits.join(", ")}. Want to add more, or search now?`,
+      `Adding ${bits.join(", ")} to the list. More filters, or ready to search?`,
+    ]);
+  } else {
+    reply = pickOne([
+      `Didn't catch a specific filter there — try a salary, a city, or something like "senior" or "entry level." Or just say "search now."`,
+      `Not sure what to do with that one. Give me a number, a location, or say "search now" whenever you're ready.`,
+    ]);
+  }
+  await hunterReply(reply);
+}
+
+function restartHunter() {
   assistantMessages.innerHTML = "";
-  resetWizardState();
-  wizardBotSay("Let's set up another search.");
-  wizardAskSource();
+  resetHunterState();
+  hunterGreet();
 }
 
-function openWizardModal() {
+function hunterGreet() {
+  hunterSay("Hi, I'm Hunter. Tell me what you're looking for — role, location, salary, experience level, whatever you've got — and I'll set it up. Or attach your resume and I'll start from that instead.");
+}
+
+function openHunterModal() {
   openModal(`
-    <h2 class="modal-title">AI Search</h2>
+    <div class="hunter-header">
+      <div class="hunter-avatar">H</div>
+      <div>
+        <div class="hunter-name">Hunter</div>
+        <div class="hunter-tagline">Search assistant</div>
+      </div>
+    </div>
     <div class="assistant-messages" id="assistant-messages"></div>
-    <div class="assistant-choices hidden" id="assistant-choices"></div>
     <form id="assistant-form" class="assistant-form">
-      <input type="text" id="assistant-input" placeholder="Use the buttons above ↑" autocomplete="off" disabled />
+      <button type="button" id="hunter-resume-btn" class="hunter-attach-btn" title="Attach resume" aria-label="Attach resume">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+      </button>
+      <input type="text" id="assistant-input" placeholder="Tell Hunter what you're looking for…" autocomplete="off" />
       <button type="submit" aria-label="Send">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
       </button>
@@ -1909,83 +1857,46 @@ function openWizardModal() {
   `, { wide: true });
 
   assistantMessages = document.getElementById("assistant-messages");
-  assistantChoices = document.getElementById("assistant-choices");
   assistantForm = document.getElementById("assistant-form");
   assistantInput = document.getElementById("assistant-input");
+  hunterResumeBtn = document.getElementById("hunter-resume-btn");
 
-  // Hidden file input dedicated to the wizard's "upload resume" branch --
-  // separate element from the main page's #resume-input so choosing a
-  // file here doesn't fight over the same <input>'s change listener.
-  // Recreated each time the modal opens, same as the fields above.
-  assistantResumeInput = document.createElement("input");
-  assistantResumeInput.type = "file";
-  assistantResumeInput.accept = ".pdf,.docx,.txt";
-  assistantResumeInput.hidden = true;
-  modalContent.appendChild(assistantResumeInput);
+  // Hidden file input, separate from the main page's #resume-input so
+  // choosing a file here doesn't fight over the same <input>'s change
+  // listener. Recreated each time the modal opens, same as the fields
+  // above.
+  hunterResumeInput = document.createElement("input");
+  hunterResumeInput.type = "file";
+  hunterResumeInput.accept = ".pdf,.docx,.txt";
+  hunterResumeInput.hidden = true;
+  modalContent.appendChild(hunterResumeInput);
 
-  assistantResumeInput.addEventListener("change", async (e) => {
+  hunterResumeBtn.addEventListener("click", () => hunterResumeInput.click());
+
+  hunterResumeInput.addEventListener("change", async (e) => {
     const file = e.target.files[0];
     e.target.value = ""; // allow re-selecting the same file later in a restarted run
     if (!file) return;
-    wizardUserSay(`Uploaded ${file.name}`);
-    wizardBotSay("Reading your resume…");
+    userSay(`Attached ${file.name}`);
+    await hunterReply("Reading your resume…");
     await handleResumeFile(file); // sets hasResume/match terms and runs an initial search itself
-    wizardBotSay("Got it — now let's narrow it down a bit. Everything from here is optional.");
-    wizardAskSalary();
+    hunterState.askedFollowup = true; // resume path already ran a search; free text from here on just adds filters
+    await hunterReply("Got it — I've run an initial search from that. Want to narrow it down further (salary, location, experience level), or say \"search now\" to leave it as-is?");
   });
 
   assistantForm.addEventListener("submit", (e) => {
     e.preventDefault();
-    if (!wizard || assistantInput.disabled) return;
     const text = assistantInput.value.trim();
-    if (!text) return; // no free pass for a blank Enter -- use the Skip/Done buttons explicitly
-
-    if (wizard.step === "salary") {
-      assistantInput.value = "";
-      const n = parseInt(text, 10);
-      if (!Number.isNaN(n) && n > 0) {
-        wizard.salaryMin = n;
-        wizardUserSay(`${currencySymbol(wizard.currency)}${formatAmountShort(n)}+ (${wizard.currency})`);
-      } else {
-        wizardUserSay(text);
-      }
-      assistantChoices.classList.add("hidden");
-      assistantChoices.innerHTML = "";
-      wizardAskYoe();
-    } else if (wizard.step === "yoe") {
-      assistantInput.value = "";
-      const n = parseInt(text, 10);
-      if (!Number.isNaN(n) && n >= 0) {
-        wizard.yoeMin = n;
-        wizardUserSay(`${n}+ yrs`);
-      } else {
-        wizardUserSay(text);
-      }
-      assistantChoices.classList.add("hidden");
-      assistantChoices.innerHTML = "";
-      wizardAskDepartment();
-    } else if (wizard.step === "location") {
-      assistantInput.value = "";
-      if (!selectedLocations.some((s) => s.type === "text" && s.value === text)) {
-        selectedLocations.push({ type: "text", value: text, label: text });
-      }
-      renderLocationChips();
-      wizardUserSay(text);
-      renderWizardLocationStep(); // stay on this step -- Done is a separate explicit action
-    } else if (wizard.step === "awaiting_terms") {
-      assistantInput.value = "";
-      wizardUserSay(text);
-      wizard.query = text;
-      wizardAskSalary();
-    }
+    assistantInput.value = "";
+    if (!text) return;
+    hunterHandleMessage(text);
   });
 
-  resetWizardState();
-  wizardBotSay("Hi! I'll walk you through setting up a search -- just click through the buttons, no typing required unless you want to.");
-  wizardAskSource();
+  resetHunterState();
+  hunterGreet();
 }
 
-document.getElementById("ai-search-btn").addEventListener("click", openWizardModal);
+document.getElementById("ai-search-btn").addEventListener("click", openHunterModal);
 
 // ---- misc UI wiring ----
 

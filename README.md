@@ -1254,47 +1254,78 @@ exists page; edit `static/about.html` directly to update it. All three
 content pages (About/FAQ/Contact) share the same nav (`.nav-links`) and
 `.content-page`/`.page-form` CSS rules in `static/style.css`.
 
-## AI Search (guided wizard — no AI, no external API, always on)
+## Hunter (AI search assistant — no LLM, no external API, always on)
 
 A single combined pill button at the top of the search panel/dashboard
-(`#ai-search-btn`/`.ai-search-pill` in `static/index.html`, icon + "AI
-Search" label in one element), which opens the wizard inside the same
-modal system used elsewhere. This is a scripted decision tree, not a real
-conversation — there's no LLM involved, no API key, no cost, and nothing
-to configure, so unlike every other feature in this README there's no env
-var gating it on/off. (It's named "AI Search" for the person using it,
-not because it calls an AI model — worth knowing if this ever needs
-explaining to someone reading the code. The hero also now explicitly
-brands the site as "AI-powered" and "easy-apply only" — see Branding
-below.)
+(`#ai-search-btn`/`.ai-search-pill` in `static/index.html`), which opens
+Hunter — a free-text chat interface — inside the same modal system used
+elsewhere. **For future maintainers**: Hunter is a client-side rule-based
+parser (regex/keyword extraction, `hunterParseMessage()` in `app.js`), not
+an LLM. There's no API key, no cost, no network call beyond this app's own
+`/api/jobs`/`/api/parse-resume`, and nothing to configure, so unlike every
+other feature in this README there's no env var gating it on/off. The
+site's own copy (FAQ, About) doesn't spell out "it's just a parser" the
+way it briefly did in an earlier version — Hunter also won't affirmatively
+claim to be a specific real AI model if asked; see `HUNTER_IDENTITY_RE`/
+`HUNTER_IDENTITY_DEFLECTIONS` below. Keep that distinction in mind before
+changing either the code or the site copy.
 
-**Flow**: (1) ask whether to upload a resume or type search terms —
-resume goes through the existing `handleResumeFile()`/`/api/parse-resume`
-path (same as the main dropzone), search terms populate the query box
-directly; (2) salary minimum — a currency picker (cosmetic only, see
-below) plus four fixed buckets ($100k/$150k/$200k/$250k+) plus a number
-box for a custom amount; (3) years of experience — four preset levels
-(Entry/Mid/Senior/Staff) plus a number box; (4) department — multi-select
-toggle chips sourced from the same cleaned, frequency-ordered list the
-main page's department picker uses (see "Department cleanup" below), so
-picks can never drift out of sync with real facets or include junk
-values; (5) commitment type — quick one-click bubbles for the most common
-live values plus a full dropdown+Continue underneath for anything else;
-(6) location — toggle "Remote (US)" and/or type any number of cities
-(each added live to the real location-chip state as you go, so the chips
-above the search box update while the wizard is still open), then hit
-Done; (7) how recently posted. Everything skippable, and (8) it all gets
-applied to the real filter controls and `search()` is called once at the
-end — the wizard is just a guided way of filling in the same search box,
-sliders, and dropdowns already on the page, never a separate/parallel
-search path.
+**Flow**: the person types a full sentence — anything from "remote senior
+product manager job paying 150k+" to a bare "product manager" — and
+`hunterParseMessage()` extracts whatever it recognizes:
 
-Currency in the salary step is for the person's own reference only — the
-dataset has no per-posting currency field (`salary_min`/`salary_max` in
-`db.py` are plain numbers, effectively USD since the indexed companies
-are overwhelmingly US-based), so picking EUR/GBP/CAD changes the symbol
-shown, not what the number is actually compared against. Called out in
-the wizard's own prompt text so it isn't a silent trap.
+- **Salary** — `$150k`, `150,000`, a bare 6-digit number, or "six
+  figures" all resolve to a minimum. A currency word/symbol (USD/EUR/GBP/
+  CAD/$/€/£/C$) is cosmetic only, same caveat as the old wizard: the
+  dataset has no per-posting currency field (`salary_min`/`salary_max` in
+  `db.py` are plain numbers, effectively USD), so it just changes the
+  symbol shown, not what the number is compared against.
+- **Years of experience** — "entry level"/"new grad" → 0, "junior" → 1,
+  "mid-level" → 3, "senior" → 6, "staff"/"principal" → 10, or an explicit
+  "5 years"/"5+ yrs".
+- **Department** — `HUNTER_DEPT_KEYWORDS` maps phrases ("product
+  manager", "swe", "account executive", "customer success", …) to the
+  same ~14 canonical labels `department_groups.py` classifies raw scraped
+  values into (see "Department cleanup" below), so a chat mention and a
+  real facet value can never drift apart. Unlike the other filters,
+  department mentions are detected but *not* stripped out of the message
+  — "product manager" is both a department signal and useful title text
+  for the keyword search itself.
+- **Commitment** — "full-time"/"part-time"/"contract"/"intern(ship)"
+  fuzzy-matched against whatever commitment values actually exist in the
+  live `#commitment` `<select>`, same live-data principle the old wizard
+  used.
+- **Location** — "remote" → the canonical Remote (US) group; any other
+  `location_groups.py` group whose label appears in the message; explicit
+  "in `<City>`"/"near `<City>`"/"based in `<City>`" phrasing → pushed as a
+  literal typed location. Locations apply live to the real
+  `selectedLocations` array/chips as they're recognized, same as the old
+  wizard's location step.
+- **Recency** — "today"/"last 24 hours" → 1 day, "this week"/"past week"
+  → 7, "last 2 weeks" → 14, "this month" → 30, etc.
+
+Whatever's left over after stripping the recognized salary/YOE/
+commitment/recency/location phrases becomes (part of) the search query —
+messages accumulate into `hunterState.query` across turns rather than
+overwriting it, so "product manager" followed later by "actually make it
+remote" doesn't lose the original title text.
+
+Saying something like "search now", "run it", "go ahead", or "that's all"
+(`HUNTER_FINALIZE_RE`) applies everything collected in `hunterState` to
+the real filter controls (`hunterApplyToPage()`) and calls `search()` —
+same role `wizardFinish()` played in the old click-through version — then
+closes the modal after a short pause so the closing message is still
+visible. Saying "restart"/"start over"/"reset" (`HUNTER_RESTART_RE`)
+clears the transcript and state and starts over. Attaching a resume (the
+paperclip icon next to the input — the one thing free text can't do on
+its own) goes through the existing `handleResumeFile()`/
+`/api/parse-resume` path unchanged, same as the main dropzone.
+
+A short "Hunter is typing…" delay (`hunterReply()`, scaled loosely to
+reply length) precedes every response — purely cosmetic, the parsing
+itself is synchronous — and reply wording is picked from small template
+pools (`pickOne()`) rather than a single fixed string per situation, so
+consecutive runs don't read as identically scripted.
 
 **Department cleanup**: raw scraped `department` values are all over the
 place — "Engineering", "Software Engineering", "AI Research &
@@ -1324,13 +1355,22 @@ synthetic "Other" bucket rather than disappearing.
 
 This classification happens at query time against the raw `department`
 column (never stored/migrated), same as location grouping: `GET
-/api/facets` returns canonical labels
-(`db.department_group_facets()`), and filtering
-(`db._department_group_raw_values()`) expands a requested canonical label
-back to every raw value currently in the DB that classifies into it, then
-OR-matches those — a label that isn't recognized (an old saved search
-storing a raw scraped value from before this grouping existed) falls back
-to literal matching, so nothing needs migrating. Department is
+/api/facets` returns canonical labels (`db.department_group_facets()`),
+and filtering happens entirely in Python, post-fetch (`_dept_matches()`
+inside `db.search_jobs()`) rather than as a SQL `WHERE` clause — an
+earlier version expanded each requested canonical label to every matching
+raw value and OR'd them as SQL bound parameters, which crashed the whole
+site in production once real data had enough distinct raw department
+strings to exceed SQLite's ~999-bound-parameter limit
+(`sqlite3.OperationalError: too many SQL variables`, hit on essentially
+every request). See the comments at the top of `db.search_jobs()` and
+`db._raw_department_values()` for the full incident writeup — the
+takeaway for any future filter that expands a category to "every raw
+value that matches" is: filter in Python after the fetch, never build a
+SQL parameter list from live data. A raw value that doesn't classify into
+any recognized label (an old saved search storing a value from before
+this grouping existed) falls back to literal matching, so nothing needs
+migrating. Department is
 multi-select everywhere it appears: `db.search_jobs(departments=[...])`
 and `GET /api/jobs?department=a&department=b` (repeated param, same
 convention as `location`); the main page's department picker
@@ -1359,23 +1399,24 @@ touching saved searches or account state. "Home" is the first item in
 and enlarged — the original dashed-border box read as decorative rather
 than clickable to a real user testing it.
 
-**Implementation notes**: `openWizardModal()` (near the end of
+**Implementation notes**: `openHunterModal()` (near the end of
 `static/app.js`) builds the modal content and re-queries
-`assistantMessages`/`assistantChoices`/`assistantForm`/`assistantInput`
-each time it opens, since `openModal()` replaces `#modal-content`'s
-`innerHTML` on every call. `wizard` (a small state object) tracks
-progress through `wizardAskSource()` → `wizardAskSalary()` →
-`wizardAskYoe()` → `wizardAskDepartment()` → `wizardAskCommitment()` →
-`wizardAskLocation()` → `wizardAskDays()` → `wizardFinish()`. Most steps
-render their own custom mix of toggle chips/bubbles/dropdown/number-or-
-text input (`renderWizardSalaryStep()`, `renderWizardYoeStep()`,
-`renderWizardDepartmentStep()`, `renderWizardLocationStep()`) rather than
-the older uniform "one dropdown + Continue" pattern
-(`wizardAskFromSelect()`, still used for the recency step).
-`wizardFinish()` reuses the exact same filter-application patterns
-`loadSavedSearch()` already used for saved searches, then offers "See
-results" (closes the modal) or "Start a new search" (replays the flow
-from the top).
+`assistantMessages`/`assistantForm`/`assistantInput`/`hunterResumeBtn`/
+`hunterResumeInput` each time it opens, since `openModal()` replaces
+`#modal-content`'s `innerHTML` on every call. `hunterState` (a small state
+object, reset by `resetHunterState()`) accumulates whatever's parsed out
+across turns; `hunterHandleMessage()` is the per-message driver —
+identity-question check → restart check → `hunterParseMessage()` →
+`hunterApplyParsed()` (pushes locations/departments live) → either
+`hunterApplyToPage()` (on a finalize phrase) or a template-pool reply
+acknowledging what was just added. `hunterApplyToPage()` reuses the exact
+same filter-application patterns `loadSavedSearch()` already uses for
+saved searches. There's no button-driven step state anymore — the whole
+thing is one flat message handler, which is simpler than the old wizard's
+per-step function chain but means `hunterParseMessage()` is the one
+function that has to stay correct; see its inline comments for why
+department mentions aren't stripped from the leftover query text the way
+every other recognized phrase is.
 
 ## Branding
 
@@ -1385,7 +1426,7 @@ pages — by construction, never Workday, iCIMS, or Oracle, which is the
 actual differentiator worth calling out (those platforms are usually the
 annoying multi-page-application, create-another-account experience
 LinkedIn/Indeed results route through) — and the "AI-powered" framing for
-the guided search wizard. The footer includes a short "why this exists"
+Hunter. The footer includes a short "why this exists"
 blurb and a LinkedIn link; the fuller version of that story lives on
 `/about` (`static/about.html`). Edit these directly to change the
 framing, or swap the LinkedIn/GitHub URLs.
