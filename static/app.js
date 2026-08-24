@@ -790,6 +790,35 @@ resumeDropzone.addEventListener("drop", (e) => {
 // ---- accounts: modal shell ----
 
 let currentUser = null; // { email } once logged in via checkAuth(), else null
+// Set from /api/auth-config on load -- empty string means Turnstile isn't
+// configured on this deployment, and the signup form just skips rendering
+// the widget entirely (matches the backend's verify_turnstile() skipping
+// the check when TURNSTILE_SECRET_KEY is unset). See README.
+let turnstileSiteKey = "";
+let turnstileWidgetId = null;
+
+async function loadAuthConfig() {
+  try {
+    const res = await fetch("/api/auth-config");
+    const data = await res.json();
+    turnstileSiteKey = data.turnstile_site_key || "";
+  } catch (e) {
+    turnstileSiteKey = ""; // fail quiet -- same as every other nice-to-have fetch here
+  }
+}
+
+function renderTurnstileWidget() {
+  const el = document.getElementById("turnstile-widget");
+  if (!el || !turnstileSiteKey) return;
+  if (window.turnstile) {
+    turnstileWidgetId = window.turnstile.render(el, { sitekey: turnstileSiteKey });
+  } else {
+    // api.js loads async -- if the signup modal opens before it's ready
+    // (rare, only right after initial page load), poll briefly rather
+    // than just giving up on the widget.
+    setTimeout(renderTurnstileWidget, 150);
+  }
+}
 
 function openModal(html, { wide = false } = {}) {
   modalContent.innerHTML = html;
@@ -858,6 +887,11 @@ async function logout() {
 
 function openAuthModal(mode) {
   const isLogin = mode === "login";
+  turnstileWidgetId = null; // previous modal's widget (if any) is gone with its DOM
+  // Turnstile only guards signup (where bot account-creation is the actual
+  // risk) -- login is left alone, rate limiting on /api/login covers
+  // credential-stuffing without adding a captcha to every login attempt.
+  const showTurnstile = !isLogin && turnstileSiteKey;
   openModal(`
     <h2 class="modal-title">${isLogin ? "Log in" : "Sign up"}</h2>
     <form id="auth-form">
@@ -866,6 +900,7 @@ function openAuthModal(mode) {
       <label for="auth-password">Password</label>
       <input type="password" id="auth-password" required minlength="8"
         autocomplete="${isLogin ? "current-password" : "new-password"}" />
+      ${showTurnstile ? `<div id="turnstile-widget"></div>` : ""}
       <div class="auth-error" id="auth-error"></div>
       <button type="submit" class="btn-primary">${isLogin ? "Log in" : "Create account"}</button>
     </form>
@@ -874,6 +909,7 @@ function openAuthModal(mode) {
       <a href="#" id="auth-switch">${isLogin ? "Sign up" : "Log in"}</a>
     </p>
   `);
+  if (showTurnstile) renderTurnstileWidget();
   document.getElementById("auth-switch").addEventListener("click", (e) => {
     e.preventDefault();
     openAuthModal(isLogin ? "signup" : "login");
@@ -884,15 +920,30 @@ function openAuthModal(mode) {
     const password = document.getElementById("auth-password").value;
     const errorEl = document.getElementById("auth-error");
     errorEl.textContent = "";
+    const body = { email, password };
+    if (showTurnstile) {
+      body.turnstile_token = (turnstileWidgetId !== null && window.turnstile)
+        ? window.turnstile.getResponse(turnstileWidgetId)
+        : "";
+      if (!body.turnstile_token) {
+        errorEl.textContent = "Please complete the verification check.";
+        return;
+      }
+    }
     try {
       const res = await fetch(isLogin ? "/api/login" : "/api/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
         errorEl.textContent = data.message || "Something went wrong.";
+        // A rejected/expired Turnstile token needs a fresh challenge, not
+        // a resubmit of the same stale one.
+        if (showTurnstile && window.turnstile && turnstileWidgetId !== null) {
+          window.turnstile.reset(turnstileWidgetId);
+        }
         return;
       }
       currentUser = { email: data.email };
@@ -1112,6 +1163,7 @@ sortSelect.addEventListener("change", () => search(1));
 
 loadFacets();
 loadLocationGroups();
+loadAuthConfig();
 loadStatus();
 setInterval(loadStatus, 30000);
 // Waits on the auth check specifically (fast -- one query, or an

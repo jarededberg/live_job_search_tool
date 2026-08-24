@@ -14,9 +14,13 @@ import os
 import re
 import secrets
 import threading
+import urllib.request
 from datetime import datetime, timezone
+from urllib.error import URLError
 
 from flask import Flask, jsonify, request, send_from_directory, session
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 import db
 import db_users
@@ -33,6 +37,9 @@ MAX_RESUME_BYTES = 8 * 1024 * 1024  # 8 MB
 ALLOWED_RESUME_EXT = (".pdf", ".docx", ".txt")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 MIN_PASSWORD_LEN = 8
+TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY", "")
+TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
+TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = MAX_RESUME_BYTES
@@ -48,6 +55,18 @@ if not os.environ.get("SECRET_KEY"):
     print("[app] WARNING: SECRET_KEY not set -- using a random key that "
           "will change on every restart, logging out all users each time. "
           "Set SECRET_KEY in production.")
+
+# Rate limiting -- primarily to blunt bot signup/login floods (see README's
+# "User accounts" section for the cost reasoning). In-memory storage is
+# fine for a single web instance (Render's free/Starter/Basic tiers all run
+# exactly one); if this app ever scales to multiple instances, the limits
+# stop being shared across them and a Redis storage_uri should be added.
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    storage_uri="memory://",
+    default_limits=[],  # only the routes below get limited, not everything
+)
 
 _scrape_lock = threading.Lock()
 _scrape_in_progress = False
@@ -97,6 +116,42 @@ def start_scheduler():
 
 
 # ---------------- accounts: helpers ----------------
+
+def turnstile_enabled():
+    return bool(TURNSTILE_SECRET_KEY)
+
+
+def verify_turnstile(token, remote_ip):
+    """Checks a Cloudflare Turnstile token against Cloudflare's siteverify
+    endpoint. Returns True/False. If TURNSTILE_SECRET_KEY isn't set, this
+    deployment hasn't configured Turnstile at all -- skip the check
+    entirely (return True) rather than locking everyone out, same
+    graceful-degradation pattern as accounts_required/DATABASE_URL. See
+    README's "User accounts" section for setup steps."""
+    if not turnstile_enabled():
+        return True
+    if not token:
+        return False
+    payload = json.dumps({
+        "secret": TURNSTILE_SECRET_KEY,
+        "response": token,
+        "remoteip": remote_ip or "",
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        TURNSTILE_VERIFY_URL, data=payload,
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+        return bool(result.get("success"))
+    except (URLError, TimeoutError, ValueError):
+        # Cloudflare's endpoint being unreachable shouldn't be the reason a
+        # real person can't sign up -- fail open here, since the rate
+        # limiter above is the primary defense and Turnstile is a second
+        # layer, not the only one.
+        return True
+
 
 def login_required(f):
     """Route decorator -- returns 401 instead of running the view at all
@@ -287,6 +342,7 @@ def api_parse_resume():
 # ---------------- accounts: auth ----------------
 
 @app.route("/api/signup", methods=["POST"])
+@limiter.limit("5 per hour")
 @accounts_required
 def api_signup():
     from werkzeug.security import generate_password_hash
@@ -294,7 +350,10 @@ def api_signup():
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
+    turnstile_token = data.get("turnstile_token") or ""
 
+    if not verify_turnstile(turnstile_token, request.remote_addr):
+        return jsonify({"ok": False, "message": "Verification failed -- please try again."}), 400
     if not EMAIL_RE.match(email):
         return jsonify({"ok": False, "message": "That doesn't look like a valid email address."}), 400
     if len(password) < MIN_PASSWORD_LEN:
@@ -318,6 +377,7 @@ def api_signup():
 
 
 @app.route("/api/login", methods=["POST"])
+@limiter.limit("10 per minute")
 @accounts_required
 def api_login():
     from werkzeug.security import check_password_hash
@@ -342,6 +402,16 @@ def api_login():
 def api_logout():
     session.clear()
     return jsonify({"ok": True})
+
+
+@app.route("/api/auth-config")
+def api_auth_config():
+    """Public config the frontend needs before rendering the signup form --
+    just the Turnstile *site* key (safe to expose; it's not the secret).
+    Empty string means Turnstile isn't configured on this deployment, and
+    the frontend skips rendering the widget entirely (verify_turnstile()
+    above skips the check to match)."""
+    return jsonify({"turnstile_site_key": TURNSTILE_SITE_KEY})
 
 
 @app.route("/api/me")
@@ -457,6 +527,11 @@ def api_list_applied_jobs_full():
                 "delisted": True,
             })
     return jsonify({"jobs": results})
+
+
+@app.errorhandler(429)
+def rate_limited(e):
+    return jsonify({"ok": False, "message": "Too many attempts -- please wait a bit and try again."}), 429
 
 
 @app.route("/")

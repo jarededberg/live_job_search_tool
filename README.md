@@ -3,7 +3,7 @@
 A small web app that scrapes the Greenhouse / Lever / Ashby career-page APIs of
 ~4,300 companies (curated by Jared Edberg during his own job search) and lets
 any visitor search the cached results by keyword, location, and recency.
-Built to share the tool publicly.
+Built to share the tool publicly and post about it on LinkedIn.
 
 ## How it works
 
@@ -818,6 +818,9 @@ for the first several minutes.
    - `SCRAPE_MAX_WORKERS` (default `4`)
    - `DATABASE_URL` / `SECRET_KEY` — see "User accounts" below; the site
      runs fine without either, just without accounts.
+   - `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` — optional bot check on
+     signup, see "Abuse guardrails" under "User accounts" below; the site
+     runs fine without either, just without the CAPTCHA widget.
 
 ## User accounts (saved searches, applied-job tracking)
 
@@ -872,6 +875,53 @@ search and the homepage both keep working normally in that state. The
 frontend just doesn't show any account UI when `/api/me` comes back
 logged-out, so a deployment without accounts configured looks and
 behaves exactly like it did before this feature existed.
+
+### Abuse guardrails (rate limiting + optional bot check)
+
+Two independent layers, both aimed at bot signup floods rather than a
+sophisticated attacker — the goal is "cheap to add, closes the obvious
+gap," not a hardened auth system:
+
+1. **Rate limiting** (`Flask-Limiter`, always on, no configuration needed):
+   `/api/signup` is capped at 5 attempts/hour per IP, `/api/login` at 10/minute
+   per IP. Both return a `429 {"ok": false, "message": "Too many attempts..."}`
+   once tripped. Uses in-memory storage (`storage_uri="memory://"` in
+   `app.py`) — correct for the single web-service instance this app runs as;
+   if this ever scales to multiple instances behind a load balancer, the
+   limits stop being shared across them and a Redis `storage_uri` should be
+   added (Flask-Limiter supports this as a drop-in config change).
+2. **Cloudflare Turnstile** (optional, off unless configured): a lightweight,
+   free CAPTCHA alternative shown on the signup form only (not login).
+   Controlled by two env vars:
+   - `TURNSTILE_SITE_KEY` — public, safe to expose; served to the frontend via
+     `GET /api/auth-config`.
+   - `TURNSTILE_SECRET_KEY` — private; used server-side in `verify_turnstile()`
+     to check the token against Cloudflare's `siteverify` endpoint.
+
+   Get both free at the [Cloudflare dashboard](https://dash.cloudflare.com/)
+   → Turnstile → Add site (no domain ownership/DNS setup required — Turnstile
+   works on any domain you register it for). Leave both env vars unset and
+   the signup form just skips rendering the widget entirely, and
+   `verify_turnstile()` skips the check server-side to match — same
+   graceful-degradation pattern as `DATABASE_URL`/accounts.
+
+   Verified against Cloudflare's real `siteverify` endpoint (not mocked)
+   using their [published dummy sitekey/secret pairs for
+   testing](https://developers.cloudflare.com/turnstile/troubleshooting/testing/):
+   an always-pass pair correctly returns success, an always-fail pair
+   correctly returns failure, and a configured-but-missing-token request is
+   correctly rejected before ever calling Cloudflare. Also verified the
+   unconfigured case (no secret set) skips the check and lets signup proceed
+   normally.
+
+Why these two and not more: the actual cost exposure from spam signups on
+Render's pricing model is small (see reasoning below) — compute is a flat
+monthly rate, not per-request, and each fake account is a few hundred bytes
+in Postgres. The realistic risk is annoyance (fake accounts cluttering the
+`users` table) rather than a runaway bill, so a free rate limiter plus an
+optional free CAPTCHA is proportionate; something heavier (email
+verification, phone verification) wasn't worth the added signup friction for
+what this app needs today.
 
 ### What's deliberately NOT built yet
 

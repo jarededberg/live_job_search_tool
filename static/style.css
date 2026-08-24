@@ -191,6 +191,8 @@ code {
 }
 .modal-content .btn-primary { margin-top: 16px; width: 100%; padding: 10px; }
 
+#turnstile-widget { margin-top: 14px; }
+
 .auth-error {
   margin-top: 10px;
   font-size: 0.82rem;

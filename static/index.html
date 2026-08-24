@@ -158,6 +158,12 @@
     </div>
   </footer>
 
+  <!-- Cloudflare Turnstile (bot check on signup). Loading this unconditionally
+       is harmless even when Turnstile isn't configured on this deployment --
+       it just sits idle until app.js explicitly renders a widget, which only
+       happens if /api/auth-config returns a site key. See README's "User
+       accounts" section. -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <script src="app.js"></script>
 </body>
 </html>
