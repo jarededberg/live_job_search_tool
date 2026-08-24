@@ -101,6 +101,21 @@ def init_db():
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_applied_jobs_user ON applied_jobs(user_id)")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    used_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id)")
+            # Only the *hash* of the raw token is ever stored (see app.py's
+            # request_password_reset) -- same reasoning as password_hash on
+            # users: if this table ever leaks, the raw tokens (which are
+            # effectively temporary passwords) can't be recovered from it.
 
 
 # ---------------- users ----------------
@@ -135,6 +150,60 @@ def get_user_by_id(user_id):
             cur.execute("SELECT id, email, created_at FROM users WHERE id = %s", (user_id,))
             row = cur.fetchone()
             return dict(row) if row else None
+
+
+def update_password(user_id, password_hash):
+    with conn_ctx() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (password_hash, user_id))
+
+
+# ---------------- password reset ----------------
+
+def create_password_reset_token(user_id, token_hash, expires_at):
+    """Stores a new reset token's hash and invalidates any earlier unused
+    tokens for this user first, so only the most recently requested reset
+    link is ever valid -- clicking an old email's link after requesting a
+    newer one shouldn't still work."""
+    with conn_ctx() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM password_reset_tokens WHERE user_id = %s AND used_at IS NULL",
+                (user_id,),
+            )
+            cur.execute(
+                "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) "
+                "VALUES (%s, %s, %s)",
+                (user_id, token_hash, expires_at),
+            )
+
+
+def get_valid_reset_token(token_hash):
+    """Returns the user_id a still-valid (unused, unexpired) token hash
+    belongs to, or None. Looking this up by the *hashed* token (never the
+    raw one -- see app.py) means a leaked database dump alone can't be used
+    to reset anyone's password, same reasoning as password_hash."""
+    with conn_ctx() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT user_id FROM password_reset_tokens "
+                "WHERE token_hash = %s AND used_at IS NULL AND expires_at > now()",
+                (token_hash,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
+def consume_reset_token(token_hash):
+    """Marks a token used so it can't be replayed to reset the password a
+    second time -- called right after a successful reset, in the same
+    request that already validated it via get_valid_reset_token()."""
+    with conn_ctx() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE password_reset_tokens SET used_at = now() WHERE token_hash = %s",
+                (token_hash,),
+            )
 
 
 # ---------------- saved searches ----------------

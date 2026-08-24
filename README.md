@@ -116,18 +116,25 @@ live label that reads "Any" untouched, "$150k+" when only the floor moved,
 "Up to $150k" when only the ceiling moved, or "$120k – $150k" once both
 handles are off their endpoints.
 
-The sliders' own endpoints aren't hardcoded — `GET /api/facets` now also
-returns `salary_bounds`/`yoe_bounds`, computed from what's actually in the
-dataset (`db.salary_bounds()` / `db.years_bounds()`) rather than an
-arbitrary guess, so the floor/ceiling always reflect real postings. Salary
-bounds round outward to the nearest $5k for clean slider endpoints;
-`years_bounds()` has to fetch the distinct `years_experience` strings and
-parse each one (`blurb_extractor.parse_years_range()`), since that column
-is free text ("5+", "3-5"), not a number SQL can `MIN`/`MAX` directly —
-including a fix where an open-ended "10+" posting has no parsed upper
-bound at all, but still needs to push the slider's ceiling up to at least
-10 so that posting is ever reachable (otherwise the ceiling would silently
-cap out at whatever the highest *bounded*-range posting happened to be).
+The salary slider's own endpoints aren't hardcoded — `GET /api/facets`
+returns `salary_bounds`, computed from what's actually in the dataset
+(`db.salary_bounds()`) rather than an arbitrary guess, so the floor/ceiling
+always reflect real postings, rounded outward to the nearest $5k for clean
+slider endpoints.
+
+**The YOE slider's bounds ARE hardcoded, deliberately — fixed at 0 to 20,
+where 20 means "20+".** This one used to be data-derived the same way
+salary is (fetch distinct `years_experience` strings, parse each with
+`blurb_extractor.parse_years_range()`, take the min/max), but a "365"
+showed up as the computed ceiling in practice — almost certainly a
+mis-scraped "365 days" PTO figure landing in the years-experience field
+rather than a real 365-years requirement, not worth chasing down in
+`blurb_extractor.py` for one outlier. A fixed 0-20 range
+(`db.YOE_SLIDER_MAX`) sidesteps that class of bug entirely and reads more
+predictably to users besides. This only changes where the slider's handles
+start/end, not the actual filter behavior: the right handle sitting at its
+max is already treated as "no ceiling requested" (see below), so a
+genuinely-20+-years posting still surfaces exactly like it did before.
 
 A filter is "active" only once a handle has actually moved off its
 starting endpoint — dragging just the salary floor sends `salary_min` but
@@ -821,6 +828,9 @@ for the first several minutes.
    - `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` — optional bot check on
      signup, see "Abuse guardrails" under "User accounts" below; the site
      runs fine without either, just without the CAPTCHA widget.
+   - `RESEND_API_KEY` / `RESEND_FROM_EMAIL` / `APP_BASE_URL` — optional
+     password reset, see "Password reset" under "User accounts" below; the
+     site runs fine without these, just without a "Forgot password?" link.
 
 ## User accounts (saved searches, applied-job tracking)
 
@@ -828,6 +838,13 @@ Optional, and off by default — the site works exactly as before (search,
 resume match, filters) with no account system configured at all. Turning
 it on adds a login, a "Save this search" button, and a "Mark applied"
 toggle on every job card.
+
+The login/signup modal (and the forgot-password/reset-password modals) got
+a dedicated visual treatment (`.modal-auth` in `style.css`) — a dark
+branded header with the site's diamond mark, icon-prefixed email/password
+fields — distinct from the plain `.modal-title` look the saved-searches and
+applied-jobs modals use, since this is the one modal most first-time
+visitors actually form an impression of the site from.
 
 ### Why this is a separate database from the job cache
 
@@ -923,14 +940,67 @@ optional free CAPTCHA is proportionate; something heavier (email
 verification, phone verification) wasn't worth the added signup friction for
 what this app needs today.
 
-### What's deliberately NOT built yet
+### Password reset
 
-**Password reset.** There's no "forgot password" flow — the app currently
-has no way to send email at all, and wiring that up (a transactional
-email provider, a reset-token flow) was explicitly deferred. Right now,
-if someone forgets their password, they're stuck; the only recourse is
-manually resetting their `password_hash` directly in the database. Worth
-prioritizing if this ever gets real usage.
+Optional, same pattern as everything else here: off unless configured,
+nothing breaks if it isn't. Uses [Resend](https://resend.com) (free tier:
+3,000 emails/month, 100/day — more than enough for this) to send the reset
+email, via a plain `urllib` POST to Resend's REST API (`app.py`'s
+`send_password_reset_email()`) rather than pulling in their SDK for one
+call — same pattern as `verify_turnstile()`'s Cloudflare call.
+
+**Setup:**
+
+1. Create a free account at [resend.com](https://resend.com), grab an API
+   key.
+2. **Verify a domain you own** in Resend's dashboard (Domains → Add
+   Domain, then add the DNS records they give you). This step matters:
+   until a domain is verified, Resend restricts your account to sending
+   *only* from `onboarding@resend.dev`, and *only* to the email address you
+   signed up to Resend with — fine for testing it yourself, useless for
+   sending real users a reset link. A subdomain works fine
+   (`mail.yourdomain.com`) if you don't want to touch your main domain's
+   DNS.
+3. On the web service, set:
+   - `RESEND_API_KEY` = the API key from step 1.
+   - `RESEND_FROM_EMAIL` = e.g. `Open Roles Finder <noreply@yourdomain.com>`,
+     using the domain verified in step 2. Defaults to
+     `Open Roles Finder <onboarding@resend.dev>` if unset, which — per the
+     restriction above — will silently only work for emailing yourself.
+   - `APP_BASE_URL` = your deployed URL (e.g.
+     `https://open-roles-finder.onrender.com`), used to build the link
+     inside the reset email. Falls back to Flask's `request.url_root` if
+     unset, which is fine for local dev but can be wrong behind a
+     proxy/load balancer in production.
+4. Redeploy. The "Forgot password?" link appears on the login form
+   automatically once `RESEND_API_KEY` is set (checked via
+   `GET /api/auth-config`); a `password_reset_tokens` table is created
+   automatically on startup, same as the other account tables.
+
+**How it works:** requesting a reset (`POST /api/forgot-password`) always
+returns the same generic "if that email has an account..." response,
+whether or not the email is actually registered — same anti-enumeration
+reasoning as the login error message. If it is registered, a random
+32-byte token is generated, only its SHA-256 hash is stored (so a leaked
+database dump alone can't be used to reset anyone's password — same
+reasoning as `password_hash`), and it expires in 1 hour
+(`RESET_TOKEN_TTL_HOURS` in `app.py`). Requesting a new reset link
+invalidates any earlier unused one for that account, so only the most
+recent email's link ever works. Clicking the emailed link lands on
+`/reset-password?token=...`, which is the same single-page app — `app.js`'s
+`checkForResetToken()` notices the `token` query param on load and opens
+the "set a new password" modal directly rather than making the user find a
+login button first. Submitting a new password (`POST /api/reset-password`)
+validates the token (unused + unexpired), updates `password_hash`, and
+marks the token used so it can't be replayed. Both endpoints are rate
+limited (3/hour and 10/hour per IP respectively) on top of the token's own
+unguessability.
+
+Both routes are also gated behind `accounts_required` (same as every other
+account route), so if `DATABASE_URL` isn't set at all, they return the
+standard 503 rather than a different error.
+
+### What's deliberately NOT built yet
 
 **Applied-job tracking is a single toggle**, not a status pipeline
 (applied / interviewing / offer / rejected) — deliberately kept simple
@@ -968,6 +1038,34 @@ account. Separately, confirmed the whole app still starts and serves
 search/homepage normally with `DATABASE_URL` completely unset, and that
 account routes return a clean 503 in that state instead of an unhandled
 exception.
+
+**Password reset, tested the same way** (real local Postgres, real HTTP
+requests, plus a real call to Cloudflare's actual Turnstile `siteverify`
+endpoint for the bot-check work below): signed up a user, requested a
+reset (with a dummy `RESEND_API_KEY` so the token gets created and the
+send attempt fails harmlessly, logged but not surfaced to the caller —
+confirming the "email delivery failing shouldn't break the response"
+design), captured the raw token server-side, submitted it to
+`/api/reset-password` with a new password, confirmed the old password now
+returns 401 and the new one returns 200, and confirmed replaying the same
+(now-consumed) token a second time correctly fails with "invalid or
+expired" rather than silently succeeding again. Also confirmed the
+`DATABASE_URL`-set-but-`RESEND_API_KEY`-unset case: `/api/forgot-password`
+still returns its normal generic response without attempting to send
+anything or raising, and `/api/auth-config` reports
+`password_reset_enabled: false` so the frontend never shows a "Forgot
+password?" link that would just dead-end.
+
+Rate limiting (5/hour signup, 10/minute login, 3/hour forgot-password,
+10/hour reset-password) was verified by firing requests past each limit
+and confirming the exact request that crosses the threshold — and only
+that one — gets the `429` response instead of the normal one. Turnstile's
+`verify_turnstile()` was checked against Cloudflare's real endpoint (not
+mocked) using their published dummy sitekey/secret pairs for automated
+testing: an always-pass pair returns success, an always-fail pair returns
+failure, a configured-but-missing-token request is rejected before ever
+calling Cloudflare, and the fully-unconfigured case (no `TURNSTILE_SECRET_KEY`)
+skips the check entirely and lets signup through.
 
 ### Memory
 

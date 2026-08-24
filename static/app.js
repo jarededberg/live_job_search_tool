@@ -796,14 +796,21 @@ let currentUser = null; // { email } once logged in via checkAuth(), else null
 // the check when TURNSTILE_SECRET_KEY is unset). See README.
 let turnstileSiteKey = "";
 let turnstileWidgetId = null;
+// Whether this deployment has RESEND_API_KEY set (see app.py's
+// password_reset_enabled()) -- gates whether "Forgot password?" renders on
+// the login form at all. A deployment without it configured just doesn't
+// show the link, same graceful-degradation pattern as everything else here.
+let passwordResetEnabled = false;
 
 async function loadAuthConfig() {
   try {
     const res = await fetch("/api/auth-config");
     const data = await res.json();
     turnstileSiteKey = data.turnstile_site_key || "";
+    passwordResetEnabled = Boolean(data.password_reset_enabled);
   } catch (e) {
     turnstileSiteKey = ""; // fail quiet -- same as every other nice-to-have fetch here
+    passwordResetEnabled = false;
   }
 }
 
@@ -820,11 +827,22 @@ function renderTurnstileWidget() {
   }
 }
 
-function openModal(html, { wide = false } = {}) {
+function openModal(html, { wide = false, auth = false } = {}) {
   modalContent.innerHTML = html;
   modalBox.classList.toggle("modal-wide", wide);
+  // The auth flows (login/signup/forgot/reset) get a distinct branded-
+  // header treatment (see .modal-auth in style.css) instead of the plain
+  // .modal-title look the saved-searches/applied-jobs modals use -- this
+  // is the one modal most first-time visitors actually see.
+  modalBox.classList.toggle("modal-auth", auth);
   modalOverlay.classList.remove("hidden");
 }
+
+// Small inline icons for the auth forms' input fields -- plain stroked SVG
+// (matches the site's minimal line-icon aesthetic elsewhere) rather than
+// pulling in an icon font/library for two icons.
+const ICON_MAIL = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>`;
+const ICON_LOCK = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`;
 
 function closeModal() {
   modalOverlay.classList.add("hidden");
@@ -893,27 +911,47 @@ function openAuthModal(mode) {
   // credential-stuffing without adding a captcha to every login attempt.
   const showTurnstile = !isLogin && turnstileSiteKey;
   openModal(`
-    <h2 class="modal-title">${isLogin ? "Log in" : "Sign up"}</h2>
-    <form id="auth-form">
-      <label for="auth-email">Email</label>
-      <input type="email" id="auth-email" required autocomplete="email" />
-      <label for="auth-password">Password</label>
-      <input type="password" id="auth-password" required minlength="8"
-        autocomplete="${isLogin ? "current-password" : "new-password"}" />
-      ${showTurnstile ? `<div id="turnstile-widget"></div>` : ""}
-      <div class="auth-error" id="auth-error"></div>
-      <button type="submit" class="btn-primary">${isLogin ? "Log in" : "Create account"}</button>
-    </form>
-    <p class="modal-switch">
-      ${isLogin ? "No account?" : "Already have an account?"}
-      <a href="#" id="auth-switch">${isLogin ? "Sign up" : "Log in"}</a>
-    </p>
-  `);
+    <div class="modal-auth-header">
+      <div class="modal-auth-brand"><span class="brand-mark">◆</span> Open Roles Finder</div>
+      <h2>${isLogin ? "Welcome back" : "Create your account"}</h2>
+      <p>${isLogin ? "Log in to pick up your saved searches and applications." : "Save searches and track which roles you've applied to."}</p>
+    </div>
+    <div class="modal-auth-body">
+      <form id="auth-form">
+        <label for="auth-email">Email</label>
+        <div class="input-icon-group">
+          ${ICON_MAIL}
+          <input type="email" id="auth-email" required autocomplete="email" />
+        </div>
+        <label for="auth-password">Password</label>
+        <div class="input-icon-group">
+          ${ICON_LOCK}
+          <input type="password" id="auth-password" required minlength="8"
+            autocomplete="${isLogin ? "current-password" : "new-password"}" />
+        </div>
+        ${isLogin && passwordResetEnabled ? `<p class="modal-forgot"><a href="#" id="auth-forgot-link">Forgot password?</a></p>` : ""}
+        ${showTurnstile ? `<div id="turnstile-widget"></div>` : ""}
+        <div class="auth-error" id="auth-error"></div>
+        <button type="submit" class="btn-primary">${isLogin ? "Log in" : "Create account"}</button>
+      </form>
+      <p class="modal-switch">
+        ${isLogin ? "No account?" : "Already have an account?"}
+        <a href="#" id="auth-switch">${isLogin ? "Sign up" : "Log in"}</a>
+      </p>
+    </div>
+  `, { auth: true });
   if (showTurnstile) renderTurnstileWidget();
   document.getElementById("auth-switch").addEventListener("click", (e) => {
     e.preventDefault();
     openAuthModal(isLogin ? "signup" : "login");
   });
+  const forgotLink = document.getElementById("auth-forgot-link");
+  if (forgotLink) {
+    forgotLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      openForgotPasswordModal();
+    });
+  }
   document.getElementById("auth-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const email = document.getElementById("auth-email").value.trim();
@@ -954,6 +992,127 @@ function openAuthModal(mode) {
       errorEl.textContent = "Something went wrong. Try again.";
     }
   });
+}
+
+// ---- accounts: password reset ----
+
+function openForgotPasswordModal() {
+  openModal(`
+    <div class="modal-auth-header">
+      <div class="modal-auth-brand"><span class="brand-mark">◆</span> Open Roles Finder</div>
+      <h2>Reset your password</h2>
+      <p>Enter your account email and we'll send you a link to set a new one.</p>
+    </div>
+    <div class="modal-auth-body">
+      <form id="forgot-form">
+        <label for="forgot-email">Email</label>
+        <div class="input-icon-group">
+          ${ICON_MAIL}
+          <input type="email" id="forgot-email" required autocomplete="email" />
+        </div>
+        <div class="auth-error" id="forgot-error"></div>
+        <div class="auth-success hidden" id="forgot-success"></div>
+        <button type="submit" class="btn-primary">Send reset link</button>
+      </form>
+      <p class="modal-switch">
+        Remembered it? <a href="#" id="forgot-back-link">Log in</a>
+      </p>
+    </div>
+  `, { auth: true });
+  document.getElementById("forgot-back-link").addEventListener("click", (e) => {
+    e.preventDefault();
+    openAuthModal("login");
+  });
+  document.getElementById("forgot-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const email = document.getElementById("forgot-email").value.trim();
+    const errorEl = document.getElementById("forgot-error");
+    const successEl = document.getElementById("forgot-success");
+    const submitBtn = form.querySelector("button[type=submit]");
+    errorEl.textContent = "";
+    submitBtn.disabled = true;
+    try {
+      const res = await fetch("/api/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      // Shown regardless of whether the email actually had an account --
+      // the backend's response is deliberately the same either way (see
+      // api_forgot_password in app.py), so this UI can't leak that either.
+      // Only a genuine request failure (network error, 429 rate limit)
+      // shows something different, via the catch block below.
+      successEl.textContent = data.message || "If that email has an account, a reset link is on its way.";
+      successEl.classList.remove("hidden");
+      document.getElementById("forgot-email").disabled = true;
+      submitBtn.textContent = "Sent";
+    } catch (err) {
+      errorEl.textContent = "Something went wrong. Try again.";
+      submitBtn.disabled = false;
+    }
+  });
+}
+
+function openResetPasswordModal(token) {
+  openModal(`
+    <div class="modal-auth-header">
+      <div class="modal-auth-brand"><span class="brand-mark">◆</span> Open Roles Finder</div>
+      <h2>Set a new password</h2>
+      <p>Choose a new password for your account.</p>
+    </div>
+    <div class="modal-auth-body">
+      <form id="reset-password-form">
+        <label for="reset-password-input">New password</label>
+        <div class="input-icon-group">
+          ${ICON_LOCK}
+          <input type="password" id="reset-password-input" required minlength="8" autocomplete="new-password" />
+        </div>
+        <div class="auth-error" id="reset-password-error"></div>
+        <button type="submit" class="btn-primary">Update password</button>
+      </form>
+    </div>
+  `, { auth: true });
+  document.getElementById("reset-password-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const password = document.getElementById("reset-password-input").value;
+    const errorEl = document.getElementById("reset-password-error");
+    errorEl.textContent = "";
+    try {
+      const res = await fetch("/api/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, password }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        errorEl.textContent = data.message || "Something went wrong.";
+        return;
+      }
+      // Strip the token out of the URL on success -- a used token is dead
+      // either way (see db_users.consume_reset_token), but leaving it
+      // sitting in the address bar/history/a refresh is just untidy at
+      // best and confusing at worst ("why does this form still say update
+      // password after I already did").
+      const cleanPath = window.location.pathname === "/reset-password" ? "/" : window.location.pathname;
+      history.replaceState({}, "", cleanPath);
+      closeModal();
+      statusLine.textContent = "Password updated -- log in with your new password.";
+      openAuthModal("login");
+    } catch (err) {
+      errorEl.textContent = "Something went wrong. Try again.";
+    }
+  });
+}
+
+// If the page loaded from the link in a reset email (/reset-password?token=...),
+// jump straight to the "set a new password" modal instead of making the
+// user hunt for a login button first.
+function checkForResetToken() {
+  if (window.location.pathname !== "/reset-password") return;
+  const token = new URLSearchParams(window.location.search).get("token");
+  if (token) openResetPasswordModal(token);
 }
 
 // ---- accounts: saved searches ----
@@ -1165,6 +1324,7 @@ loadFacets();
 loadLocationGroups();
 loadAuthConfig();
 loadStatus();
+checkForResetToken();
 setInterval(loadStatus, 30000);
 // Waits on the auth check specifically (fast -- one query, or an
 // immediate no-op if accounts aren't configured) so the very first

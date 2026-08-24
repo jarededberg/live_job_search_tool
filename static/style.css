@@ -191,7 +191,104 @@ code {
 }
 .modal-content .btn-primary { margin-top: 16px; width: 100%; padding: 10px; }
 
+.modal-subtitle {
+  margin: -8px 0 16px;
+  font-size: 0.84rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 #turnstile-widget { margin-top: 14px; }
+
+.modal-forgot {
+  margin: 8px 0 0;
+  text-align: right;
+}
+.modal-forgot a { font-size: 0.8rem; color: var(--muted); text-decoration: none; }
+.modal-forgot a:hover { color: var(--accent); text-decoration: underline; }
+
+.auth-success {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: #1e7e34;
+}
+
+/* ---------- Auth modal (login / signup / password reset) ----------
+   A visually distinct treatment from the plain utility modals (saved
+   searches, applied jobs) -- this is the one modal a first-time visitor
+   forms an impression of the whole site from, so it gets a branded dark
+   header instead of reusing the generic .modal-title look. */
+
+.modal-box.modal-auth {
+  padding: 0;
+  overflow: hidden;
+  max-width: 400px;
+}
+
+.modal-box.modal-auth .modal-close {
+  color: rgba(255, 255, 255, 0.6);
+}
+.modal-box.modal-auth .modal-close:hover { color: white; }
+
+.modal-auth-header {
+  padding: 30px 28px 22px;
+  background: linear-gradient(135deg, var(--ink) 0%, #1c2540 100%);
+}
+
+.modal-auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 16px;
+}
+.modal-auth-brand .brand-mark { color: #8aa5ff; font-size: 0.85rem; }
+
+.modal-auth-header h2 {
+  margin: 0;
+  font-size: 1.32rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: white;
+}
+.modal-auth-header p {
+  margin: 7px 0 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.modal-auth-body { padding: 24px 28px 28px; }
+.modal-auth-body label { margin-top: 0; }
+.modal-auth-body .input-icon-group + label { margin-top: 14px; }
+
+.input-icon-group { position: relative; }
+.input-icon-group svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted-light);
+  pointer-events: none;
+}
+.input-icon-group input {
+  padding-left: 36px !important;
+}
+
+.modal-box.modal-auth .btn-primary {
+  box-shadow: var(--shadow-sm);
+  font-weight: 600;
+}
+.modal-box.modal-auth .modal-switch {
+  padding-top: 14px;
+  margin-top: 18px;
+  border-top: 1px solid var(--border-soft);
+  text-align: center;
+}
 
 .auth-error {
   margin-top: 10px;

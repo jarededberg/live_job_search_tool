@@ -631,32 +631,27 @@ def salary_bounds():
     return int(lo), int(hi)
 
 
+YOE_SLIDER_MAX = 20  # see years_bounds() docstring
+
+
 def years_bounds():
-    """(min, max) of parsed years_experience across every job that has it
-    -- same idea as salary_bounds() but for the YOE slider. years_experience
-    is free text ("5+", "3-5"), not a numeric column, so this can't be a
-    plain SQL MIN/MAX: it fetches the small number of distinct values
-    actually present and parses each with parse_years_range()."""
-    with conn_ctx() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT years_experience AS v FROM jobs "
-            "WHERE years_experience IS NOT NULL AND years_experience != ''"
-        ).fetchall()
-    los, his = [], []
-    for row in rows:
-        lo, hi = parse_years_range(row["v"])
-        if lo is not None:
-            los.append(lo)
-        if hi is not None:
-            his.append(hi)
-    if not los:
-        return 0, 15
-    # An open-ended "10+" posting has no parsed `hi` at all, but the
-    # slider's upper endpoint still needs to reach at least 10 for that
-    # job to ever be selectable -- so the max is taken over BOTH lists,
-    # not just `his` (which would silently cap out at 7 if every
-    # bounded-range posting topped out lower than an open-ended one).
-    return min(los), max(los + his)
+    """(min, max) for the YOE slider's endpoints. Fixed at (0, 20) rather
+    than derived from the data (that was the original design -- see git
+    history) because a handful of postings parse to wildly unreasonable
+    values (a "365" showed up in practice, almost certainly a mis-scraped
+    "365 days" PTO figure rather than a real years-of-experience figure,
+    not worth chasing down in blurb_extractor.py for one outlier). A fixed
+    0-20 range with 20 meaning "20+" is both more predictable for users and
+    immune to whatever the next weird outlier turns out to be.
+
+    This only affects where the slider's handles start/end -- the actual
+    filter semantics (search_jobs()'s `_yoe_overlaps`) already treat the
+    slider's right handle sitting at its max as "no ceiling requested" (see
+    app.js's search(), which only sends `yoe_max` once the handle has moved
+    off the endpoint), so leaving the slider at its new 0-20 default still
+    surfaces a genuinely-20+-years posting same as before -- nothing about
+    real filtering changes, just what number the slider's ceiling reads as."""
+    return 0, YOE_SLIDER_MAX
 
 
 def distinct_facet_values(column, limit=30):

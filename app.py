@@ -9,13 +9,14 @@ Then open http://localhost:8000
 """
 
 import functools
+import hashlib
 import json
 import os
 import re
 import secrets
 import threading
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.error import URLError
 
 from flask import Flask, jsonify, request, send_from_directory, session
@@ -40,6 +41,15 @@ MIN_PASSWORD_LEN = 8
 TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY", "")
 TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "Open Roles Finder <onboarding@resend.dev>")
+# Used to build the link inside the reset email (e.g. "https://open-roles-
+# finder.onrender.com") -- deliberately an explicit env var rather than
+# inferred from request.url_root, since that can be wrong behind a proxy/
+# load balancer. Falls back to request.url_root at send-time if unset,
+# which is fine for local dev but should be set explicitly in production.
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "").rstrip("/")
+RESET_TOKEN_TTL_HOURS = 1
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = MAX_RESUME_BYTES
@@ -151,6 +161,56 @@ def verify_turnstile(token, remote_ip):
         # limiter above is the primary defense and Turnstile is a second
         # layer, not the only one.
         return True
+
+
+def password_reset_enabled():
+    return bool(RESEND_API_KEY)
+
+
+def send_password_reset_email(to_email, reset_link):
+    """Sends the reset-link email via Resend's REST API -- plain urllib,
+    same pattern as verify_turnstile() above, so this doesn't need to pull
+    in an HTTP client dependency (or the `resend` package) for one call.
+    Returns True/False; the caller always shows the same generic response
+    to the browser regardless of the result (see api_forgot_password), so a
+    delivery failure here only ever surfaces in the server logs, never as a
+    signal to whoever's making the request about whether the email exists
+    or whether sending succeeded."""
+    payload = json.dumps({
+        "from": RESEND_FROM_EMAIL,
+        "to": [to_email],
+        "subject": "Reset your Open Roles Finder password",
+        "html": (
+            "<p>Someone (hopefully you) asked to reset the password on your "
+            "Open Roles Finder account.</p>"
+            f'<p><a href="{reset_link}">Click here to set a new password</a>. '
+            f"This link expires in {RESET_TOKEN_TTL_HOURS} hour"
+            f"{'s' if RESET_TOKEN_TTL_HOURS != 1 else ''}.</p>"
+            "<p>If you didn't request this, you can safely ignore this "
+            "email -- your password hasn't been changed.</p>"
+        ),
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.resend.com/emails", data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return 200 <= resp.status < 300
+    except Exception as e:
+        # Broad except deliberately -- URLError/HTTPError/timeout/whatever
+        # else, none of it should ever bubble up into the request handler
+        # as a 500. The user still sees the same generic "check your email"
+        # response either way (see api_forgot_password); this is purely for
+        # the server operator to notice in logs (e.g. RESEND_API_KEY typo'd,
+        # or Resend's sandbox restriction blocking delivery to a real user
+        # because a custom domain hasn't been verified yet -- see README).
+        print(f"[app] password reset email to {to_email} failed to send: {e}")
+        return False
 
 
 def login_required(f):
@@ -398,6 +458,69 @@ def api_login():
     return jsonify({"ok": True, "email": user["email"]})
 
 
+@app.route("/api/forgot-password", methods=["POST"])
+@limiter.limit("3 per hour")
+@accounts_required
+def api_forgot_password():
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+
+    # Always the same response, whether or not the email is registered, the
+    # format's invalid, password reset isn't configured, or the send itself
+    # fails -- any difference here would let this endpoint be used to probe
+    # which emails have accounts (same reasoning as api_login's generic
+    # "incorrect email or password"). Real problems (bad RESEND_API_KEY,
+    # Resend's sandbox domain restriction, etc.) only ever show up in
+    # server logs, via send_password_reset_email()'s own logging.
+    generic = jsonify({
+        "ok": True,
+        "message": "If that email has an account, a password reset link is on its way.",
+    })
+
+    if not EMAIL_RE.match(email) or not password_reset_enabled():
+        return generic
+
+    user = db_users.get_user_by_email(email)
+    if user:
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=RESET_TOKEN_TTL_HOURS)
+        db_users.create_password_reset_token(user["id"], token_hash, expires_at)
+        base = APP_BASE_URL or request.url_root.rstrip("/")
+        reset_link = f"{base}/reset-password?token={raw_token}"
+        send_password_reset_email(user["email"], reset_link)
+
+    return generic
+
+
+@app.route("/api/reset-password", methods=["POST"])
+@limiter.limit("10 per hour")
+@accounts_required
+def api_reset_password():
+    from werkzeug.security import generate_password_hash
+
+    data = request.get_json(silent=True) or {}
+    token = data.get("token") or ""
+    new_password = data.get("password") or ""
+
+    if len(new_password) < MIN_PASSWORD_LEN:
+        return jsonify({"ok": False, "message": f"Password needs to be at least {MIN_PASSWORD_LEN} characters."}), 400
+    if not token:
+        return jsonify({"ok": False, "message": "Missing or invalid reset link."}), 400
+
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    user_id = db_users.get_valid_reset_token(token_hash)
+    if not user_id:
+        return jsonify({"ok": False, "message": "This reset link is invalid or has expired. Request a new one."}), 400
+
+    db_users.update_password(user_id, generate_password_hash(new_password))
+    # Consumed only after the password's actually updated -- if update_password
+    # somehow raised, the token stays valid for a retry instead of being
+    # burned on a failed attempt.
+    db_users.consume_reset_token(token_hash)
+    return jsonify({"ok": True, "message": "Password updated. You can log in now."})
+
+
 @app.route("/api/logout", methods=["POST"])
 def api_logout():
     session.clear()
@@ -406,12 +529,17 @@ def api_logout():
 
 @app.route("/api/auth-config")
 def api_auth_config():
-    """Public config the frontend needs before rendering the signup form --
-    just the Turnstile *site* key (safe to expose; it's not the secret).
-    Empty string means Turnstile isn't configured on this deployment, and
-    the frontend skips rendering the widget entirely (verify_turnstile()
-    above skips the check to match)."""
-    return jsonify({"turnstile_site_key": TURNSTILE_SITE_KEY})
+    """Public config the frontend needs before rendering the auth forms --
+    the Turnstile *site* key (safe to expose; it's not the secret) and
+    whether password reset is set up at all (so the frontend can hide the
+    "Forgot password?" link entirely rather than show a dead-end form).
+    Empty/false means that feature isn't configured on this deployment, and
+    the frontend skips rendering it, matching the backend skipping the
+    corresponding check (verify_turnstile(), api_forgot_password())."""
+    return jsonify({
+        "turnstile_site_key": TURNSTILE_SITE_KEY,
+        "password_reset_enabled": password_reset_enabled(),
+    })
 
 
 @app.route("/api/me")
@@ -539,6 +667,18 @@ def index():
     return send_from_directory(STATIC_DIR, "index.html")
 
 
+@app.route("/reset-password")
+def reset_password_page():
+    # Same static/index.html as "/" -- this is a single-page app, so the
+    # actual "page" here is just app.js noticing a `?token=...` query
+    # param on load and opening the "set a new password" modal for it (see
+    # checkForResetToken() in app.js). A dedicated Flask route exists only
+    # so this URL (the one emailed to the user) resolves to something
+    # instead of a 404 -- without it, Flask's static handler has no file
+    # called "reset-password" to serve.
+    return send_from_directory(STATIC_DIR, "index.html")
+
+
 db.init_db()
 if db_users.accounts_enabled():
     db_users.init_db()
@@ -547,6 +687,11 @@ else:
           "applied-job tracking) are disabled on this deployment. Search "
           "and resume matching work as normal. See README's 'User "
           "accounts' section to enable accounts.")
+if db_users.accounts_enabled() and not password_reset_enabled():
+    print("[app] RESEND_API_KEY not set -- password reset is disabled on "
+          "this deployment (signup/login/saved searches/applied jobs all "
+          "still work normally). See README's 'User accounts' section to "
+          "enable it.")
 _scheduler = start_scheduler()
 
 if __name__ == "__main__":
