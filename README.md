@@ -816,6 +816,108 @@ for the first several minutes.
 6. Optional environment variables:
    - `SCRAPE_INTERVAL_HOURS` (default `8`)
    - `SCRAPE_MAX_WORKERS` (default `4`)
+   - `DATABASE_URL` / `SECRET_KEY` — see "User accounts" below; the site
+     runs fine without either, just without accounts.
+
+## User accounts (saved searches, applied-job tracking)
+
+Optional, and off by default — the site works exactly as before (search,
+resume match, filters) with no account system configured at all. Turning
+it on adds a login, a "Save this search" button, and a "Mark applied"
+toggle on every job card.
+
+### Why this is a separate database from the job cache
+
+`db.py`'s SQLite `jobs.db` is disposable by design — if it's ever lost,
+the next scrape rebuilds it from scratch, and it already gets pruned/
+rewritten constantly (see `prune_stale`, `upsert_jobs`). A user's account
+and the searches/applications they've saved are NOT disposable — losing
+them actually costs the person something. So accounts live in their own
+Postgres database (`db_users.py`), connected via the standard
+`DATABASE_URL` env var (`postgresql://user:pass@host:port/dbname`),
+completely separate from the SQLite file and its lifecycle.
+
+Render's **free** Postgres tier auto-deletes the whole database after 30
+days with no warning — fine for a disposable cache, not something to put
+irreplaceable account data on. The recommended setup uses Render's
+smallest **paid** Postgres tier (Basic, ~$6/month as of writing — check
+Render's current pricing), which doesn't expire. At the data volumes a
+tool like this actually sees (a saved search is roughly 1KB; even a few
+hundred applied-job records per user is well under 100KB), that tier has
+a lot of headroom — this isn't a case where the database is likely to
+become the bottleneck or need upsizing any time soon.
+
+### Setup
+
+1. In Render: **New > PostgreSQL**, pick the paid Basic tier (not Free,
+   for the reason above), same region as the web service.
+2. Copy its **Internal Database URL** from the Render dashboard.
+3. On the web service: **Environment**, add:
+   - `DATABASE_URL` = the internal connection string from step 2.
+   - `SECRET_KEY` = any long random string (e.g. `python3 -c "import secrets; print(secrets.token_hex(32))"`).
+     This signs login session cookies — **if it's not set, the app still
+     runs, but generates a random one on every process start/restart,
+     which silently logs every user out each time the app restarts.** Not
+     a problem for local dev; a real problem on a host that
+     redeploys/restarts periodically.
+4. Redeploy. The three account tables (`users`, `saved_searches`,
+   `applied_jobs`) are created automatically on startup
+   (`db_users.init_db()`) — no manual migration step.
+
+Locally, without a `DATABASE_URL` set at all, every account-related route
+(`/api/signup`, `/api/login`, saved searches, applied jobs) returns a
+clean `503 {"error": "Accounts aren't set up on this deployment yet."}`
+instead of crashing — verified directly, along with the fact that plain
+search and the homepage both keep working normally in that state. The
+frontend just doesn't show any account UI when `/api/me` comes back
+logged-out, so a deployment without accounts configured looks and
+behaves exactly like it did before this feature existed.
+
+### What's deliberately NOT built yet
+
+**Password reset.** There's no "forgot password" flow — the app currently
+has no way to send email at all, and wiring that up (a transactional
+email provider, a reset-token flow) was explicitly deferred. Right now,
+if someone forgets their password, they're stuck; the only recourse is
+manually resetting their `password_hash` directly in the database. Worth
+prioritizing if this ever gets real usage.
+
+**Applied-job tracking is a single toggle**, not a status pipeline
+(applied / interviewing / offer / rejected) — deliberately kept simple
+for v1. `applied_jobs` is a plain `(user_id, job_url, applied_at)` table;
+extending it to a status enum + notes field later is a small, additive
+schema change, not a redesign.
+
+**Saved searches restore the plain filters** (query text, days,
+department, commitment, sort, location chips, and the salary/YOE sliders
+if touched) but NOT anything resume-derived — uploading a resume and
+using "sort by match" isn't something a saved search remembers, since
+that's tied to whatever resume happens to be uploaded in that browser
+session, not a standing preference. Re-running a saved search always
+falls back to newest-first if it had been saved while sorted by match.
+
+### How this was tested
+
+No live Render Postgres instance was available to test against directly,
+so this was verified against a *real* local PostgreSQL server instead of
+mocking the database calls out — a portable, no-root-required Postgres
+18.6 binary (aarch64 build, from the `theseus-rs/postgresql-binaries`
+project) was downloaded, initialized, and run on a throwaway port for the
+duration of testing. Against that real instance, end-to-end via actual
+HTTP requests (not calling Python functions directly): sign up, confirm
+`/api/me` reflects the new session, save a search and list it back,
+mark a job applied and confirm it shows `applied: true` on that URL (and
+`false` on a different one) in a live `/api/jobs` response, fetch the
+full "My Applications" list (including a URL deliberately marked applied
+that was never in the job cache at all, to confirm the "delisted, but
+still shown" behavior works), unmark it, log out, confirm `/api/me`
+reflects the logged-out state, confirm a protected route returns 401
+without a session, confirm a wrong password returns 401, and confirm
+signing up twice with the same email returns 409 rather than a duplicate
+account. Separately, confirmed the whole app still starts and serves
+search/homepage normally with `DATABASE_URL` completely unset, and that
+account routes return a clean 503 in that state instead of an unhandled
+exception.
 
 ### Memory
 

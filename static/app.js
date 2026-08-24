@@ -15,6 +15,12 @@ const syntaxHelp = document.getElementById("syntax-help");
 const resumeInput = document.getElementById("resume-input");
 const resumeDropzone = document.getElementById("resume-dropzone");
 const resumeStatus = document.getElementById("resume-status");
+const authArea = document.getElementById("auth-area");
+const saveSearchBtn = document.getElementById("save-search-btn");
+const modalOverlay = document.getElementById("modal-overlay");
+const modalBox = document.getElementById("modal-box");
+const modalContent = document.getElementById("modal-content");
+const modalCloseBtn = document.getElementById("modal-close");
 
 let currentPage = 1;
 // Populated once /api/facets returns salary_bounds/yoe_bounds and the
@@ -289,6 +295,14 @@ function jobCard(job) {
     ? `<div class="job-tools"><span class="tools-icon" aria-hidden="true">🔧</span>${job.tools.map((t) => `<span class="tool-chip">${escapeHtml(t)}</span>`).join("")}</div>`
     : "";
 
+  // Only rendered once we actually know whether the user's logged in
+  // (checkAuth() runs on page load) -- logged-out visitors just don't see
+  // an applied toggle at all rather than one that errors on click.
+  const appliedBtn = currentUser
+    ? `<button type="button" class="applied-toggle${job.applied ? " is-applied" : ""}"
+         onclick="toggleApplied('${escapeAttr(job.url)}', this)">${job.applied ? "✓ Applied" : "Mark applied"}</button>`
+    : "";
+
   return `
     <div class="job-card">
       <div class="job-card-header">
@@ -304,6 +318,7 @@ function jobCard(job) {
       <div class="job-footer">
         <span class="job-posted">${escapeHtml(posted)}</span>
         ${tags.join("")}
+        ${appliedBtn}
       </div>
     </div>
   `;
@@ -449,7 +464,18 @@ function createRangeSlider({ track, fill, thumbMin, thumbMax, valueEl, min, max,
   });
 
   render();
-  return { getValues: () => ({ lo, hi, min, max }) };
+  return {
+    getValues: () => ({ lo, hi, min, max }),
+    // Used to restore slider position when loading a saved search --
+    // clamps into [min, max] and re-renders the thumbs/fill/label without
+    // re-running onCommit (the caller triggers the actual search itself).
+    setValues(newLo, newHi) {
+      lo = Math.min(Math.max(min, newLo), max);
+      hi = Math.min(Math.max(min, newHi), max);
+      if (lo > hi) [lo, hi] = [hi, lo];
+      render();
+    },
+  };
 }
 
 function formatSalaryShort(n) {
@@ -461,13 +487,18 @@ function formatYoeShort(n) {
 }
 
 let rangeSlidersInitialized = false;
+// Kept around (beyond the closures createRangeSlider already returns) so
+// a loaded saved search can reposition the thumbs via .setValues() --
+// see loadSavedSearch().
+let salarySliderCtl = null;
+let yoeSliderCtl = null;
 
 function initRangeSliders(salaryBounds, yoeBounds) {
   if (rangeSlidersInitialized) return; // /api/facets can be called again later; only wire once
   rangeSlidersInitialized = true;
 
   const salaryStep = Math.max(1000, Math.round((salaryBounds.max - salaryBounds.min) / 100 / 1000) * 1000);
-  const salarySlider = createRangeSlider({
+  salarySliderCtl = createRangeSlider({
     track: document.querySelector("#salary-slider .range-slider-track"),
     fill: document.getElementById("salary-slider-fill"),
     thumbMin: document.getElementById("salary-thumb-min"),
@@ -485,7 +516,7 @@ function initRangeSliders(salaryBounds, yoeBounds) {
   salaryRange = { lo: salaryBounds.min, hi: salaryBounds.max, min: salaryBounds.min, max: salaryBounds.max };
 
   const yoeStep = 1;
-  const yoeSlider = createRangeSlider({
+  yoeSliderCtl = createRangeSlider({
     track: document.querySelector("#yoe-slider .range-slider-track"),
     fill: document.getElementById("yoe-slider-fill"),
     thumbMin: document.getElementById("yoe-thumb-min"),
@@ -756,6 +787,312 @@ resumeDropzone.addEventListener("drop", (e) => {
   if (file) handleResumeFile(file);
 });
 
+// ---- accounts: modal shell ----
+
+let currentUser = null; // { email } once logged in via checkAuth(), else null
+
+function openModal(html, { wide = false } = {}) {
+  modalContent.innerHTML = html;
+  modalBox.classList.toggle("modal-wide", wide);
+  modalOverlay.classList.remove("hidden");
+}
+
+function closeModal() {
+  modalOverlay.classList.add("hidden");
+  modalContent.innerHTML = "";
+}
+
+modalCloseBtn.addEventListener("click", closeModal);
+modalOverlay.addEventListener("click", (e) => {
+  if (e.target === modalOverlay) closeModal(); // click on the dimmed backdrop, not the box itself
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !modalOverlay.classList.contains("hidden")) closeModal();
+});
+
+// ---- accounts: auth (signup/login/logout) ----
+
+function renderAuthArea() {
+  if (currentUser) {
+    authArea.innerHTML = `
+      <button type="button" class="auth-btn" id="btn-saved-searches">Saved searches</button>
+      <button type="button" class="auth-btn" id="btn-my-applications">My applications</button>
+      <span class="auth-email">${escapeHtml(currentUser.email)}</span>
+      <button type="button" class="auth-btn" id="btn-logout">Log out</button>
+    `;
+    document.getElementById("btn-saved-searches").addEventListener("click", openSavedSearchesModal);
+    document.getElementById("btn-my-applications").addEventListener("click", openMyApplicationsModal);
+    document.getElementById("btn-logout").addEventListener("click", logout);
+    saveSearchBtn.classList.remove("hidden");
+  } else {
+    authArea.innerHTML = `
+      <button type="button" class="auth-btn" id="btn-login">Log in</button>
+      <button type="button" class="auth-btn auth-btn-primary" id="btn-signup">Sign up</button>
+    `;
+    document.getElementById("btn-login").addEventListener("click", () => openAuthModal("login"));
+    document.getElementById("btn-signup").addEventListener("click", () => openAuthModal("signup"));
+    saveSearchBtn.classList.add("hidden");
+    document.getElementById("save-search-inline").classList.add("hidden");
+  }
+}
+
+async function checkAuth() {
+  try {
+    const res = await fetch("/api/me");
+    const data = await res.json();
+    currentUser = data.ok ? { email: data.email } : null;
+  } catch (e) {
+    currentUser = null; // accounts DB hiccup or not configured -- fail quiet, site works fine logged-out
+  }
+  renderAuthArea();
+}
+
+async function logout() {
+  try {
+    await fetch("/api/logout", { method: "POST" });
+  } catch (e) { /* best effort -- clear local state regardless */ }
+  currentUser = null;
+  renderAuthArea();
+  search(currentPage); // redraw cards without the "Mark applied" toggle
+}
+
+function openAuthModal(mode) {
+  const isLogin = mode === "login";
+  openModal(`
+    <h2 class="modal-title">${isLogin ? "Log in" : "Sign up"}</h2>
+    <form id="auth-form">
+      <label for="auth-email">Email</label>
+      <input type="email" id="auth-email" required autocomplete="email" />
+      <label for="auth-password">Password</label>
+      <input type="password" id="auth-password" required minlength="8"
+        autocomplete="${isLogin ? "current-password" : "new-password"}" />
+      <div class="auth-error" id="auth-error"></div>
+      <button type="submit" class="btn-primary">${isLogin ? "Log in" : "Create account"}</button>
+    </form>
+    <p class="modal-switch">
+      ${isLogin ? "No account?" : "Already have an account?"}
+      <a href="#" id="auth-switch">${isLogin ? "Sign up" : "Log in"}</a>
+    </p>
+  `);
+  document.getElementById("auth-switch").addEventListener("click", (e) => {
+    e.preventDefault();
+    openAuthModal(isLogin ? "signup" : "login");
+  });
+  document.getElementById("auth-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = document.getElementById("auth-email").value.trim();
+    const password = document.getElementById("auth-password").value;
+    const errorEl = document.getElementById("auth-error");
+    errorEl.textContent = "";
+    try {
+      const res = await fetch(isLogin ? "/api/login" : "/api/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        errorEl.textContent = data.message || "Something went wrong.";
+        return;
+      }
+      currentUser = { email: data.email };
+      renderAuthArea();
+      closeModal();
+      search(currentPage); // redraw cards with applied toggles now available
+    } catch (err) {
+      errorEl.textContent = "Something went wrong. Try again.";
+    }
+  });
+}
+
+// ---- accounts: saved searches ----
+
+function currentSearchParams() {
+  // The "restorable" subset of search state -- plain filters, location
+  // chips, and (if actually touched) the salary/YOE sliders. Deliberately
+  // excludes anything resume-derived (resume_title_term etc.): a saved
+  // search is meant to be re-run standalone later, without requiring the
+  // same resume to be re-uploaded first, so "match" sort (which only
+  // means something with resume terms attached) falls back to "newest."
+  const params = {
+    q: document.getElementById("q").value.trim(),
+    days: document.getElementById("days").value,
+    department: departmentSelect.value,
+    commitment: commitmentSelect.value,
+    sort: sortSelect.value === "match" ? "newest" : sortSelect.value,
+    locations: selectedLocations,
+  };
+  if (salaryRange && (salaryRange.lo > salaryRange.min || salaryRange.hi < salaryRange.max)) {
+    params.salary_min = salaryRange.lo;
+    params.salary_max = salaryRange.hi;
+  }
+  if (yoeRange && (yoeRange.lo > yoeRange.min || yoeRange.hi < yoeRange.max)) {
+    params.yoe_min = yoeRange.lo;
+    params.yoe_max = yoeRange.hi;
+  }
+  return params;
+}
+
+function loadSavedSearch(params) {
+  document.getElementById("q").value = params.q || "";
+  document.getElementById("days").value = params.days || "";
+  if (params.department) departmentSelect.value = params.department;
+  if (params.commitment) commitmentSelect.value = params.commitment;
+  sortSelect.value = params.sort || "newest";
+  selectedLocations = params.locations || [];
+  renderLocationChips();
+  if (salarySliderCtl && params.salary_min !== undefined) {
+    salaryRange = { ...salaryRange, lo: params.salary_min, hi: params.salary_max };
+    salarySliderCtl.setValues(params.salary_min, params.salary_max);
+  }
+  if (yoeSliderCtl && params.yoe_min !== undefined) {
+    yoeRange = { ...yoeRange, lo: params.yoe_min, hi: params.yoe_max };
+    yoeSliderCtl.setValues(params.yoe_min, params.yoe_max);
+  }
+  closeModal();
+  search(1);
+}
+
+saveSearchBtn.addEventListener("click", () => {
+  saveSearchBtn.classList.add("hidden");
+  const inline = document.getElementById("save-search-inline");
+  inline.classList.remove("hidden");
+  document.getElementById("save-search-name").focus();
+});
+
+document.getElementById("save-search-cancel").addEventListener("click", () => {
+  document.getElementById("save-search-inline").classList.add("hidden");
+  document.getElementById("save-search-name").value = "";
+  saveSearchBtn.classList.remove("hidden");
+});
+
+document.getElementById("save-search-name").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); submitSaveSearch(); }
+  else if (e.key === "Escape") { document.getElementById("save-search-cancel").click(); }
+});
+
+document.getElementById("save-search-confirm").addEventListener("click", submitSaveSearch);
+
+async function submitSaveSearch() {
+  const nameInput = document.getElementById("save-search-name");
+  const name = nameInput.value.trim();
+  if (!name) { nameInput.focus(); return; }
+  try {
+    const res = await fetch("/api/saved-searches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, params: currentSearchParams() }),
+    });
+    const data = await res.json();
+    statusLine.textContent = (res.ok && data.ok) ? `Saved "${name}".` : (data.message || "Couldn't save that search.");
+  } catch (e) {
+    statusLine.textContent = "Couldn't save that search. Try again.";
+  } finally {
+    nameInput.value = "";
+    document.getElementById("save-search-inline").classList.add("hidden");
+    saveSearchBtn.classList.remove("hidden");
+  }
+}
+
+async function openSavedSearchesModal() {
+  openModal(`<h2 class="modal-title">Saved searches</h2><div id="saved-searches-list">Loading…</div>`);
+  try {
+    const res = await fetch("/api/saved-searches");
+    const data = await res.json();
+    const list = document.getElementById("saved-searches-list");
+    if (!data.searches || !data.searches.length) {
+      list.innerHTML = `<div class="empty-modal-state">No saved searches yet. Run a search, then click "Save this search."</div>`;
+      return;
+    }
+    list.innerHTML = data.searches.map((s) => `
+      <div class="saved-search-row">
+        <span class="saved-search-name">${escapeHtml(s.name)}</span>
+        <button type="button" class="row-action-btn" data-run="${s.id}">Run</button>
+        <button type="button" class="row-action-btn danger" data-delete="${s.id}">Delete</button>
+      </div>
+    `).join("");
+    const byId = {};
+    data.searches.forEach((s) => { byId[s.id] = s; });
+    list.querySelectorAll("[data-run]").forEach((btn) => {
+      btn.addEventListener("click", () => loadSavedSearch(byId[btn.dataset.run].params));
+    });
+    list.querySelectorAll("[data-delete]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await fetch(`/api/saved-searches/${btn.dataset.delete}`, { method: "DELETE" });
+        openSavedSearchesModal(); // simplest correct redraw -- just refetch rather than hand-patch the DOM
+      });
+    });
+  } catch (e) {
+    document.getElementById("saved-searches-list").innerHTML = `<div class="empty-modal-state">Couldn't load saved searches.</div>`;
+  }
+}
+
+// ---- accounts: applied-job tracking ----
+
+async function toggleApplied(jobUrl, btnEl) {
+  const wasApplied = btnEl.classList.contains("is-applied");
+  btnEl.disabled = true;
+  try {
+    const res = await fetch("/api/applied-jobs", {
+      method: wasApplied ? "DELETE" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_url: jobUrl }),
+    });
+    if (!res.ok) throw new Error("request failed");
+    btnEl.classList.toggle("is-applied", !wasApplied);
+    btnEl.textContent = !wasApplied ? "✓ Applied" : "Mark applied";
+  } catch (e) {
+    // Leave the button in its prior state on failure -- no silent state
+    // drift between what's shown and what's actually saved server-side.
+  } finally {
+    btnEl.disabled = false;
+  }
+}
+
+async function openMyApplicationsModal() {
+  openModal(`<h2 class="modal-title">My applications</h2><div id="applied-jobs-list">Loading…</div>`, { wide: true });
+  try {
+    const res = await fetch("/api/applied-jobs/full");
+    const data = await res.json();
+    const list = document.getElementById("applied-jobs-list");
+    if (!data.jobs || !data.jobs.length) {
+      list.innerHTML = `<div class="empty-modal-state">Nothing marked applied yet. Use "Mark applied" on any job card.</div>`;
+      return;
+    }
+    list.innerHTML = data.jobs.map(appliedJobRow).join("");
+    list.querySelectorAll("[data-unapply]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await fetch("/api/applied-jobs", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_url: btn.dataset.unapply }),
+        });
+        openMyApplicationsModal();
+      });
+    });
+  } catch (e) {
+    document.getElementById("applied-jobs-list").innerHTML = `<div class="empty-modal-state">Couldn't load your applications.</div>`;
+  }
+}
+
+function appliedJobRow(job) {
+  const appliedDate = job.applied_at ? String(job.applied_at).slice(0, 10) : "";
+  // `delisted` jobs (see /api/applied-jobs/full in app.py) have no title/
+  // company anymore -- the posting closed and dropped out of the live
+  // dataset -- so they still show up here (this is the user's application
+  // HISTORY, not "still-open postings"), just with the bare URL instead.
+  const titleHtml = job.delisted
+    ? `<span class="applied-job-title">${escapeHtml(job.url)} <span class="delisted-tag">(no longer listed)</span></span>`
+    : `<span class="applied-job-title"><a href="${escapeAttr(job.url)}" target="_blank" rel="noopener">${escapeHtml(job.title)}</a> — ${escapeHtml(job.company || "")}</span>`;
+  return `
+    <div class="applied-job-row">
+      ${titleHtml}
+      <span class="applied-job-meta">Applied ${escapeHtml(appliedDate)}</span>
+      <button type="button" class="row-action-btn danger" data-unapply="${escapeAttr(job.url)}">Remove</button>
+    </div>
+  `;
+}
+
 // ---- misc UI wiring ----
 
 syntaxHelpBtn.addEventListener("click", () => {
@@ -777,4 +1114,8 @@ loadFacets();
 loadLocationGroups();
 loadStatus();
 setInterval(loadStatus, 30000);
-search(1); // fires the logo-cache fetch internally, in parallel with the jobs fetch -- see search()
+// Waits on the auth check specifically (fast -- one query, or an
+// immediate no-op if accounts aren't configured) so the very first
+// render already knows whether to show "Mark applied" toggles, instead
+// of a flash where they appear only after the next search.
+checkAuth().then(() => search(1));

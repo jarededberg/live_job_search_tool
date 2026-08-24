@@ -8,13 +8,18 @@ Run locally:
 Then open http://localhost:8000
 """
 
+import functools
+import json
 import os
+import re
+import secrets
 import threading
 from datetime import datetime, timezone
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, session
 
 import db
+import db_users
 from scraper import scrape_all
 from companies_data import COMPANIES
 import resume_parser
@@ -26,9 +31,23 @@ SCRAPE_INTERVAL_HOURS = float(os.environ.get("SCRAPE_INTERVAL_HOURS", "8"))
 MAX_WORKERS = int(os.environ.get("SCRAPE_MAX_WORKERS", "4"))
 MAX_RESUME_BYTES = 8 * 1024 * 1024  # 8 MB
 ALLOWED_RESUME_EXT = (".pdf", ".docx", ".txt")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MIN_PASSWORD_LEN = 8
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = MAX_RESUME_BYTES
+# Session cookies need a stable secret to sign against. Falling back to a
+# freshly-generated one when SECRET_KEY isn't set keeps the app from
+# crashing on startup, but it means every process restart invalidates
+# every logged-in session (everyone gets silently logged out) -- fine for
+# local dev, NOT fine on a host that restarts/redeploys periodically. Set
+# a real SECRET_KEY env var in production; see README's "User accounts"
+# section.
+app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+if not os.environ.get("SECRET_KEY"):
+    print("[app] WARNING: SECRET_KEY not set -- using a random key that "
+          "will change on every restart, logging out all users each time. "
+          "Set SECRET_KEY in production.")
 
 _scrape_lock = threading.Lock()
 _scrape_in_progress = False
@@ -77,6 +96,34 @@ def start_scheduler():
     return scheduler
 
 
+# ---------------- accounts: helpers ----------------
+
+def login_required(f):
+    """Route decorator -- returns 401 instead of running the view at all
+    if there's no logged-in user. Applied to every saved-search/applied-
+    job route below; /api/jobs itself stays open to everyone (accounts
+    are optional, not a gate on searching)."""
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        if "user_id" not in session:
+            return jsonify({"error": "Log in to use this feature."}), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def accounts_required(f):
+    """Returns a clear 503 if this deployment has no DATABASE_URL
+    configured at all, rather than letting a raw psycopg2 connection
+    error bubble up as a 500. Stacked with login_required on routes that
+    need both checks (accounts configured AND a logged-in user)."""
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        if not db_users.accounts_enabled():
+            return jsonify({"error": "Accounts aren't set up on this deployment yet."}), 503
+        return f(*args, **kwargs)
+    return wrapper
+
+
 @app.route("/api/jobs")
 def api_jobs():
     q = request.args.get("q", "")
@@ -116,6 +163,22 @@ def api_jobs():
                                       page=page, per_page=per_page)
     except Exception as e:
         return jsonify({"error": f"Couldn't parse that search: {e}"}), 400
+
+    # Badge each row with whether the logged-in user's already applied --
+    # one query for the whole page's worth of URLs, not one per card.
+    # Silently skipped (no badges, no error) if accounts aren't configured
+    # or nobody's logged in, so this never breaks plain anonymous search.
+    if "user_id" in session and db_users.accounts_enabled():
+        try:
+            applied_urls = db_users.list_applied_job_urls(session["user_id"])
+        except Exception:
+            applied_urls = set()  # accounts DB hiccup shouldn't break search results
+        for j in jobs:
+            j["applied"] = j.get("url") in applied_urls
+    else:
+        for j in jobs:
+            j["applied"] = False
+
     return jsonify({
         "jobs": jobs,
         "total": total,
@@ -221,12 +284,194 @@ def api_parse_resume():
     })
 
 
+# ---------------- accounts: auth ----------------
+
+@app.route("/api/signup", methods=["POST"])
+@accounts_required
+def api_signup():
+    from werkzeug.security import generate_password_hash
+
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+
+    if not EMAIL_RE.match(email):
+        return jsonify({"ok": False, "message": "That doesn't look like a valid email address."}), 400
+    if len(password) < MIN_PASSWORD_LEN:
+        return jsonify({"ok": False, "message": f"Password needs to be at least {MIN_PASSWORD_LEN} characters."}), 400
+
+    try:
+        user = db_users.create_user(email, generate_password_hash(password))
+    except Exception as e:
+        # psycopg2's UniqueViolation (email already registered) surfaces
+        # here as some flavor of IntegrityError depending on driver/
+        # transaction state -- checked by message substring rather than
+        # importing the specific exception class, since the connection's
+        # already been rolled back and closed by conn_ctx by this point.
+        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+            return jsonify({"ok": False, "message": "That email's already registered. Try logging in instead."}), 409
+        return jsonify({"ok": False, "message": f"Couldn't create that account: {e}"}), 500
+
+    session["user_id"] = user["id"]
+    session.permanent = True
+    return jsonify({"ok": True, "email": user["email"]})
+
+
+@app.route("/api/login", methods=["POST"])
+@accounts_required
+def api_login():
+    from werkzeug.security import check_password_hash
+
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+
+    user = db_users.get_user_by_email(email)
+    # Deliberately the same generic error whether the email doesn't exist
+    # or the password's wrong -- distinguishing the two in the response
+    # would let someone probe which emails have accounts here at all.
+    if not user or not check_password_hash(user["password_hash"], password):
+        return jsonify({"ok": False, "message": "Incorrect email or password."}), 401
+
+    session["user_id"] = user["id"]
+    session.permanent = True
+    return jsonify({"ok": True, "email": user["email"]})
+
+
+@app.route("/api/logout", methods=["POST"])
+def api_logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/me")
+def api_me():
+    if "user_id" not in session or not db_users.accounts_enabled():
+        return jsonify({"ok": False})
+    user = db_users.get_user_by_id(session["user_id"])
+    if not user:
+        # Account was deleted (or DB reset) out from under an active
+        # session cookie -- clear it rather than leaving a session
+        # pointing at a user_id that no longer exists.
+        session.clear()
+        return jsonify({"ok": False})
+    return jsonify({"ok": True, "email": user["email"]})
+
+
+# ---------------- accounts: saved searches ----------------
+
+@app.route("/api/saved-searches", methods=["GET"])
+@accounts_required
+@login_required
+def api_list_saved_searches():
+    searches = db_users.list_saved_searches(session["user_id"])
+    for s in searches:
+        s["params"] = json.loads(s.pop("params_json"))
+    return jsonify({"searches": searches})
+
+
+@app.route("/api/saved-searches", methods=["POST"])
+@accounts_required
+@login_required
+def api_create_saved_search():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    params = data.get("params")
+    if not name:
+        return jsonify({"ok": False, "message": "Give this search a name."}), 400
+    if not isinstance(params, dict):
+        return jsonify({"ok": False, "message": "Missing search parameters."}), 400
+    search = db_users.create_saved_search(session["user_id"], name, json.dumps(params))
+    search["params"] = json.loads(search.pop("params_json"))
+    return jsonify({"ok": True, "search": search})
+
+
+@app.route("/api/saved-searches/<int:search_id>", methods=["DELETE"])
+@accounts_required
+@login_required
+def api_delete_saved_search(search_id):
+    deleted = db_users.delete_saved_search(session["user_id"], search_id)
+    if not deleted:
+        return jsonify({"ok": False, "message": "Not found."}), 404
+    return jsonify({"ok": True})
+
+
+# ---------------- accounts: applied jobs ----------------
+
+@app.route("/api/applied-jobs", methods=["POST"])
+@accounts_required
+@login_required
+def api_mark_applied():
+    data = request.get_json(silent=True) or {}
+    job_url = (data.get("job_url") or "").strip()
+    if not job_url:
+        return jsonify({"ok": False, "message": "Missing job_url."}), 400
+    db_users.mark_applied(session["user_id"], job_url)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/applied-jobs", methods=["DELETE"])
+@accounts_required
+@login_required
+def api_unmark_applied():
+    data = request.get_json(silent=True) or {}
+    job_url = (data.get("job_url") or "").strip()
+    if not job_url:
+        return jsonify({"ok": False, "message": "Missing job_url."}), 400
+    db_users.unmark_applied(session["user_id"], job_url)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/applied-jobs/full")
+@accounts_required
+@login_required
+def api_list_applied_jobs_full():
+    """Full job details for everything the user's marked applied, for the
+    "My Applications" view -- joins Postgres's applied_jobs (URL + when)
+    against the live SQLite job cache (title/company/location/etc.), since
+    applied_jobs only ever stores the URL. A posting that's since closed
+    and dropped out of the live dataset (see db.prune_stale) still shows
+    up here with just its URL and applied date -- the point of this list
+    is the user's own history, not "still-open postings," so a closed
+    listing doesn't just vanish from their record."""
+    applied = db_users.list_applied_jobs(session["user_id"])
+    urls = [a["job_url"] for a in applied]
+    jobs_by_url = db.get_jobs_by_urls(urls)
+    results = []
+    for a in applied:
+        job = jobs_by_url.get(a["job_url"])
+        if job:
+            job = dict(job)
+            job["applied_at"] = a["applied_at"].isoformat() if hasattr(a["applied_at"], "isoformat") else a["applied_at"]
+            job["applied"] = True
+            results.append(job)
+        else:
+            # No longer in the live dataset -- still surface it, just
+            # without the fields we no longer have.
+            results.append({
+                "url": a["job_url"],
+                "title": None,
+                "company": None,
+                "applied_at": a["applied_at"].isoformat() if hasattr(a["applied_at"], "isoformat") else a["applied_at"],
+                "applied": True,
+                "delisted": True,
+            })
+    return jsonify({"jobs": results})
+
+
 @app.route("/")
 def index():
     return send_from_directory(STATIC_DIR, "index.html")
 
 
 db.init_db()
+if db_users.accounts_enabled():
+    db_users.init_db()
+else:
+    print("[app] DATABASE_URL not set -- user accounts (saved searches, "
+          "applied-job tracking) are disabled on this deployment. Search "
+          "and resume matching work as normal. See README's 'User "
+          "accounts' section to enable accounts.")
 _scheduler = start_scheduler()
 
 if __name__ == "__main__":

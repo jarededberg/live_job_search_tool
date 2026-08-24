@@ -581,6 +581,34 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     return page_rows, total
 
 
+def get_jobs_by_urls(urls):
+    """Full job rows for a given list of URLs, keyed by URL — used to
+    join Postgres's applied_jobs table (which only stores the URL, not a
+    copy of the job's title/company/etc.) back to the live-scraped data
+    for the "My Applications" view. A URL applied to weeks ago may no
+    longer be in this table at all if the posting closed and dropped out
+    of the live dataset (see prune_stale) — callers should expect fewer
+    results back than URLs given in, not treat a missing one as an
+    error, and still show *something* for it (the bare URL, no title/
+    company) rather than silently hiding a real application record."""
+    if not urls:
+        return {}
+    placeholders = ",".join("?" for _ in urls)
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM jobs WHERE url IN ({placeholders})", list(urls)
+        ).fetchall()
+    result = {}
+    for r in rows:
+        d = dict(r)
+        try:
+            d["tools"] = json.loads(d.get("tools") or "[]")
+        except (TypeError, ValueError):
+            d["tools"] = []
+        result[d["url"]] = d
+    return result
+
+
 def salary_bounds():
     """(min, max) of salary_min/salary_max across every job that reports
     both -- used to size the salary range slider's endpoints so the
