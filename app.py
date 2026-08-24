@@ -42,7 +42,7 @@ TURNSTILE_SITE_KEY = os.environ.get("TURNSTILE_SITE_KEY", "")
 TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "Open Roles Finder <onboarding@resend.dev>")
+RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "Skip The Boards <onboarding@resend.dev>")
 # Used to build the link inside the reset email (e.g. "https://open-roles-
 # finder.onrender.com") -- deliberately an explicit env var rather than
 # inferred from request.url_root, since that can be wrong behind a proxy/
@@ -185,10 +185,10 @@ def send_password_reset_email(to_email, reset_link):
     payload = json.dumps({
         "from": RESEND_FROM_EMAIL,
         "to": [to_email],
-        "subject": "Reset your Open Roles Finder password",
+        "subject": "Reset your Skip The Boards password",
         "html": (
             "<p>Someone (hopefully you) asked to reset the password on your "
-            "Open Roles Finder account.</p>"
+            "Skip The Boards account.</p>"
             f'<p><a href="{reset_link}">Click here to set a new password</a>. '
             f"This link expires in {RESET_TOKEN_TTL_HOURS} hour"
             f"{'s' if RESET_TOKEN_TTL_HOURS != 1 else ''}.</p>"

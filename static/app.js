@@ -912,7 +912,7 @@ function openAuthModal(mode) {
   const showTurnstile = !isLogin && turnstileSiteKey;
   openModal(`
     <div class="modal-auth-header">
-      <div class="modal-auth-brand"><span class="brand-mark">◆</span> Open Roles Finder</div>
+      <div class="modal-auth-brand"><span class="brand-mark">◆</span> Skip The Boards</div>
       <h2>${isLogin ? "Welcome back" : "Create your account"}</h2>
       <p>${isLogin ? "Log in to pick up your saved searches and applications." : "Save searches and track which roles you've applied to."}</p>
     </div>
@@ -999,7 +999,7 @@ function openAuthModal(mode) {
 function openForgotPasswordModal() {
   openModal(`
     <div class="modal-auth-header">
-      <div class="modal-auth-brand"><span class="brand-mark">◆</span> Open Roles Finder</div>
+      <div class="modal-auth-brand"><span class="brand-mark">◆</span> Skip The Boards</div>
       <h2>Reset your password</h2>
       <p>Enter your account email and we'll send you a link to set a new one.</p>
     </div>
@@ -1058,7 +1058,7 @@ function openForgotPasswordModal() {
 function openResetPasswordModal(token) {
   openModal(`
     <div class="modal-auth-header">
-      <div class="modal-auth-brand"><span class="brand-mark">◆</span> Open Roles Finder</div>
+      <div class="modal-auth-brand"><span class="brand-mark">◆</span> Skip The Boards</div>
       <h2>Set a new password</h2>
       <p>Choose a new password for your account.</p>
     </div>

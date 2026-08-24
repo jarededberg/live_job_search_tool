@@ -1,4 +1,4 @@
-# Open Roles Finder
+# Skip The Boards
 
 A small web app that scrapes the Greenhouse / Lever / Ashby career-page APIs of
 ~4,300 companies (curated by Jared Edberg during his own job search) and lets
@@ -976,9 +976,9 @@ call — same pattern as `verify_turnstile()`'s Cloudflare call.
    DNS.
 3. On the web service, set:
    - `RESEND_API_KEY` = the API key from step 1.
-   - `RESEND_FROM_EMAIL` = e.g. `Open Roles Finder <noreply@yourdomain.com>`,
+   - `RESEND_FROM_EMAIL` = e.g. `Skip The Boards <noreply@yourdomain.com>`,
      using the domain verified in step 2. Defaults to
-     `Open Roles Finder <onboarding@resend.dev>` if unset, which — per the
+     `Skip The Boards <onboarding@resend.dev>` if unset, which — per the
      restriction above — will silently only work for emailing yourself.
    - `APP_BASE_URL` = your deployed URL (e.g.
      `https://open-roles-finder.onrender.com`), used to build the link
