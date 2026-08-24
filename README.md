@@ -1305,10 +1305,25 @@ product manager job paying 150k+" to a bare "product manager" — and
   → 7, "last 2 weeks" → 14, "this month" → 30, etc.
 
 Whatever's left over after stripping the recognized salary/YOE/
-commitment/recency/location phrases becomes (part of) the search query —
-messages accumulate into `hunterState.query` across turns rather than
-overwriting it, so "product manager" followed later by "actually make it
-remote" doesn't lose the original title text.
+commitment/recency/location phrases from the *first* substantive message
+becomes the search query (`hunterState.queryCaptured` flips to `true`
+right after) — every message after that only ever affects the real
+filters, never the query text again. **This was a real bug, not just a
+design choice**: an earlier version kept merging every later message's
+leftover text into the query too, on the theory that "product manager"
+followed by "actually make it remote" shouldn't lose the original title.
+In practice, ordinary chat sentences ("I live in Phoenix but would also
+be open to remote roles") and questions directed at Hunter itself ("what
+else should I enter?") aren't title text, and their filler words ended up
+glued onto the search box and sent straight to the boolean search —
+reliably returning zero results. A message ending in `?` (or matching
+`HUNTER_HELP_RE`, common phrasings like "what should I type") is now
+detected as a question and answered directly (`HUNTER_HELP_REPLY`)
+instead of being parsed for query text at all. If a message is the resume
+-upload path instead of typed text, `queryCaptured` is set immediately
+(the query stays empty; matching comes from the resume's own extracted
+terms, same as before), so nothing typed afterward can retroactively
+rewrite it either.
 
 Saying something like "search now", "run it", "go ahead", or "that's all"
 (`HUNTER_FINALIZE_RE`) applies everything collected in `hunterState` to

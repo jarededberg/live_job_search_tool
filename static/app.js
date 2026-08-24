@@ -1441,7 +1441,7 @@ function resetHunterState() {
     departments: [],
     commitment: "",
     days: "",
-    askedFollowup: false,
+    queryCaptured: false, // true once `query` has been set once -- see hunterHandleMessage()
   };
 }
 
@@ -1542,6 +1542,17 @@ const HUNTER_IDENTITY_DEFLECTIONS = [
 const HUNTER_RESTART_RE = /\b(restart|start over|reset|new search)\b/i;
 const HUNTER_FINALIZE_RE = /\b(search now|run (?:it|the search)|go ahead|do it|that'?s (?:it|all|everything)|looks good|find (?:it|them|jobs)|show me|i'?m (?:done|ready)|let'?s go|just search|search please|pull (?:it|them) up)\b/i;
 const HUNTER_FILLER_RE = /^(no|none|nothing|nope|na|n\/a|meh|idk|not really)\.?!?$/i;
+
+// A message ending in "?" (or matching one of these common phrasings) is
+// almost always a question directed AT Hunter ("what else should I
+// enter?", "what search terms should I use?"), not job-search info to
+// extract -- treated as a real question, answered directly, and never
+// allowed to become (part of) the search query. This is the fix for a
+// real bug: earlier, any unrecognized text -- including a typed question
+// -- got folded into the query and sent straight to the boolean search,
+// which reliably returned zero results.
+const HUNTER_HELP_RE = /\bwhat (else )?(should|can|do) i (enter|type|say|add|tell you)\b|\bwhat (other )?(search )?terms\b|\bwhat can you do\b|\bhow does this work\b|^\s*help\s*\??\s*$/i;
+const HUNTER_HELP_REPLY = "I can pick up things like a salary (\"150k+\"), a city or \"remote\", years of experience (\"senior\", \"5+ years\"), a department (\"engineering\", \"sales\"), a commitment type (\"full-time\", \"contract\"), or how recently it was posted (\"this week\"). Give me any combination, or just say \"search now\" to run what we've got.";
 
 // The core parser. Takes one typed message and returns everything it
 // could pull out of it, plus `leftover` -- whatever text is left after
@@ -1781,20 +1792,11 @@ async function hunterHandleMessage(text) {
     return;
   }
 
-  const isFirst = !hunterState.askedFollowup;
   const parsed = hunterParseMessage(text);
   hunterApplyParsed(parsed);
-
-  if (isFirst) {
-    hunterState.query = parsed.leftover || "";
-    hunterState.askedFollowup = true;
-  } else if (parsed.leftover && parsed.leftover.length > 2 && !HUNTER_FINALIZE_RE.test(text) && !HUNTER_FILLER_RE.test(text.trim())) {
-    hunterState.query = hunterState.query ? `${hunterState.query} ${parsed.leftover}`.trim() : parsed.leftover;
-  }
+  const bits = hunterRecapBits(parsed, { includeQuery: false });
 
   const finalize = HUNTER_FINALIZE_RE.test(text);
-  const bits = hunterRecapBits(parsed, { includeQuery: isFirst });
-
   if (finalize) {
     const closing = bits.length
       ? `Got it — adding ${bits.join(", ")}. Running your search now…`
@@ -1805,16 +1807,45 @@ async function hunterHandleMessage(text) {
     return;
   }
 
+  // A trailing "?" (or one of the common "what should I type" phrasings)
+  // means this message is a question directed at Hunter, not job-search
+  // info -- never used as (part of) the query, regardless of whether
+  // anything else in it happened to parse as a real filter.
+  const isQuestion = /\?\s*$/.test(text.trim()) || HUNTER_HELP_RE.test(text);
+
+  // The query is captured ONCE, from the first message that isn't a
+  // question or filler, and never touched again after that. An earlier
+  // version kept merging every later message's leftover text into the
+  // query too, which meant ordinary chat -- "I live in Phoenix but would
+  // also be open to remote roles," "what else should I enter?" -- ended
+  // up glued onto the search box and sent straight to the boolean search,
+  // reliably returning zero results. Follow-up messages now only ever
+  // affect the real filters (salary/YOE/department/commitment/location/
+  // days), never the query text.
+  const capturingQuery = !isQuestion && !hunterState.queryCaptured;
+  if (capturingQuery) {
+    hunterState.query = parsed.leftover || "";
+    hunterState.queryCaptured = true;
+  }
+
+  if (isQuestion && !bits.length) {
+    await hunterReply(HUNTER_HELP_REPLY);
+    return;
+  }
+
+  const recapBits = capturingQuery ? hunterRecapBits(parsed, { includeQuery: true }) : bits;
   let reply;
-  if (isFirst) {
-    reply = bits.length
-      ? `Got it — ${bits.join(", ")}. Want to narrow it down more (salary, location, experience level, department), or just say "search now" and I'll pull it up.`
+  if (capturingQuery) {
+    reply = recapBits.length
+      ? `Got it — ${recapBits.join(", ")}. Want to narrow it down more (salary, location, experience level, department), or just say "search now" and I'll pull it up.`
       : `Got it. Want to narrow it down — salary, location, experience level, department — or just say "search now."`;
-  } else if (bits.length) {
+  } else if (HUNTER_FILLER_RE.test(text.trim())) {
+    reply = pickOne(["No worries — anything else, or say \"search now\"?", "All good — more filters, or ready to search?"]);
+  } else if (recapBits.length) {
     reply = pickOne([
-      `Noted — added ${bits.join(", ")}. Anything else, or should I search now?`,
-      `Got it, ${bits.join(", ")}. Want to add more, or search now?`,
-      `Adding ${bits.join(", ")} to the list. More filters, or ready to search?`,
+      `Noted — added ${recapBits.join(", ")}. Anything else, or should I search now?`,
+      `Got it, ${recapBits.join(", ")}. Want to add more, or search now?`,
+      `Adding ${recapBits.join(", ")} to the list. More filters, or ready to search?`,
     ]);
   } else {
     reply = pickOne([
@@ -1880,7 +1911,7 @@ function openHunterModal() {
     userSay(`Attached ${file.name}`);
     await hunterReply("Reading your resume…");
     await handleResumeFile(file); // sets hasResume/match terms and runs an initial search itself
-    hunterState.askedFollowup = true; // resume path already ran a search; free text from here on just adds filters
+    hunterState.queryCaptured = true; // resume path already ran a search; free text from here on just adds filters, never rewrites the query
     await hunterReply("Got it — I've run an initial search from that. Want to narrow it down further (salary, location, experience level), or say \"search now\" to leave it as-is?");
   });
 
