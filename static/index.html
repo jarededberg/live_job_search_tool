@@ -11,7 +11,7 @@
      change. Without it, browsers that already cached the old files can
      keep running old JS against new HTML after a deploy (mismatched IDs,
      "nothing happens" clicks) until the cache separately expires. -->
-<link rel="stylesheet" href="style.css?v=5" />
+<link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
   <nav class="topnav">
@@ -22,6 +22,7 @@
       </div>
       <div class="topnav-right">
         <nav class="nav-links">
+          <a href="/">Home</a>
           <a href="/about">About</a>
           <a href="/faq">FAQ</a>
           <a href="/contact">Contact</a>
@@ -85,6 +86,8 @@
           </div>
           <select id="days">
             <option value="">Any time posted</option>
+            <option value="1">Last 24 hours</option>
+            <option value="3">Last 3 days</option>
             <option value="7">Last 7 days</option>
             <option value="14">Last 14 days</option>
             <option value="30" selected>Last 30 days</option>
@@ -105,6 +108,7 @@
             <option value="salary_high">Salary: high to low</option>
             <option value="salary_low">Salary: low to high</option>
           </select>
+          <button type="button" id="clear-search-btn" class="row-action-btn clear-search-btn">✕ Clear search</button>
           <button type="button" id="save-search-btn" class="save-search-btn hidden">☆ Save this search</button>
           <div class="save-search-inline hidden" id="save-search-inline">
             <input type="text" id="save-search-name" placeholder="Name this search…" maxlength="80" autocomplete="off" />
@@ -148,7 +152,7 @@
 
         <label for="resume-input" class="resume-dropzone" id="resume-dropzone">
           <span class="resume-icon">↑</span>
-          <span><strong>Upload your resume</strong> to auto-fill search terms — .pdf, .docx, or .txt</span>
+          <span><strong>Upload your resume</strong><br />auto-fills search terms &amp; location — .pdf, .docx, or .txt</span>
         </label>
         <input type="file" id="resume-input" accept=".pdf,.docx,.txt" hidden />
         <span id="resume-status" class="resume-status"></span>
@@ -184,6 +188,6 @@
        happens if /api/auth-config returns a site key. See README's "User
        accounts" section. -->
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

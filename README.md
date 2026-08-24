@@ -1268,25 +1268,68 @@ are overwhelmingly US-based), so picking EUR/GBP/CAD changes the symbol
 shown, not what the number is actually compared against. Called out in
 the wizard's own prompt text so it isn't a silent trap.
 
-**Department cleanup**: `db.distinct_facet_values()` filters out
-cohort/program-tag values that showed up in scraped department data
+**Department cleanup**: raw scraped `department` values are all over the
+place — "Engineering", "Software Engineering", "AI Research &
+Engineering", "GTM", "20213 S&M - Sales - Square Outside" — because
+Greenhouse/Lever/Ashby just store whatever free-text label or internal
+org-chart code a company typed into its ATS, and a picker built straight
+off `SELECT DISTINCT department` read as unrecognizable next to the clean
+department dropdowns on LinkedIn/Indeed. `department_groups.py`
+classifies each raw string into one of ~14 canonical, familiar labels
+(Engineering, Product, Design, Sales, Marketing, Customer Success,
+Operations, Data, IT, Finance, People, Legal, Professional Services,
+Executive) via ordered keyword matching — same classifier-over-raw-string
+approach `location_groups.py` already uses for locations, including the
+same reasoning for why it can't be a lookup table (no way to enumerate
+every company's spelling in advance). Order matters: e.g. "Solutions
+Engineering" is checked against Sales before the broad Engineering bucket
+would otherwise swallow it (that's how it reads on every major job
+board's own function taxonomy despite containing "engineering"), and IT
+is checked before Engineering so "Information Technology" doesn't match
+Engineering's broader "technology" keyword. Cohort/program-tag junk values
 (e.g. `"EMEA '24"`, an intern/grad program class year, not a real
-department) via `_JUNK_DEPARTMENT_RE` — an apostrophe followed by a
-2-digit year, rather than a hardcoded per-company blocklist, so new ones
-get caught automatically as more companies are scraped. Department is
+department — flagged by a real user as confusing) are filtered out
+entirely via `_JUNK_DEPARTMENT_RE` (an apostrophe followed by a 2-digit
+year) before classification, in `db._raw_department_values()`. Real
+departments that don't match any canonical keyword set fall into a
+synthetic "Other" bucket rather than disappearing.
+
+This classification happens at query time against the raw `department`
+column (never stored/migrated), same as location grouping: `GET
+/api/facets` returns canonical labels
+(`db.department_group_facets()`), and filtering
+(`db._department_group_raw_values()`) expands a requested canonical label
+back to every raw value currently in the DB that classifies into it, then
+OR-matches those — a label that isn't recognized (an old saved search
+storing a raw scraped value from before this grouping existed) falls back
+to literal matching, so nothing needs migrating. Department is
 multi-select everywhere it appears: `db.search_jobs(departments=[...])`
 and `GET /api/jobs?department=a&department=b` (repeated param, same
-convention as `location`) OR-match across the list; the main page's
-department picker (`#department-select` in `static/index.html`) is a
-custom checkbox dropdown (`renderDepartmentMenu()` in `app.js`) rather
-than a native `<select multiple>`, since a native multi-select renders as
-an always-open listbox and needs ctrl/cmd-click most people don't know
+convention as `location`); the main page's department picker
+(`#department-select` in `static/index.html`) is a custom checkbox
+dropdown (`renderDepartmentMenu()` in `app.js`) rather than a native
+`<select multiple>`, since a native multi-select renders as an
+always-open listbox and needs ctrl/cmd-click most people don't know
 about.
 
 **Pagination**: in addition to Prev/Next and numbered page buttons,
 `renderResults()` appends a `<select class="page-jump">` with one option
 per page whenever there's more than one page — handy for jumping straight
 to, say, page 40 of results without clicking Next 39 times.
+
+**Other search-panel additions**: the posted-date dropdown (`#days`) adds
+"Last 24 hours" (`value="1"`) and "Last 3 days" (`value="3"`) ahead of the
+existing 7/14/30/90-day options — `db.search_jobs`'s day-cutoff math
+already handled any integer, so this was purely an `index.html` addition.
+"Clear search" (`#clear-search-btn`, `clearSearch()` in `app.js`) resets
+every filter — query text, days, department/commitment, sort, location
+chips, both range sliders, and any uploaded resume's extracted terms —
+back to the as-loaded default and re-runs an unfiltered search, without
+touching saved searches or account state. "Home" is the first item in
+`.nav-links` on every page (index/About/FAQ/Contact), linking back to
+`/`. The resume dropzone (`.resume-dropzone`) was restyled solid maroon
+and enlarged — the original dashed-border box read as decorative rather
+than clickable to a real user testing it.
 
 **Implementation notes**: `openWizardModal()` (near the end of
 `static/app.js`) builds the modal content and re-queries

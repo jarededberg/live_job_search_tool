@@ -19,6 +19,7 @@ const resumeDropzone = document.getElementById("resume-dropzone");
 const resumeStatus = document.getElementById("resume-status");
 const authArea = document.getElementById("auth-area");
 const saveSearchBtn = document.getElementById("save-search-btn");
+const clearSearchBtn = document.getElementById("clear-search-btn");
 const modalOverlay = document.getElementById("modal-overlay");
 const modalBox = document.getElementById("modal-box");
 const modalContent = document.getElementById("modal-content");
@@ -1996,6 +1997,49 @@ form.addEventListener("submit", (e) => {
   e.preventDefault();
   search(1);
 });
+
+// Resets every filter back to its as-loaded default -- query text, days,
+// department/commitment selections, sort, location chips, both range
+// sliders, and any resume that's been uploaded (its extracted terms drive
+// match-tier badges/sort until cleared, so leaving it in place after
+// "Clear search" would silently keep filtering/ranking against it).
+// Deliberately does NOT touch a saved search or account state -- just the
+// live filter form -- then re-runs an unfiltered search.
+function clearSearch() {
+  document.getElementById("q").value = "";
+  document.getElementById("days").value = "30";
+  commitmentSelect.value = "";
+  sortSelect.value = "newest";
+  document.getElementById("sort-match-option").hidden = true;
+
+  selectedDepartments = [];
+  renderDepartmentMenu();
+
+  selectedLocations = [];
+  renderLocationChips();
+
+  if (salarySliderCtl && salaryRange) {
+    salarySliderCtl.setValues(salaryRange.min, salaryRange.max);
+    salaryRange = { ...salaryRange, lo: salaryRange.min, hi: salaryRange.max };
+  }
+  if (yoeSliderCtl && yoeRange) {
+    yoeSliderCtl.setValues(yoeRange.min, yoeRange.max);
+    yoeRange = { ...yoeRange, lo: yoeRange.min, hi: yoeRange.max };
+  }
+
+  hasResume = false;
+  resumeTitleTerms = [];
+  resumeSkillTerms = [];
+  resumeUsBased = false;
+  resumeMetroTerms = [];
+  resumeInput.value = "";
+  resumeStatus.textContent = "";
+  resumeStatus.className = "resume-status";
+
+  search(1);
+}
+
+clearSearchBtn.addEventListener("click", clearSearch);
 
 // Sort is a "how do you want to look at what you already have" control,
 // not a new query — applying it immediately (unlike the other filters,

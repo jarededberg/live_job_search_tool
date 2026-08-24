@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from boolean_search import parse_query, evaluate, leaf_terms
 from location_groups import matches_group, is_clearly_non_us, is_remote, city_state_variants
+from department_groups import classify_department, DEPARTMENT_DISPLAY_ORDER
 from blurb_extractor import parse_years_range
 
 DB_PATH = os.environ.get("JOBS_DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "jobs.db"))
@@ -325,11 +326,15 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     kept for backward compatibility as a single substring filter; if both
     are given, `locations` wins.
 
-    `departments`, if given, is a list of exact department values
-    (multi-select, same OR-across-the-list convention as `locations`) — a
-    job matches if its department is ANY of them. `department` (singular)
-    is kept for backward compatibility as a single-value filter; if both
-    are given, `departments` wins.
+    `departments`, if given, is a list of canonical department labels
+    (see department_groups.py — "Engineering", "Sales", etc; multi-select,
+    same OR-across-the-list convention as `locations`) — a job matches if
+    its raw scraped department classifies into ANY of them. `department`
+    (singular) is kept for backward compatibility as a single-value
+    filter; if both are given, `departments` wins. A value that isn't a
+    recognized canonical label is matched literally against the raw
+    department column instead (keeps old saved searches, from before this
+    grouping existed, working unchanged).
 
     `location_groups`, if given, is a list of canonical group keys from
     location_groups.py (e.g. "remote_us") — a job matches if its raw
@@ -432,8 +437,20 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     if not dept_list and department.strip():
         dept_list = [department.strip()]
     if dept_list:
-        where.append("(" + " OR ".join("department = ?" for _ in dept_list) + ")")
-        params.extend(dept_list)
+        # `dept_list` holds canonical department labels ("Engineering",
+        # "Sales", ...) now, not raw scraped strings -- expand each to
+        # every raw department value currently in the DB that classifies
+        # into it (see department_groups.py), then OR-match against those.
+        # A label that isn't a recognized canonical one (an old saved
+        # search from before this grouping existed, storing a raw scraped
+        # string) falls back to being matched literally, so it keeps
+        # working exactly as before.
+        raw_values = _department_group_raw_values(dept_list)
+        if raw_values:
+            where.append("(" + " OR ".join("department = ?" for _ in raw_values) + ")")
+            params.extend(raw_values)
+        else:
+            where.append("1 = 0")  # requested group matches nothing currently in the DB
 
     if commitment.strip():
         where.append("commitment = ?")
@@ -675,24 +692,82 @@ def years_bounds():
 _JUNK_DEPARTMENT_RE = re.compile(r"'\d{2}\b")
 
 
+def _raw_department_values():
+    """Every distinct non-empty raw `department` string currently in the
+    DB, with the junk cohort/program-tag values (see _JUNK_DEPARTMENT_RE)
+    already excluded -- shared by department_group_facets() (building the
+    picker's option list) and _department_group_raw_values() (expanding a
+    picked canonical label back to the raw values it covers, for
+    filtering)."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT department AS v FROM jobs WHERE department != ''"
+        ).fetchall()
+    return [row["v"] for row in rows if row["v"] and not _JUNK_DEPARTMENT_RE.search(row["v"])]
+
+
+def department_group_facets(limit=30):
+    """Canonical department labels (see department_groups.py) that at
+    least one current job classifies into, ordered by DEPARTMENT_DISPLAY_ORDER
+    (a fixed "reads like a normal job board" order, not raw frequency, so
+    the picker doesn't reshuffle every time the underlying data changes)
+    with an "Other" bucket appended last if any real (non-junk) department
+    value didn't classify into anything."""
+    raws = _raw_department_values()
+    present = set()
+    has_other = False
+    for raw in raws:
+        label = classify_department(raw)
+        if label:
+            present.add(label)
+        else:
+            has_other = True
+    ordered = [label for label in DEPARTMENT_DISPLAY_ORDER if label in present]
+    if has_other:
+        ordered.append("Other")
+    return ordered[:limit]
+
+
+def _department_group_raw_values(labels):
+    """Raw department strings currently in the DB that fall under ANY of
+    the given canonical department labels. A label that isn't one of
+    department_groups.py's recognized canonical labels (including the
+    synthetic "Other" bucket) is treated as a literal raw department
+    string instead -- this is what keeps old saved searches, saved back
+    when the department filter stored a raw scraped value directly,
+    still filtering correctly with no migration needed."""
+    raws = _raw_department_values()
+    result = []
+    seen = set()
+    for label in labels:
+        if label == "Other":
+            matches = [v for v in raws if classify_department(v) is None]
+        elif label in DEPARTMENT_DISPLAY_ORDER:
+            matches = [v for v in raws if classify_department(v) == label]
+        else:
+            matches = [label]
+        for v in matches:
+            if v not in seen:
+                seen.add(v)
+                result.append(v)
+    return result
+
+
 def distinct_facet_values(column, limit=30):
     """Top N non-empty distinct values for a facet column, ordered by
-    frequency. For `department`, over-fetches (2x `limit`) before filtering
-    out junk cohort-tag values (see _JUNK_DEPARTMENT_RE) so real,
-    lower-frequency departments still fill out the list instead of the
-    filter just shrinking it below `limit`."""
+    frequency. `department` is special-cased to return canonical grouped
+    labels (see department_group_facets()) instead of raw scraped
+    strings -- see department_groups.py for why."""
     assert column in ("department", "commitment")
-    fetch_limit = limit * 2 if column == "department" else limit
+    if column == "department":
+        return department_group_facets(limit)
     with conn_ctx() as conn:
         rows = conn.execute(
             f"SELECT {column} AS v, COUNT(*) AS c FROM jobs WHERE {column} != '' "
             f"GROUP BY {column} ORDER BY c DESC LIMIT ?",
-            (fetch_limit,),
+            (limit,),
         ).fetchall()
-        values = [row["v"] for row in rows]
-        if column == "department":
-            values = [v for v in values if v and not _JUNK_DEPARTMENT_RE.search(v)]
-        return values[:limit]
+        return [row["v"] for row in rows]
 
 
 def distinct_locations(prefix="", limit=20):
