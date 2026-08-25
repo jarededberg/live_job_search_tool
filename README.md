@@ -1295,24 +1295,40 @@ product manager job paying 150k+" to a bare "product manager" — and
   fuzzy-matched against whatever commitment values actually exist in the
   live `#commitment` `<select>`, same live-data principle the old wizard
   used.
-- **Location** — "remote" → the canonical Remote (US) group; any other
-  `location_groups.py` group whose label appears in the message; "City,
-  ST"/"City, State" (`US_STATE_MAP` in `app.js`, all 50 states + DC,
-  abbreviation or full name, case-insensitive — "portland, or" and
-  "Portland, Oregon" both resolve to "Portland, OR") pushed as a literal
-  typed location; explicit "in `<city>`"/"near `<city>`"/"based in
-  `<city>`"/"city is `<city>`" phrasing (also case-insensitive, guarded by
-  `HUNTER_STOPWORDS` so "in engineering"/"in sales" don't get mistaken for
-  a city) as a fallback for locations without a state attached. **Fixed a
-  real bug here too**: the location patterns originally required
-  Title-Case input (`[A-Z][a-zA-Z]+`) on the theory that a real city name
-  would be capitalized — but most people type lowercase in a chat box, so
-  "in portland, ore[gon]", "portland, or", and "the city is portland,
-  oregon" all silently failed to parse, which is exactly the state a real
-  user hit. The state-name whitelist gate (`US_STATE_MAP`) is what makes
-  the "City, ST" pattern safe to run case-insensitively without also
-  matching random commas elsewhere in a sentence. Locations apply live to
-  the real `selectedLocations` array/chips as they're recognized, same as
+- **Location** — checked in this order, each layer catching whatever the
+  one before it couldn't: (1) "remote" → the canonical Remote (US) group,
+  or any other `location_groups.py` group whose label appears in the
+  message; (2) "City, ST"/"City, State" (`US_STATE_MAP` in `app.js`, all
+  50 states + DC, abbreviation or full name, case-insensitive — "portland,
+  or" and "Portland, Oregon" both resolve to "Portland, OR"); (3) a bare
+  major-metro name with **no state at all** — "san francisco", "austin",
+  "new york" — resolved against `metroCityMap`/`metroCityRe`
+  (`loadMetroCities()` in `app.js`, fetched once from `GET
+  /api/metro-cities`, which is just the ~68 curated `(city, state)` keys
+  already in `metro_areas.py` — the same list the resume-upload flow uses
+  server-side to expand a home city into nearby suburbs, reused here so
+  there's one source of truth for "what counts as a known city" instead
+  of a second hardcoded list drifting out of sync); (4) explicit "in
+  `<city>`"/"near `<city>`"/"based in `<city>`"/"city is `<city>`"
+  phrasing (case-insensitive, guarded by `HUNTER_STOPWORDS` so "in
+  engineering"/"in sales" don't get mistaken for a city) as a last-resort
+  fallback for real locations outside the curated metro list. **Fixed two
+  real bugs here**: the location patterns originally required Title-Case
+  input (`[A-Z][a-zA-Z]+`) on the theory that a real city name would be
+  capitalized — but most people type lowercase in a chat box, so "in
+  portland, ore[gon]", "portland, or", and "the city is portland, oregon"
+  all silently failed to parse. And before the metro-city layer existed,
+  a bare "san francisco" (no state, no trigger word) didn't match
+  anything at all — a user has to know to type "in San Francisco" or
+  "San Francisco, CA" for the *fallback* patterns to catch it, which
+  isn't how people actually talk about where they live. The state-name
+  whitelist gate (`US_STATE_MAP`) is what makes the "City, ST" pattern
+  safe to run case-insensitively without also matching random commas
+  elsewhere in a sentence; `metroCityRe` is one big case-insensitive
+  alternation of every known city name, sorted longest-first so "san
+  francisco" matches as a whole rather than partially. Locations apply
+  live to the real `selectedLocations` array/chips as they're recognized,
+  same as
   the old wizard's location step.
 - **Recency** — "today"/"last 24 hours" → 1 day, "this week"/"past week"
   → 7, "last 2 weeks" → 14, "this month" → 30, etc.
@@ -1348,6 +1364,30 @@ clears the transcript and state and starts over. Attaching a resume (the
 paperclip icon next to the input — the one thing free text can't do on
 its own) goes through the existing `handleResumeFile()`/
 `/api/parse-resume` path unchanged, same as the main dropzone.
+
+Hunter also handles the small talk around the actual filter-gathering —
+a real user reported it felt too limited ("make sure he can actually
+hold a conversation in a limited capacity"), since a message that carried
+no recognizable filter used to fall straight through to the generic
+"Didn't catch a specific filter there" reply even for things like "hi" or
+"thanks". Now, whenever a message parses to zero filter bits
+(`hunterRecapBits().length === 0`), it's checked against four more
+patterns before giving up: `HUNTER_GREETING_RE` ("hi"/"hey"/"hello"/etc.,
+answered from `HUNTER_GREETING_REPLIES`), `HUNTER_SMALLTALK_RE` ("how are
+you"/"what's up", from `HUNTER_SMALLTALK_REPLIES`), `HUNTER_THANKS_RE`
+("thanks"/"appreciate it", from `HUNTER_THANKS_REPLIES`), and
+`HUNTER_STATUS_RE` ("what have I got so far"/"summarize", answered by
+`hunterStatusSummary()`, which reads the live `hunterState` and
+`selectedLocations` and recaps everything gathered in one plain-English
+sentence — query, salary, YOE, departments, commitment, locations,
+recency — so the person doesn't have to scroll back up to remember what
+they've already told it). Each reply is picked at random from its pool
+(`pickOne()`) so the conversation doesn't feel scripted on repeat. On top
+of that, `HUNTER_FINALIZE_RE` was extended to also match a bare
+affirmation on its own line — "yes"/"yeah"/"sure"/"ok"/"go for it" — since
+Hunter always closes its own turn by asking "want to add more, or search
+now?", so a one-word "yes" in that context means finalize, not an
+unparseable non-answer.
 
 A short "Hunter is typing…" delay (`hunterReply()`, scaled loosely to
 reply length) precedes every response — purely cosmetic, the parsing
@@ -1421,7 +1461,14 @@ already handled any integer, so this was purely an `index.html` addition.
 every filter — query text, days, department/commitment, sort, location
 chips, both range sliders, and any uploaded resume's extracted terms —
 back to the as-loaded default and re-runs an unfiltered search, without
-touching saved searches or account state. "Home" is the first item in
+touching saved searches or account state. Originally styled with the same
+generic `.row-action-btn` look as everything else in that row (1px muted
+border, small text) — a real user testing the page reported not being
+able to find it, so `.clear-search-btn` now has its own rule in
+`style.css`: a 2px accent border and a tinted background so it reads as a
+real control rather than blending into the filter row, same "decorative
+vs. clickable" issue the resume dropzone had before its own restyle
+below. "Home" is the first item in
 `.nav-links` on every page (index/About/FAQ/Contact), linking back to
 `/`. The resume dropzone (`.resume-dropzone`) was restyled solid maroon
 and enlarged — the original dashed-border box read as decorative rather

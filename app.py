@@ -438,6 +438,24 @@ def api_location_groups():
     return jsonify({"groups": [{"key": k, "label": v["label"]} for k, v in LOCATION_GROUPS.items()]})
 
 
+@app.route("/api/metro-cities")
+def api_metro_cities():
+    """City/state pairs for the ~68 major US metros curated in
+    metro_areas.py (already used server-side to expand a resume's home
+    city into nearby suburbs -- see resume_parser.py). Reused here purely
+    for the (city, state) *keys*, not the nearby-city lists, so Hunter
+    (static/app.js) can recognize a bare metro name typed in chat --
+    "san francisco" -- as "San Francisco, CA" without requiring the state
+    to be spelled out. One shared list rather than a second hardcoded copy
+    of city names in the frontend, so the two stay in sync automatically."""
+    from metro_areas import METRO_AREAS
+    cities = [
+        {"city": city.title(), "state": state.upper()}
+        for (city, state) in METRO_AREAS.keys()
+    ]
+    return jsonify({"cities": cities})
+
+
 @app.route("/api/site-config")
 def api_site_config():
     """Public, non-account config the frontend needs on every page load:

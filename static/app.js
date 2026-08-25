@@ -63,6 +63,36 @@ async function loadLocationGroups() {
   }
 }
 
+// Bare-city recognition for Hunter (hunterParseMessage() below) -- "san
+// francisco" alone, no state, should resolve to "San Francisco, CA" the
+// same way a resume upload already does server-side (see
+// metro_areas.py). metroCityMap is city-name-lowercased -> state abbr;
+// metroCityRe is one big alternation of every known city name, longest
+// first so "san francisco" matches whole rather than partially. Both
+// built once the fetch resolves rather than hand-maintained in JS, so
+// this list can never drift out of sync with metro_areas.py.
+let metroCityMap = {};
+let metroCityRe = null;
+
+async function loadMetroCities() {
+  try {
+    const res = await fetch("/api/metro-cities");
+    const data = await res.json();
+    const cities = data.cities || [];
+    cities.forEach((c) => { metroCityMap[c.city.toLowerCase()] = c.state; });
+    const names = cities
+      .map((c) => c.city)
+      .sort((a, b) => b.length - a.length) // longest first, e.g. "san francisco" before "san"
+      .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    if (names.length) {
+      metroCityRe = new RegExp(`\\b(${names.join("|")})\\b`, "gi");
+    }
+  } catch (e) {
+    metroCityMap = {}; // bare-city recognition is a nice-to-have; fail quietly, "City, ST" still works
+    metroCityRe = null;
+  }
+}
+
 async function loadLogoCache() {
   try {
     const res = await fetch("/logo_cache.json");
@@ -1597,8 +1627,38 @@ const HUNTER_IDENTITY_DEFLECTIONS = [
 ];
 
 const HUNTER_RESTART_RE = /\b(restart|start over|reset|new search)\b/i;
-const HUNTER_FINALIZE_RE = /\b(search now|run (?:it|the search)|go ahead|do it|that'?s (?:it|all|everything)|looks good|find (?:it|them|jobs)|show me|i'?m (?:done|ready)|let'?s go|just search|search please|pull (?:it|them) up)\b/i;
+// A bare "yes"/"sure"/"ok" is, in context, almost always answering
+// Hunter's own "want to add more, or search now?" -- included in
+// finalize rather than treated as unparseable filler, since Hunter always
+// asks that exact question after every reply.
+const HUNTER_FINALIZE_RE = /\b(search now|run (?:it|the search)|go ahead|do it|that'?s (?:it|all|everything)|looks good|find (?:it|them|jobs)|show me|i'?m (?:done|ready)|let'?s go|just search|search please|pull (?:it|them) up)\b|^\s*(?:yes|yeah|yep|yup|sure|sounds good|ok|okay|please|go for it)[.!]?\s*$/i;
 const HUNTER_FILLER_RE = /^(no|none|nothing|nope|na|n\/a|meh|idk|not really)\.?!?$/i;
+
+// Small-talk handling -- a real conversational assistant should be able
+// to say hi, say you're welcome, and answer "so what have you got so
+// far" without those falling into the generic "didn't catch a filter"
+// bucket. Each is only handled specially when the message carries no
+// other parseable content (see the `bits.length` gate around each check
+// in hunterHandleMessage) -- "hey, remote roles please" still applies the
+// remote filter, it just also gets a warmer opener.
+const HUNTER_GREETING_RE = /^\s*(?:hi|hello|hey|yo|hiya|good morning|good afternoon|good evening)[!.,]?\s*$/i;
+const HUNTER_GREETING_REPLIES = [
+  "Hey! What kind of role are you after?",
+  "Hi there — tell me what you're looking for.",
+  "Hello! Give me a role, location, salary, anything to start with.",
+];
+const HUNTER_THANKS_RE = /\b(thanks|thank you|thx|ty|appreciate it)\b/i;
+const HUNTER_THANKS_REPLIES = [
+  "Anytime! Anything else, or ready to search?",
+  "You're welcome — more filters, or should I run it?",
+  "No problem. Want to add anything else, or search now?",
+];
+const HUNTER_SMALLTALK_RE = /\bhow are you\b|\bhow'?s it going\b|\bwhat'?s up\b/i;
+const HUNTER_SMALLTALK_REPLIES = [
+  "Doing well, thanks! What are you searching for?",
+  "Can't complain — let's find you a role. What are you looking for?",
+];
+const HUNTER_STATUS_RE = /\bwhat (?:have i|do you have|did i (?:say|tell you)|'?ve i got)\b|\bwhat do you have (?:so far)?\b|\bwhat'?s in (?:my|the) search\b|\bshow me what you have\b|\bsummar(?:y|ize)\b/i;
 
 // A message ending in "?" (or matching one of these common phrasings) is
 // almost always a question directed AT Hunter ("what else should I
@@ -1755,11 +1815,30 @@ function hunterParseMessage(rawText) {
     result.locationsAdded.push({ type: "text", value: label, label });
     working = working.replace(csm[0], "");
   }
-  // Trigger-word phrasing ("in Austin", "near portland", "based in NYC")
+  // Bare major-metro name, no state needed at all -- "san francisco",
+  // "austin", "new york" -- resolved against the ~68-city curated list in
+  // metro_areas.py (see loadMetroCities()/metroCityMap/metroCityRe).
+  // Deliberately runs AFTER the "City, ST" pattern above, so "Austin, TX"
+  // is already fully consumed as a unit before this looks for bare
+  // mentions; only genuinely state-less mentions reach here.
+  if (metroCityRe) {
+    metroCityRe.lastIndex = 0;
+    let mcm;
+    while ((mcm = metroCityRe.exec(working)) !== null) {
+      const state = metroCityMap[mcm[1].toLowerCase()];
+      if (!state) continue;
+      const label = `${titleCaseWords(mcm[1])}, ${state}`;
+      result.locationsAdded.push({ type: "text", value: label, label });
+      working = working.replace(mcm[0], "");
+      metroCityRe.lastIndex = 0; // string just changed length -- restart the scan over `working`
+    }
+  }
+  // Trigger-word phrasing ("in Traverse City", "near that little town")
   // -- case-insensitive so it isn't tripped up by how someone actually
   // capitalizes while typing, gated by HUNTER_STOPWORDS so common non-
   // place words right after "in" ("in engineering", "in sales") don't get
-  // mistaken for a city.
+  // mistaken for a city. This is the last-resort fallback for real
+  // locations outside the curated metro list above.
   const cityRe = /\b(?:in|near|around|based in|located in|city is|city:)\s+([a-zA-Z][a-zA-Z.]+(?:\s+[a-zA-Z.]+){0,2})/gi;
   let cm2;
   while ((cm2 = cityRe.exec(working)) !== null) {
@@ -1859,6 +1938,25 @@ function hunterApplyToPage() {
   search(1);
 }
 
+// Plain-English recap of everything accumulated in hunterState/
+// selectedLocations SO FAR (not just what one message just added -- see
+// hunterRecapBits() for that), for the "what have I got so far?" status
+// check below.
+function hunterStatusSummary() {
+  const bits = [];
+  if (hunterState.query) bits.push(`"${hunterState.query}"`);
+  if (hunterState.salaryMin !== undefined) bits.push(`${currencySymbol(hunterState.currency)}${formatAmountShort(hunterState.salaryMin)}+`);
+  if (hunterState.yoeMin !== undefined) bits.push(`${hunterState.yoeMin}+ years experience`);
+  if (hunterState.departments.length) bits.push(hunterState.departments.join("/"));
+  if (hunterState.commitment && hunterState.commitment.label) bits.push(hunterState.commitment.label);
+  const locLabels = selectedLocations.map((l) => l.label || l.value);
+  if (locLabels.length) bits.push(locLabels.join(", "));
+  if (hunterState.days && hunterState.days.label) bits.push(hunterState.days.label.toLowerCase());
+
+  if (!bits.length) return "Nothing yet — tell me a role, location, salary, whatever you've got.";
+  return `So far I've got: ${bits.join(", ")}. Say "search now" whenever you're ready, or keep adding.`;
+}
+
 async function hunterHandleMessage(text) {
   userSay(text);
 
@@ -1876,6 +1974,19 @@ async function hunterHandleMessage(text) {
   const parsed = hunterParseMessage(text);
   hunterApplyParsed(parsed);
   const bits = hunterRecapBits(parsed, { includeQuery: false });
+
+  // Small talk -- only handled specially when the message carries no
+  // parseable filter content of its own (a stray "hey, remote roles
+  // please" still applies "remote" normally, it just also gets a warmer
+  // opener via the reply text below). Checked in this order so a message
+  // matching more than one -- unlikely, but "thanks, how's it going" is
+  // possible -- resolves to the more specific one first.
+  if (!bits.length) {
+    if (HUNTER_GREETING_RE.test(text)) { await hunterReply(pickOne(HUNTER_GREETING_REPLIES)); return; }
+    if (HUNTER_SMALLTALK_RE.test(text)) { await hunterReply(pickOne(HUNTER_SMALLTALK_REPLIES)); return; }
+    if (HUNTER_THANKS_RE.test(text)) { await hunterReply(pickOne(HUNTER_THANKS_REPLIES)); return; }
+    if (HUNTER_STATUS_RE.test(text)) { await hunterReply(hunterStatusSummary()); return; }
+  }
 
   const finalize = HUNTER_FINALIZE_RE.test(text);
   if (finalize) {
@@ -2072,6 +2183,7 @@ sortSelect.addEventListener("change", () => search(1));
 
 loadFacets();
 loadLocationGroups();
+loadMetroCities();
 loadAuthConfig();
 loadStatus();
 loadSiteConfig();

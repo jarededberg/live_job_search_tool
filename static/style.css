@@ -399,6 +399,22 @@ code {
 .row-action-btn:hover { border-color: var(--accent); color: var(--accent); }
 .row-action-btn.danger:hover { border-color: #b3261e; color: #b3261e; }
 
+/* Clear search overrides the generic .row-action-btn look -- a thin
+   1px-border/muted-text chip read as decorative rather than clickable to
+   a real user testing the page (same complaint the resume dropzone had
+   before it was restyled solid maroon). A 2px accent border plus a tinted
+   background makes it read as a real, findable control at a glance
+   instead of blending into the filter row. */
+.clear-search-btn {
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+}
+.clear-search-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+
 .delisted-tag {
   font-size: 0.7rem;
   color: var(--muted-light);
