@@ -1404,6 +1404,37 @@ footer {
 .about-body a { color: var(--accent); text-decoration: none; }
 .about-body a:hover { text-decoration: underline; }
 
+.about-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin: 0 0 28px;
+}
+.about-photo {
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid var(--accent);
+  flex-shrink: 0;
+}
+.about-header-text h2 {
+  margin: 0 0 4px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.about-header-text p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+@media (max-width: 480px) {
+  .about-header { gap: 14px; }
+  .about-photo { width: 84px; height: 84px; }
+}
+
 /* Standalone-page form (contact.html) -- same visual language as the
    modal forms (.modal-content label/input), just not scoped under
    .modal-content since this page has no modal wrapper around it. */
