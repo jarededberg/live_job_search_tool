@@ -188,15 +188,80 @@ def password_reset_enabled():
     return bool(RESEND_API_KEY)
 
 
+def _post_to_resend(payload, hard_timeout=10, socket_timeout=8):
+    """POSTs an already-JSON-encoded payload (bytes) to Resend's REST API
+    and returns True/False, never raising.
+
+    This exists because `urllib.request.urlopen(req, timeout=socket_timeout)`
+    alone is NOT a reliable upper bound on how long this can take. The
+    timeout param only covers the connect/read phases of the socket -- DNS
+    resolution (getaddrinfo, which urlopen calls internally before it ever
+    gets a socket to apply that timeout to) can still hang indefinitely on
+    some networks, ignoring the timeout entirely. That's exactly what
+    happened in production here: a valid contact-form submission hung for
+    120+ seconds with zero response (confirmed via curl -- an invalid
+    payload that fails validation before ever reaching this function still
+    returns in well under a second, so the route itself is fine; it's
+    specifically the network call out to api.resend.com that stalls),
+    which lines up with gunicorn's own --timeout 120 eventually killing the
+    worker rather than urlopen's timeout=8 ever firing.
+
+    The fix is a real wall-clock cutoff that doesn't depend on the socket
+    layer cooperating: run the request in a daemon thread and join() it
+    with a hard timeout. If Resend (or DNS to it) is unreachable and the
+    inner call hangs forever, this function still returns within
+    `hard_timeout` seconds -- the leaked thread dies on its own once the
+    call eventually resolves/errors, and being a daemon thread means it
+    can't block process shutdown either way."""
+    result = {"ok": False}
+
+    def worker():
+        try:
+            req = urllib.request.Request(
+                "https://api.resend.com/emails", data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=socket_timeout) as resp:
+                result["ok"] = 200 <= resp.status < 300
+        except Exception as e:
+            # Broad except deliberately -- URLError/HTTPError/timeout/
+            # whatever else, none of it should ever bubble up into the
+            # request handler as a 500. Logged for the operator only (e.g.
+            # RESEND_API_KEY typo'd, or Resend's sandbox restriction
+            # blocking delivery because a custom domain hasn't been
+            # verified yet -- see README); the caller shows the same
+            # generic response to the browser regardless.
+            result["ok"] = False
+            result["error"] = e
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    t.join(timeout=hard_timeout)
+    if t.is_alive():
+        print(f"[app] Resend call still hanging after {hard_timeout}s "
+              f"(DNS/connect to api.resend.com not responding) -- giving "
+              f"up and returning failure to the caller instead of blocking "
+              f"the request indefinitely.")
+        return False
+    if "error" in result:
+        print(f"[app] Resend call failed: {result['error']}")
+    return result["ok"]
+
+
 def send_password_reset_email(to_email, reset_link):
-    """Sends the reset-link email via Resend's REST API -- plain urllib,
-    same pattern as verify_turnstile() above, so this doesn't need to pull
-    in an HTTP client dependency (or the `resend` package) for one call.
-    Returns True/False; the caller always shows the same generic response
-    to the browser regardless of the result (see api_forgot_password), so a
-    delivery failure here only ever surfaces in the server logs, never as a
-    signal to whoever's making the request about whether the email exists
-    or whether sending succeeded."""
+    """Sends the reset-link email via Resend's REST API -- plain urllib
+    (via _post_to_resend, see its docstring for why that's wrapped in a
+    hard-timeout thread), so this doesn't need to pull in an HTTP client
+    dependency (or the `resend` package) for one call. Returns True/False;
+    the caller always shows the same generic response to the browser
+    regardless of the result (see api_forgot_password), so a delivery
+    failure here only ever surfaces in the server logs, never as a signal
+    to whoever's making the request about whether the email exists or
+    whether sending succeeded."""
     payload = json.dumps({
         "from": RESEND_FROM_EMAIL,
         "to": [to_email],
@@ -211,27 +276,7 @@ def send_password_reset_email(to_email, reset_link):
             "email -- your password hasn't been changed.</p>"
         ),
     }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.resend.com/emails", data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            return 200 <= resp.status < 300
-    except Exception as e:
-        # Broad except deliberately -- URLError/HTTPError/timeout/whatever
-        # else, none of it should ever bubble up into the request handler
-        # as a 500. The user still sees the same generic "check your email"
-        # response either way (see api_forgot_password); this is purely for
-        # the server operator to notice in logs (e.g. RESEND_API_KEY typo'd,
-        # or Resend's sandbox restriction blocking delivery to a real user
-        # because a custom domain hasn't been verified yet -- see README).
-        print(f"[app] password reset email to {to_email} failed to send: {e}")
-        return False
+    return _post_to_resend(payload)
 
 
 def login_required(f):
@@ -296,14 +341,17 @@ CONTACT_REASONS = (
 
 def send_contact_email(reason, name, from_email, message):
     """Sends a contact-form submission to CONTACT_EMAIL via Resend, same
-    urllib pattern as send_password_reset_email(). Sets reply_to to the
-    submitter's own address so replying from the inbox goes straight back
-    to them, rather than to Resend's From address. Returns True/False;
-    the caller always shows the same success message to the browser
-    regardless (see api_contact) so a delivery failure only ever shows up
-    in server logs. `reason` is put in the subject line so submissions
-    (general questions vs. "add my company" vs. bug reports, etc.) are
-    triageable from the inbox without opening every one."""
+    urllib pattern as send_password_reset_email() (both go through
+    _post_to_resend(), see its docstring for why the network call is
+    wrapped in a hard-timeout thread rather than trusting urlopen's own
+    timeout param). Sets reply_to to the submitter's own address so
+    replying from the inbox goes straight back to them, rather than to
+    Resend's From address. Returns True/False; the caller always shows the
+    same success message to the browser regardless (see api_contact) so a
+    delivery failure only ever shows up in server logs. `reason` is put in
+    the subject line so submissions (general questions vs. "add my
+    company" vs. bug reports, etc.) are triageable from the inbox without
+    opening every one."""
     # Escaped before going into the HTML body -- reason/name/message are
     # all user-supplied, and this is the one email-sending path on the
     # site where the sender picks the content freely (unlike the
@@ -323,20 +371,7 @@ def send_contact_email(reason, name, from_email, message):
             f"<p>{safe_message}</p>"
         ),
     }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.resend.com/emails", data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            return 200 <= resp.status < 300
-    except Exception as e:
-        print(f"[app] contact email from {from_email} failed to send: {e}")
-        return False
+    return _post_to_resend(payload)
 
 
 @app.route("/api/jobs")

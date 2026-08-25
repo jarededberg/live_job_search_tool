@@ -962,6 +962,31 @@ email, via a plain `urllib` POST to Resend's REST API (`app.py`'s
 `send_password_reset_email()`) rather than pulling in their SDK for one
 call — same pattern as `verify_turnstile()`'s Cloudflare call.
 
+**Real production bug, since fixed:** both `send_password_reset_email()`
+and `send_contact_email()` route through a shared `_post_to_resend()`
+helper, which wraps the actual network call in a daemon thread with a
+hard `join(timeout=...)`, rather than calling `urlopen()` directly.
+This matters because `urlopen(req, timeout=8)`'s timeout only covers the
+connect/read phases of the socket — it does *not* reliably bound DNS
+resolution (`getaddrinfo`, which `urlopen` calls internally before it
+ever has a socket to apply that timeout to). On Render, a live contact-
+form submission hung for 120+ seconds with zero response to the browser
+(confirmed with `curl`: an invalid payload that fails validation before
+ever reaching `send_contact_email()` still returned in well under a
+second, so the route itself was fine — it was specifically the outbound
+call to `api.resend.com` that stalled, and it lined up almost exactly
+with gunicorn's own `--timeout 120` eventually killing the worker,
+rather than `urlopen`'s `timeout=8` ever firing). `_post_to_resend()`
+fixes this with a real wall-clock cutoff that doesn't depend on the
+socket layer cooperating: it runs the request in a `daemon=True` thread
+and joins it with `hard_timeout` (10s by default). If the network call
+is still stuck when that fires, the function just returns `False` — the
+leaked thread dies on its own whenever the call eventually resolves or
+errors, and being a daemon thread means it can't block process shutdown
+either way. The end result: a broken network path to Resend now surfaces
+as a fast, honest "couldn't send that right now" to whoever's submitting
+the form, instead of an indefinitely spinning button.
+
 **Setup:**
 
 1. Create a free account at [resend.com](https://resend.com), grab an API
