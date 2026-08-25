@@ -830,6 +830,28 @@ for the first several minutes.
    `/data`, and set the environment variable `JOBS_DB_PATH=/data/jobs.db` so
    the SQLite cache survives restarts/redeploys. Without a persistent disk
    the app still works, it just re-scrapes from empty on every redeploy.
+
+   **The scrape schedule itself is also deploy-aware, since this bit
+   real:** `start_scheduler()` (`app.py`) used to hardcode
+   `next_run_time=datetime.now()`, so *every* deploy -- even a one-line
+   copy change with a persistent disk already full of data -- kicked off
+   a full re-scrape of all ~4,300 companies immediately, on top of
+   whatever was already there. That scraper shares this single-worker,
+   4-thread gunicorn process (and its GIL) with every web request, so for
+   the ~30 minutes a full scrape takes, it can starve other threads of
+   CPU time badly enough that an otherwise-healthy request looks hung
+   from the app's own perspective (this is exactly what made the contact
+   form intermittently fail while testing it here -- DNS, TLS, and the
+   Resend API itself all responded instantly when tested directly,
+   outside this process, but requests handled *by* this process during
+   an active scrape did not). `_compute_next_scrape_time()` fixes this
+   using the scrape history already sitting on that persistent disk:
+   never scraped before → run immediately (nothing to serve otherwise);
+   scraped recently → schedule the *remainder* of `SCRAPE_INTERVAL_HOURS`
+   instead of restarting the clock; overdue (app was down past its next
+   scheduled time) → run immediately, same as a normal scheduler catching
+   up. Net effect: routine deploys no longer retrigger a full scrape,
+   only the normal 8-hour cadence does.
 6. Optional environment variables:
    - `SCRAPE_INTERVAL_HOURS` (default `8`)
    - `SCRAPE_MAX_WORKERS` (default `4`)

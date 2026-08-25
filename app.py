@@ -136,12 +136,52 @@ def run_scrape_job():
         _scrape_lock.release()
 
 
+def _compute_next_scrape_time():
+    """When to schedule the *first* run of the recurring scrape job at
+    startup. Deliberately NOT "always right now" -- that was the previous
+    behavior (a bare `next_run_time=datetime.now()`), which meant every
+    single code deploy, even a one-line change, kicked off a full re-
+    scrape of all ~4,300 companies immediately. That scraper shares this
+    process's single gunicorn worker (and its GIL) with every web
+    request, so for the ~30 minutes a full scrape takes, it can starve
+    other threads of CPU time badly enough to make an otherwise-healthy
+    request (confirmed independently: DNS, TLS, and the Resend API itself
+    all responded instantly when tested directly, outside this process)
+    look hung from the app's own perspective -- exactly what happened
+    testing the contact form shortly after a deploy.
+
+    JOBS_DB_PATH lives on a persistent disk (see README), so scrape
+    history normally survives across deploys. This uses that history to
+    schedule sensibly instead of restarting the clock on every restart:
+      - Never scraped before (fresh disk / brand-new deployment): run
+        right away, same as before -- there's no data to serve otherwise.
+      - Last scrape started less than SCRAPE_INTERVAL_HOURS ago: schedule
+        the first run for whenever it was actually due, not immediately.
+      - Overdue (the app was down past its next scheduled time, or this
+        is an old deploy with SCRAPE_INTERVAL_HOURS lowered since): run
+        right away -- being overdue for the periodic scrape is exactly
+        the case an unattended scheduler is supposed to catch up on."""
+    last = db.last_run()
+    if last is None:
+        return datetime.now()
+    started_at = last.get("started_at")
+    try:
+        last_start = datetime.fromisoformat(started_at)
+    except (TypeError, ValueError):
+        return datetime.now()
+    if last_start.tzinfo is None:
+        last_start = last_start.replace(tzinfo=timezone.utc)
+    due = last_start + timedelta(hours=SCRAPE_INTERVAL_HOURS)
+    now = datetime.now(timezone.utc)
+    return due if due > now else now
+
+
 def start_scheduler():
     from apscheduler.schedulers.background import BackgroundScheduler
 
     scheduler = BackgroundScheduler(daemon=True)
     scheduler.add_job(run_scrape_job, "interval", hours=SCRAPE_INTERVAL_HOURS, id="scrape",
-                       next_run_time=datetime.now())
+                       next_run_time=_compute_next_scrape_time())
     scheduler.start()
     return scheduler
 
