@@ -693,7 +693,7 @@ COMPANIES = [
     ("Clearco",                 "clearco"),         # $2B, revenue-based financing for ecommerce
 
     # ══ SERIES C+ — VERTICAL SAAS ════════════════════════════════════════════
-    ("Housecall Pro",           "housecallpro"),    # $1.4B, home services business platform
+    ("Housecall Pro",           "housecall"),       # $1.4B, home services business platform -- slug was "housecallpro" (404, dead) until this fix; live board is "housecall", confirmed 39 open jobs
     ("Contentstack",            "contentstack"),    # $1B, headless CMS platform
 
     # ══ RESTAURANT / FOOD TECH ═══════════════════════════════════════════════
@@ -2665,7 +2665,6 @@ COMPANIES = [
     ("Field AI",                    "field-ai"),
     ("Storable",                    "storable"),
     ("Materialize",                    "materialize"),
-    ("Housecall Pro",                    "housecallpro"),
     ("Razorpay",                    "razorpaysoftwareprivatelimited"),
     ("Solarisbank",                    "solarisbank"),
     ("FT Partners",                    "financialtechnologypartners"),
@@ -5198,6 +5197,25 @@ COMPANIES = [
     ("Doppel",                  "doppel"),           # Greenhouse; social engineering defense/cybersecurity — Director Sales Enablement reviewed
     ("First Due",               "firstdue"),         # Greenhouse; fire/EMS software — Director Sales Enablement reviewed
     ("Datavant Inc",            "datavantinc"),      # Greenhouse; health data interoperability — slug unverified
+
+    # ── User-requested additions (Aug 2026 batch 2) ────────────────────────────
+    # Every slug below was hit directly against its live boards-api/
+    # posting-api/postings endpoint (curl) before being added, not left as an
+    # unverified guess -- Anaplan, Hippocratic AI, UpGuard, Trulioo, and Rho
+    # were requested too but already exist above under those exact slugs, so
+    # they're intentionally not repeated here.
+    ("Truffle Security",        "trufflesecurity"), # Greenhouse; secret-scanning security tooling
+    ("Nava PBC",                "navapbc"),          # Greenhouse; gov/health public benefit corp — distinct from the existing unrelated "Nava Benefits" (slug "nava") above
+    ("Gruve",                   "gruve"),            # Greenhouse; AI/cybersecurity infrastructure
+    ("Aegis Ventures",          "aegisventures"),    # Greenhouse; AI venture studio
+    ("Optain Health",           "optainhealth"),     # Greenhouse; the board's actual name is "Optain Health" — slugs "optain"/"optainai" don't exist
+    ("Clubhouse",               "clubhouse"),        # Ashby; audio social app
+    ("Moego",                   "moego"),            # Ashby; pet grooming business software
+    ("Lumin Digital",           "LuminDigital"),     # Lever, not Ashby — requested as Ashby but the live board is Lever; 0 openings at verification time, slug still valid and will pick up postings once they appear
+    ("Loot Labs",               "loot-labs"),        # Ashby; collectibles/rewards platform (Boxed.gg)
+    ("Camunda",                 "camunda"),          # Ashby; process orchestration software
+    ("The Voleon Group",        "voleon"),           # Ashby; quantitative investment management
+    ("0x",                      "0x"),               # Ashby; crypto/DeFi trading infrastructure
 
 ]
 
