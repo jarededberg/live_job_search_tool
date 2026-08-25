@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="favicon.svg?v=14" type="image/svg+xml" />
-<link rel="alternate icon" href="favicon.ico?v=14" />
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=14" />
+<link rel="icon" href="favicon.svg?v=15" type="image/svg+xml" />
+<link rel="alternate icon" href="favicon.ico?v=15" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=15" />
 <title>Contact — Skip The Boards</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=14" />
+<link rel="stylesheet" href="style.css?v=15" />
 </head>
 <body>
   <nav class="topnav">
@@ -60,20 +60,25 @@
     async function init() {
       const body = document.getElementById("contact-page-body");
       let contactEnabled = false;
-      let contactEmail = "";
       try {
         const res = await fetch("/api/site-config");
         const data = await res.json();
         contactEnabled = Boolean(data.contact_enabled);
-        contactEmail = data.contact_email || "";
       } catch (e) {
-        /* fall through to the mailto fallback below */
+        /* contactEnabled stays false -- fall through to the unavailable message below */
       }
 
+      // No mailto/email fallback here on purpose -- the destination inbox
+      // is never sent to the browser at all (see /api/site-config in
+      // app.py), so there's nothing to build a mailto: link out of even
+      // if this branch is reached. If RESEND_API_KEY isn't configured on
+      // this deployment, the form just isn't shown; enabling it is a
+      // server-side config change (README's "Contact form" section), not
+      // something the visitor needs to work around.
       if (!contactEnabled) {
         body.innerHTML = `
           <p class="modal-plain-text">
-            Reach me directly at <a href="mailto:${escapeAttr(contactEmail || "jarededberg@gmail.com")}">${escapeHtml(contactEmail || "jarededberg@gmail.com")}</a>.
+            The contact form isn't available on this deployment right now. Please check back soon.
           </p>
         `;
         return;

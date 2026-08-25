@@ -1524,8 +1524,9 @@ function appliedJobRow(job) {
 //
 // Contact is now its own page (static/contact.html, same treatment as
 // /faq) rather than a modal -- it fetches /api/site-config itself to
-// decide form-vs-mailto, so this page no longer needs contact_enabled/
-// contact_email at all.
+// decide whether to show the real form or an "unavailable" message, so
+// this page no longer needs contact_enabled at all (and /api/site-config
+// never returns contact_email in the first place -- see app.py).
 async function loadSiteConfig() {
   try {
     const res = await fetch("/api/site-config");

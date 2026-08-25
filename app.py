@@ -461,16 +461,22 @@ def api_site_config():
     """Public, non-account config the frontend needs on every page load:
     the GA4 measurement ID (safe to expose; it's a public tracking ID, not
     a secret) and whether the contact form is wired up to actually send
-    email (plus the destination address itself, which is fine to expose --
-    it's already public in the footer byline/LinkedIn). Each flag being
-    false means app.js skips that feature entirely -- same graceful-
-    degradation pattern as Turnstile/Resend/password-reset. (The guided
-    search wizard/chat widget needs no entry here -- it's a purely
-    client-side scripted flow, not an external API call.)"""
+    email. Each flag being false means app.js skips that feature entirely
+    -- same graceful-degradation pattern as Turnstile/Resend/password-
+    reset. (The guided search wizard/chat widget needs no entry here --
+    it's a purely client-side scripted flow, not an external API call.)
+
+    Deliberately does NOT include CONTACT_EMAIL. An earlier version of
+    this endpoint returned it so the contact page could fall back to a
+    mailto: link when the form itself wasn't configured, but that put the
+    operator's real inbox address in plain text in the page and in the
+    API response -- a real complaint, since there's no reason a visitor
+    ever needs to see the destination address. send_contact_email() runs
+    entirely server-side and is the only thing that ever needs
+    CONTACT_EMAIL; the browser doesn't, so it doesn't get it."""
     return jsonify({
         "ga_measurement_id": GA_MEASUREMENT_ID,
         "contact_enabled": contact_enabled(),
-        "contact_email": CONTACT_EMAIL,
     })
 
 

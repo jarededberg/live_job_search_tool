@@ -1246,18 +1246,28 @@ change.
 Contact is a real standalone page (`static/contact.html`, served by
 `/contact` in `app.py`), not a modal — same treatment as `/faq` and
 `/about` below: linkable, indexable, doesn't need the homepage loaded
-first. The page's own inline script fetches `GET /api/site-config` (which
-exposes `contact_enabled`/`contact_email` — the address is public anyway,
-it's already in the footer byline/LinkedIn) and shows a real form (reason
-dropdown, name/email/message, `POST /api/contact`, rate limited to
-3/hour/IP same as forgot-password) if `contact_enabled` is true, or a
-`mailto:` link to `contact_email` if it's false — never a dead end either
-way. Submissions are emailed to `CONTACT_EMAIL` via Resend with
-`reply_to` set to the sender's own address, so replying from your inbox
-goes straight back to them. The reason dropdown (`CONTACT_REASONS` in
-`app.py`) is validated server-side and falls back to "Other" if missing
-or tampered with; name/email/message are HTML-escaped before being
-embedded in the outgoing email body.
+first. The page's own inline script fetches `GET /api/site-config`, which
+exposes `contact_enabled` only, never `contact_email` -- the destination
+inbox address is not sent to the browser under any circumstance. If
+`contact_enabled` is true it shows a real form (reason dropdown,
+name/email/message, `POST /api/contact`, rate limited to 3/hour/IP same
+as forgot-password); if it's false it shows a plain "not available right
+now" message, not a `mailto:` fallback. **This is a fix for a real
+privacy complaint**: an earlier version of this page fell back to a
+`mailto:${contact_email}` link (with the address rendered as visible
+text too) whenever `RESEND_API_KEY` wasn't configured, which meant the
+operator's personal inbox address sat in plain text in the page's HTML
+on any deployment that hadn't set up Resend yet -- exactly the kind of
+thing a visitor (or a scraper) could copy straight off the page. Since
+`send_contact_email()` (`app.py`) is the only code that ever needs
+`CONTACT_EMAIL`, and it runs entirely server-side, the browser has no
+legitimate reason to receive that value at all, so `/api/site-config`
+simply stopped sending it. Submissions are emailed to `CONTACT_EMAIL` via
+Resend with `reply_to` set to the sender's own address, so replying from
+your inbox goes straight back to them. The reason dropdown
+(`CONTACT_REASONS` in `app.py`) is validated server-side and falls back
+to "Other" if missing or tampered with; name/email/message are
+HTML-escaped before being embedded in the outgoing email body.
 
 ## Admin dashboard (signup tracking)
 
