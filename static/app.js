@@ -1509,6 +1509,51 @@ function formatAmountShort(n) {
 // days/location phrases already stripped out (see hunterParseMessage()),
 // so "engineering" in "5 years of engineering experience" doesn't also
 // have to fight the YOE regex for the same substring.
+// US state names/abbreviations, all lowercased -- used as a precision gate
+// for the "City, ST" / "City, State" location pattern below: any
+// "<words>, <this>" match only counts as a location if the part after the
+// comma resolves to a real state, which is what lets that pattern be
+// case-insensitive and fairly loose about the city part without matching
+// every random comma in a sentence.
+const US_STATE_MAP = {
+  al: "AL", ak: "AK", az: "AZ", ar: "AR", ca: "CA", co: "CO", ct: "CT", de: "DE",
+  fl: "FL", ga: "GA", hi: "HI", id: "ID", il: "IL", in: "IN", ia: "IA", ks: "KS",
+  ky: "KY", la: "LA", me: "ME", md: "MD", ma: "MA", mi: "MI", mn: "MN", ms: "MS",
+  mo: "MO", mt: "MT", ne: "NE", nv: "NV", nh: "NH", nj: "NJ", nm: "NM", ny: "NY",
+  nc: "NC", nd: "ND", oh: "OH", ok: "OK", or: "OR", pa: "PA", ri: "RI", sc: "SC",
+  sd: "SD", tn: "TN", tx: "TX", ut: "UT", vt: "VT", va: "VA", wa: "WA", wv: "WV",
+  wi: "WI", wy: "WY", dc: "DC",
+  alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA",
+  colorado: "CO", connecticut: "CT", delaware: "DE", florida: "FL", georgia: "GA",
+  hawaii: "HI", idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA", kansas: "KS",
+  kentucky: "KY", louisiana: "LA", maine: "ME", maryland: "MD", massachusetts: "MA",
+  michigan: "MI", minnesota: "MN", mississippi: "MS", missouri: "MO", montana: "MT",
+  nebraska: "NE", nevada: "NV", "new hampshire": "NH", "new jersey": "NJ",
+  "new mexico": "NM", "new york": "NY", "north carolina": "NC", "north dakota": "ND",
+  ohio: "OH", oklahoma: "OK", oregon: "OR", pennsylvania: "PA", "rhode island": "RI",
+  "south carolina": "SC", "south dakota": "SD", tennessee: "TN", texas: "TX",
+  utah: "UT", vermont: "VT", virginia: "VA", washington: "WA", "west virginia": "WV",
+  wisconsin: "WI", wyoming: "WY",
+};
+function titleCaseWords(s) {
+  return s.replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+}
+// The "City, ST" pattern below captures up to 3 words before the comma
+// (to allow multi-word cities like "San Francisco"), which also means it
+// happily captures leading filler ("in Portland", "the city is Portland")
+// as part of the "city" -- this strips those words back off so the
+// location label reads "Portland, OR" instead of "The City Is Portland, OR".
+const CITY_LEADING_FILLER_RE = /^(?:in|near|around|based|located|the|city|is|for|a|an)\s+/i;
+function stripCityFiller(phrase) {
+  let p = phrase.trim();
+  let prev;
+  do {
+    prev = p;
+    p = p.replace(CITY_LEADING_FILLER_RE, "").trim();
+  } while (p !== prev && p.length);
+  return p || phrase.trim();
+}
+
 const HUNTER_DEPT_KEYWORDS = {
   "Engineering": ["engineering", "engineer", "swe", "software developer", "software eng", "backend", "front end", "frontend", "full stack", "fullstack", "devops", "site reliability"],
   "Product": ["product manager", "product management", "product role", "product team", "pm role"],
@@ -1525,6 +1570,18 @@ const HUNTER_DEPT_KEYWORDS = {
   "Professional Services": ["professional services", "consulting", "implementation"],
   "Executive": ["executive", "chief of staff"],
 };
+
+// Words that should never be mistaken for a city name by the trigger-word
+// location pattern below (e.g. "in engineering", "in sales" shouldn't
+// become a location just because they follow "in") -- mostly single-word
+// department/commitment terms plus generic filler.
+const HUNTER_STOPWORDS = new Set([
+  "a", "an", "the", "that", "this", "your", "my", "our", "us", "them", "it",
+  "one", "some", "any", "full", "part", "contract", "remote", "office",
+  "person", "people", "charge", "favor", "engineering", "engineer", "sales",
+  "marketing", "design", "product", "finance", "legal", "operations", "data",
+  "support", "service", "services", "recruiting", "hr",
+]);
 
 // Phrases that, if a typed message asks something like this, get a light
 // in-character deflection instead of a straight answer -- Hunter neither
@@ -1679,12 +1736,36 @@ function hunterParseMessage(rawText) {
       working = working.replace(new RegExp(g.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "");
     }
   });
-  const cityRe = /\b(?:in|near|around|based in|located in)\s+([A-Z][a-zA-Z.]+(?:\s+[A-Z][a-zA-Z.]+){0,2})/g;
+  // "City, ST" / "City, State" -- deliberately case-insensitive and loose
+  // about the city part (unlike the trigger-word pattern below), because
+  // the part after the comma resolving to a real US state is itself
+  // strong evidence this is a location, not a coincidental comma
+  // elsewhere in the sentence. This is the pattern that actually needs to
+  // catch how people type real locations: "portland, or", "Austin TX",
+  // typed lowercase, no "in"/"near" in front of it at all.
+  const cityStateRe = /\b([a-zA-Z][a-zA-Z]*(?:\s+[a-zA-Z]+){0,2}),\s*([a-zA-Z]{2}|[a-zA-Z]+(?:\s+[a-zA-Z]+)?)\b/g;
+  let csm;
+  while ((csm = cityStateRe.exec(working)) !== null) {
+    const stateKey = csm[2].trim().toLowerCase();
+    const stateAbbr = US_STATE_MAP[stateKey];
+    if (!stateAbbr) continue;
+    const city = stripCityFiller(csm[1]);
+    if (!city || HUNTER_STOPWORDS.has(city.toLowerCase())) continue;
+    const label = `${titleCaseWords(city)}, ${stateAbbr}`;
+    result.locationsAdded.push({ type: "text", value: label, label });
+    working = working.replace(csm[0], "");
+  }
+  // Trigger-word phrasing ("in Austin", "near portland", "based in NYC")
+  // -- case-insensitive so it isn't tripped up by how someone actually
+  // capitalizes while typing, gated by HUNTER_STOPWORDS so common non-
+  // place words right after "in" ("in engineering", "in sales") don't get
+  // mistaken for a city.
+  const cityRe = /\b(?:in|near|around|based in|located in|city is|city:)\s+([a-zA-Z][a-zA-Z.]+(?:\s+[a-zA-Z.]+){0,2})/gi;
   let cm2;
-  while ((cm2 = cityRe.exec(rawText)) !== null) {
+  while ((cm2 = cityRe.exec(working)) !== null) {
     const city = cm2[1].trim().replace(/[.,]+$/, "");
-    if (city.length > 2) {
-      result.locationsAdded.push({ type: "text", value: city, label: city });
+    if (city.length > 2 && !HUNTER_STOPWORDS.has(city.toLowerCase())) {
+      result.locationsAdded.push({ type: "text", value: city, label: titleCaseWords(city) });
       working = working.replace(cm2[0], "");
     }
   }

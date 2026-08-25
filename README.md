@@ -1296,11 +1296,24 @@ product manager job paying 150k+" to a bare "product manager" — and
   live `#commitment` `<select>`, same live-data principle the old wizard
   used.
 - **Location** — "remote" → the canonical Remote (US) group; any other
-  `location_groups.py` group whose label appears in the message; explicit
-  "in `<City>`"/"near `<City>`"/"based in `<City>`" phrasing → pushed as a
-  literal typed location. Locations apply live to the real
-  `selectedLocations` array/chips as they're recognized, same as the old
-  wizard's location step.
+  `location_groups.py` group whose label appears in the message; "City,
+  ST"/"City, State" (`US_STATE_MAP` in `app.js`, all 50 states + DC,
+  abbreviation or full name, case-insensitive — "portland, or" and
+  "Portland, Oregon" both resolve to "Portland, OR") pushed as a literal
+  typed location; explicit "in `<city>`"/"near `<city>`"/"based in
+  `<city>`"/"city is `<city>`" phrasing (also case-insensitive, guarded by
+  `HUNTER_STOPWORDS` so "in engineering"/"in sales" don't get mistaken for
+  a city) as a fallback for locations without a state attached. **Fixed a
+  real bug here too**: the location patterns originally required
+  Title-Case input (`[A-Z][a-zA-Z]+`) on the theory that a real city name
+  would be capitalized — but most people type lowercase in a chat box, so
+  "in portland, ore[gon]", "portland, or", and "the city is portland,
+  oregon" all silently failed to parse, which is exactly the state a real
+  user hit. The state-name whitelist gate (`US_STATE_MAP`) is what makes
+  the "City, ST" pattern safe to run case-insensitively without also
+  matching random commas elsewhere in a sentence. Locations apply live to
+  the real `selectedLocations` array/chips as they're recognized, same as
+  the old wizard's location step.
 - **Recency** — "today"/"last 24 hours" → 1 day, "this week"/"past week"
   → 7, "last 2 weeks" → 14, "this month" → 30, etc.
 
