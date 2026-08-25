@@ -1343,6 +1343,25 @@ async function openSavedSearchesModal() {
 
 // ---- accounts: applied-job tracking ----
 
+// Mirrors db_users.APPLICATION_STATUSES in order -- a hardcoded copy
+// rather than a fetched one, since this list changes about as often as
+// the rest of the UI copy around it, and a whole endpoint just to serve
+// six strings isn't worth the round trip on every modal open.
+const APPLICATION_STATUSES = [
+  { value: "applied", label: "Applied" },
+  { value: "interviewing", label: "Interviewing" },
+  { value: "offer", label: "Offer" },
+  { value: "rejected", label: "Rejected" },
+  { value: "ghosted", label: "Ghosted" },
+  { value: "withdrawn", label: "Withdrawn" },
+];
+const STATUS_LABELS = Object.fromEntries(APPLICATION_STATUSES.map((s) => [s.value, s.label]));
+
+// Which status chip is active in the "My Applications" modal -- plain
+// module state rather than anything persisted, since it's cheap to lose
+// on refresh and reopening the modal is the normal way to reset it.
+let myApplicationsFilter = "all";
+
 async function toggleApplied(jobUrl, btnEl) {
   const wasApplied = btnEl.classList.contains("is-applied");
   btnEl.disabled = true;
@@ -1363,17 +1382,74 @@ async function toggleApplied(jobUrl, btnEl) {
   }
 }
 
+async function updateApplicationStatus(jobUrl, status, selectEl) {
+  const prevStatus = selectEl.dataset.prevStatus || "applied";
+  selectEl.disabled = true;
+  try {
+    const res = await fetch("/api/applied-jobs/status", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_url: jobUrl, status }),
+    });
+    if (!res.ok) throw new Error("request failed");
+    // Simplest correct redraw -- refetch rather than hand-patch the DOM,
+    // same pattern as the delete/unmark handlers below. This also keeps
+    // the filter-chip counts and the currently-filtered row list in sync
+    // with the change, not just the one dropdown that was touched.
+    openMyApplicationsModal();
+  } catch (e) {
+    selectEl.value = prevStatus; // request failed -- snap the dropdown back rather than show a status that isn't actually saved
+    selectEl.disabled = false;
+  }
+}
+
 async function openMyApplicationsModal() {
   openModal(`<h2 class="modal-title">My applications</h2><div id="applied-jobs-list">Loading…</div>`, { wide: true });
   try {
     const res = await fetch("/api/applied-jobs/full");
     const data = await res.json();
+    const jobs = data.jobs || [];
     const list = document.getElementById("applied-jobs-list");
-    if (!data.jobs || !data.jobs.length) {
+    if (!jobs.length) {
       list.innerHTML = `<div class="empty-modal-state">Nothing marked applied yet. Use "Mark applied" on any job card.</div>`;
       return;
     }
-    list.innerHTML = data.jobs.map(appliedJobRow).join("");
+
+    // Counts per stage power both the filter chips below and the "which
+    // stage is everything actually in" overview a flat list didn't give
+    // -- the whole point of this pass, since a bare list of applied URLs
+    // wasn't "explicitly helpful" once there were more than a handful.
+    const counts = { all: jobs.length };
+    APPLICATION_STATUSES.forEach((s) => { counts[s.value] = 0; });
+    jobs.forEach((j) => {
+      const s = j.status || "applied";
+      counts[s] = (counts[s] || 0) + 1;
+    });
+
+    const chipDefs = [{ value: "all", label: "All" }, ...APPLICATION_STATUSES];
+    const chipsHtml = chipDefs
+      .map((s) => {
+        const active = s.value === myApplicationsFilter ? " active" : "";
+        return `<button type="button" class="status-filter-chip status-${s.value}${active}" data-filter="${s.value}">${s.label} <span class="status-filter-count">${counts[s.value] || 0}</span></button>`;
+      })
+      .join("");
+
+    const visible = myApplicationsFilter === "all"
+      ? jobs
+      : jobs.filter((j) => (j.status || "applied") === myApplicationsFilter);
+
+    const rowsHtml = visible.length
+      ? visible.map(appliedJobRow).join("")
+      : `<div class="empty-modal-state">Nothing in "${STATUS_LABELS[myApplicationsFilter] || "All"}" right now.</div>`;
+
+    list.innerHTML = `<div class="status-filter-row">${chipsHtml}</div>${rowsHtml}`;
+
+    list.querySelectorAll("[data-filter]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        myApplicationsFilter = btn.dataset.filter;
+        openMyApplicationsModal();
+      });
+    });
     list.querySelectorAll("[data-unapply]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         await fetch("/api/applied-jobs", {
@@ -1384,6 +1460,10 @@ async function openMyApplicationsModal() {
         openMyApplicationsModal();
       });
     });
+    list.querySelectorAll("[data-status-select]").forEach((sel) => {
+      sel.dataset.prevStatus = sel.value;
+      sel.addEventListener("change", () => updateApplicationStatus(sel.dataset.statusSelect, sel.value, sel));
+    });
   } catch (e) {
     document.getElementById("applied-jobs-list").innerHTML = `<div class="empty-modal-state">Couldn't load your applications.</div>`;
   }
@@ -1391,6 +1471,7 @@ async function openMyApplicationsModal() {
 
 function appliedJobRow(job) {
   const appliedDate = job.applied_at ? String(job.applied_at).slice(0, 10) : "";
+  const status = job.status || "applied";
   // `delisted` jobs (see /api/applied-jobs/full in app.py) have no title/
   // company anymore -- the posting closed and dropped out of the live
   // dataset -- so they still show up here (this is the user's application
@@ -1398,10 +1479,14 @@ function appliedJobRow(job) {
   const titleHtml = job.delisted
     ? `<span class="applied-job-title">${escapeHtml(job.url)} <span class="delisted-tag">(no longer listed)</span></span>`
     : `<span class="applied-job-title"><a href="${escapeAttr(job.url)}" target="_blank" rel="noopener">${escapeHtml(job.title)}</a> — ${escapeHtml(job.company || "")}</span>`;
+  const statusOptionsHtml = APPLICATION_STATUSES
+    .map((s) => `<option value="${s.value}"${s.value === status ? " selected" : ""}>${s.label}</option>`)
+    .join("");
   return `
     <div class="applied-job-row">
       ${titleHtml}
       <span class="applied-job-meta">Applied ${escapeHtml(appliedDate)}</span>
+      <select class="status-select status-${status}" data-status-select="${escapeAttr(job.url)}" aria-label="Application status">${statusOptionsHtml}</select>
       <button type="button" class="row-action-btn danger" data-unapply="${escapeAttr(job.url)}">Remove</button>
     </div>
   `;

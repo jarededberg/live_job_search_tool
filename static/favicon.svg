@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Skip The Boards favicon: the same maroon diamond (brand-mark "◆")
+       used next to the wordmark in the top nav, on a cream rounded-square
+       field so it reads at 16px in a browser tab instead of disappearing
+       against a white or dark tab bar. Colors match style.css's page-bg
+       (#f7f4ee) and accent (#7a1f2e) variables exactly, so the tab icon
+       and the site itself never look like they belong to different
+       brands. -->
+  <rect width="64" height="64" rx="14" fill="#f7f4ee"/>
+  <rect x="1" y="1" width="62" height="62" rx="13" fill="none" stroke="#e4ded0" stroke-width="2"/>
+  <path d="M32 12 L50 32 L32 52 L14 32 Z" fill="#7a1f2e"/>
+</svg>

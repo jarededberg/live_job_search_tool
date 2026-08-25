@@ -812,6 +812,29 @@ def api_unmark_applied():
     return jsonify({"ok": True})
 
 
+@app.route("/api/applied-jobs/status", methods=["PATCH"])
+@accounts_required
+@login_required
+def api_update_applied_status():
+    """Moves a tracked application to a new pipeline stage (interviewing,
+    offer, rejected, ghosted, withdrawn, or back to applied) -- the status
+    dropdown on each row in the "My Applications" list. Separate from the
+    POST/DELETE routes above (which only ever mean "track this" / "stop
+    tracking this") so an accidental double-click can't wipe out a status
+    someone's already set."""
+    data = request.get_json(silent=True) or {}
+    job_url = (data.get("job_url") or "").strip()
+    status = (data.get("status") or "").strip().lower()
+    if not job_url:
+        return jsonify({"ok": False, "message": "Missing job_url."}), 400
+    if status not in db_users.APPLICATION_STATUSES:
+        return jsonify({"ok": False, "message": "Unknown status."}), 400
+    updated = db_users.update_applied_status(session["user_id"], job_url, status)
+    if not updated:
+        return jsonify({"ok": False, "message": "That job isn't marked applied."}), 404
+    return jsonify({"ok": True})
+
+
 @app.route("/api/applied-jobs/full")
 @accounts_required
 @login_required
@@ -830,10 +853,13 @@ def api_list_applied_jobs_full():
     results = []
     for a in applied:
         job = jobs_by_url.get(a["job_url"])
+        applied_at = a["applied_at"].isoformat() if hasattr(a["applied_at"], "isoformat") else a["applied_at"]
+        status = a.get("status") or "applied"
         if job:
             job = dict(job)
-            job["applied_at"] = a["applied_at"].isoformat() if hasattr(a["applied_at"], "isoformat") else a["applied_at"]
+            job["applied_at"] = applied_at
             job["applied"] = True
+            job["status"] = status
             results.append(job)
         else:
             # No longer in the live dataset -- still surface it, just
@@ -842,8 +868,9 @@ def api_list_applied_jobs_full():
                 "url": a["job_url"],
                 "title": None,
                 "company": None,
-                "applied_at": a["applied_at"].isoformat() if hasattr(a["applied_at"], "isoformat") else a["applied_at"],
+                "applied_at": applied_at,
                 "applied": True,
+                "status": status,
                 "delisted": True,
             })
     return jsonify({"jobs": results})

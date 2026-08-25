@@ -1013,13 +1013,60 @@ Both routes are also gated behind `accounts_required` (same as every other
 account route), so if `DATABASE_URL` isn't set at all, they return the
 standard 503 rather than a different error.
 
-### What's deliberately NOT built yet
+**Applied-job tracking now has a status pipeline**, not just a single
+toggle — a real user found the plain "you applied on this date" list
+"not explicitly helpful" once it had more than a handful of rows, with
+no way to record what actually happened after applying. `applied_jobs`
+picked up a `status` column (`TEXT NOT NULL DEFAULT 'applied'`,
+constrained in application code, not a DB enum, against
+`db_users.APPLICATION_STATUSES = ("applied", "interviewing", "offer",
+"rejected", "ghosted", "withdrawn")` — a plain tuple rather than an enum
+type specifically so adding a seventh stage later is a one-line change
+here, not a migration). Existing rows on an already-deployed database
+backfill to `'applied'` automatically: `init_db()` runs `ALTER TABLE
+applied_jobs ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT
+'applied'` unconditionally on every startup, which is a genuine no-op on
+a fresh table (the `CREATE TABLE IF NOT EXISTS` right above it already
+included the column) and a safe backfill on one that predates this
+feature. `PATCH /api/applied-jobs/status` (`db_users.update_applied_status()`)
+moves one row to a new stage, validated against `APPLICATION_STATUSES`
+in `app.py` before it ever reaches the query, and returns 404 rather than
+a silent no-op if the `job_url` was never actually marked applied by
+that user. On the frontend, `appliedJobRow()` in `app.js` renders a
+color-coded `<select>` per row (`.status-select.status-<value>` in
+`style.css` — six status colors chosen to read clearly against the
+cream/white surfaces without competing with the maroon accent, which
+stays reserved for the site's own actions rather than a status value),
+and `openMyApplicationsModal()` now also renders a row of filter chips
+above the list (`.status-filter-chip`, one per stage plus "All", each
+showing a live count) so the whole pipeline reads at a glance — click a
+chip to narrow the list to just that stage. `myApplicationsFilter` is
+plain in-memory module state, reset to "All" each time the modal is
+reopened, not worth persisting anywhere heavier for a filter this cheap
+to reset.
 
-**Applied-job tracking is a single toggle**, not a status pipeline
-(applied / interviewing / offer / rejected) — deliberately kept simple
-for v1. `applied_jobs` is a plain `(user_id, job_url, applied_at)` table;
-extending it to a status enum + notes field later is a small, additive
-schema change, not a redesign.
+**Favicon**: `static/favicon.svg` is the same maroon diamond used as the
+`.brand-mark` "◆" next to the wordmark in the top nav, on a cream
+rounded-square field (colors copied straight from `style.css`'s
+`--page-bg`/`--accent` so the tab icon can never drift from the site's
+own palette), rasterized to `favicon.ico` (16/32/48px, for browsers that
+don't support SVG favicons) and `apple-touch-icon.png` (180px, for
+iOS/Safari "Add to Home Screen") via `cairosvg`/Pillow at build time —
+these are static output files checked into `static/`, not generated at
+request time. All five pages link all three (`<link rel="icon">`,
+`rel="alternate icon"`, `rel="apple-touch-icon"`), same `?v=` cache-bust
+suffix as `style.css`/`app.js`. Regenerate from the source SVG with:
+```
+python3 -c "
+import cairosvg
+cairosvg.svg2png(url='static/favicon.svg', write_to='/tmp/favicon-256.png', output_width=256, output_height=256)
+cairosvg.svg2png(url='static/favicon.svg', write_to='static/apple-touch-icon.png', output_width=180, output_height=180)
+from PIL import Image
+Image.open('/tmp/favicon-256.png').save('static/favicon.ico', sizes=[(16,16),(32,32),(48,48)])
+"
+```
+
+### What's deliberately NOT built yet
 
 **Saved searches restore the plain filters** (query text, days,
 department, commitment, sort, location chips, and the salary/YOE sliders

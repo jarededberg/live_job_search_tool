@@ -106,10 +106,20 @@ def init_db():
                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     job_url TEXT NOT NULL,
                     applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    status TEXT NOT NULL DEFAULT 'applied',
                     UNIQUE (user_id, job_url)
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_applied_jobs_user ON applied_jobs(user_id)")
+            # `status` was added after this table already existed in
+            # production -- CREATE TABLE IF NOT EXISTS above is a no-op on a
+            # deployment that already has the table, so the column has to be
+            # added separately here. ADD COLUMN IF NOT EXISTS makes this
+            # migration safe to run on every startup, on both a fresh table
+            # (where it's a genuine no-op, the CREATE already added it) and
+            # an existing one (where it backfills the column with the
+            # 'applied' default for every row that predates this feature).
+            cur.execute("ALTER TABLE applied_jobs ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'applied'")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS password_reset_tokens (
                     id SERIAL PRIMARY KEY,
@@ -299,6 +309,15 @@ def delete_saved_search(user_id, search_id):
 
 # ---------------- applied jobs ----------------
 
+# The pipeline stages a tracked application can be in. "applied" is the
+# starting/default status (see mark_applied); everything else is a
+# manual transition the user makes from the "My Applications" list.
+# Kept as a plain ordered tuple (not a DB enum) so adding a stage later
+# is a one-line change here, no migration required -- app.py validates
+# incoming status values against this same list.
+APPLICATION_STATUSES = ("applied", "interviewing", "offer", "rejected", "ghosted", "withdrawn")
+
+
 def list_applied_job_urls(user_id):
     """Just the URLs, as a set -- used to badge job cards in a search
     result (one query per request, then an in-memory set-membership check
@@ -313,7 +332,7 @@ def list_applied_jobs(user_id):
     with conn_ctx() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT job_url, applied_at FROM applied_jobs "
+                "SELECT job_url, applied_at, status FROM applied_jobs "
                 "WHERE user_id = %s ORDER BY applied_at DESC",
                 (user_id,),
             )
@@ -340,3 +359,23 @@ def unmark_applied(user_id, job_url):
                 "DELETE FROM applied_jobs WHERE user_id = %s AND job_url = %s",
                 (user_id, job_url),
             )
+
+
+def update_applied_status(user_id, job_url, status):
+    """Moves one tracked application to a new pipeline stage. Returns True
+    if a row was actually updated (i.e. the job_url was really in this
+    user's applied_jobs), False otherwise -- app.py uses that to return a
+    404 rather than silently succeeding on a URL that was never marked
+    applied. Caller (app.py) validates `status` against
+    APPLICATION_STATUSES before this ever runs a query, but the check is
+    repeated here too since this function isn't only ever called from
+    behind that validation."""
+    if status not in APPLICATION_STATUSES:
+        raise ValueError(f"Unknown status: {status!r}")
+    with conn_ctx() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE applied_jobs SET status = %s WHERE user_id = %s AND job_url = %s",
+                (status, user_id, job_url),
+            )
+            return cur.rowcount > 0

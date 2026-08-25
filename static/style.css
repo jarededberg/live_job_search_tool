@@ -421,6 +421,68 @@ code {
   font-style: italic;
 }
 
+/* ---------- Application status tracking (My Applications) ----------
+   A flat "you applied on this date" list wasn't explicitly helpful once
+   there were more than a few rows -- there was nowhere to record what
+   actually happened after applying. Each row now gets a status dropdown
+   (interviewing/offer/rejected/ghosted/withdrawn, back to db_users.py's
+   APPLICATION_STATUSES), and the modal gets a row of filter chips above
+   the list so the whole pipeline reads at a glance instead of requiring
+   a scroll-and-scan. Six status colors, chosen to stay readable against
+   the cream/white surfaces without competing with the maroon accent
+   (which is reserved for the site's own actions, not a status value). */
+
+.status-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.status-filter-chip {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.status-filter-chip:hover { border-color: var(--muted-light); color: var(--ink-soft); }
+.status-filter-count { opacity: 0.7; }
+
+.status-filter-chip.active { color: white; border-color: transparent; }
+.status-filter-chip.status-all.active { background: var(--ink); }
+.status-filter-chip.status-applied.active { background: #6b6759; }
+.status-filter-chip.status-interviewing.active { background: #9a7b1f; }
+.status-filter-chip.status-offer.active { background: #1f7a45; }
+.status-filter-chip.status-rejected.active { background: #a13c3c; }
+.status-filter-chip.status-ghosted.active { background: #5c5470; }
+.status-filter-chip.status-withdrawn.active { background: #8a8478; }
+
+.status-select {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--bg);
+  color: var(--ink-soft);
+}
+.status-select.status-applied { border-color: #d8d5c9; color: #6b6759; background: #f6f5f1; }
+.status-select.status-interviewing { border-color: #e6d193; color: #7a611a; background: #fbf1d9; }
+.status-select.status-offer { border-color: #a8dcbb; color: #1f7a45; background: #e3f3e8; }
+.status-select.status-rejected { border-color: #e3b8b8; color: #a13c3c; background: #f7e9e9; }
+.status-select.status-ghosted { border-color: #cdc6dc; color: #5c5470; background: #ece9f2; }
+.status-select.status-withdrawn { border-color: #ddd8cc; color: #75705f; background: #f0eee6; }
+
 .empty-modal-state {
   color: var(--muted);
   font-size: 0.86rem;
