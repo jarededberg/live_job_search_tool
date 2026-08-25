@@ -93,6 +93,28 @@ async function loadMetroCities() {
   }
 }
 
+// Common short nicknames/abbreviations people actually type in chat --
+// "sf", "nyc", "la", "dc" -- that the metro-city list above can't catch
+// because those aren't the city's real name, they're a colloquial
+// stand-in for it. Kept as a small hardcoded map (not server-fetched,
+// unlike metroCityMap) since this is closer to slang than data -- it
+// doesn't change when metro_areas.py changes. Deliberately short and
+// conservative: every entry here is unambiguous in a job-search sentence
+// (no real English word collides with "nyc"/"philly"/"atl"), unlike
+// something like "sea" for Seattle, which was left out on purpose.
+const CITY_ABBR_LABELS = {
+  "sf": "San Francisco, CA",
+  "sfo": "San Francisco, CA",
+  "nyc": "New York, NY",
+  "la": "Los Angeles, CA",
+  "dc": "Washington, DC",
+  "philly": "Philadelphia, PA",
+  "atl": "Atlanta, GA",
+  "vegas": "Las Vegas, NV",
+  "nola": "New Orleans, LA",
+};
+const CITY_ABBR_RE = new RegExp(`\\b(${Object.keys(CITY_ABBR_LABELS).join("|")})\\b`, "gi");
+
 async function loadLogoCache() {
   try {
     const res = await fetch("/logo_cache.json");
@@ -1726,7 +1748,13 @@ const HUNTER_FILLER_RE = /^(no|none|nothing|nope|na|n\/a|meh|idk|not really)\.?!
 // other parseable content (see the `bits.length` gate around each check
 // in hunterHandleMessage) -- "hey, remote roles please" still applies the
 // remote filter, it just also gets a warmer opener.
-const HUNTER_GREETING_RE = /^\s*(?:hi|hello|hey|yo|hiya|good morning|good afternoon|good evening)[!.,]?\s*$/i;
+// Allows an optional trailing "hunter" (the assistant's own name) after
+// the greeting word -- "hey hunter", "hi hunter!" -- which the original
+// strict full-string match missed entirely: a real user typed exactly
+// that and got it parsed as search query text ("hey hunter" roles)
+// instead of a greeting, since addressing Hunter by name is one of the
+// most natural ways to say hello to it.
+const HUNTER_GREETING_RE = /^\s*(?:hi|hello|hey|yo|hiya|good morning|good afternoon|good evening)[!.,]?\s*(?:hunter)?[!.,]?\s*$/i;
 const HUNTER_GREETING_REPLIES = [
   "Hey! What kind of role are you after?",
   "Hi there — tell me what you're looking for.",
@@ -1742,6 +1770,19 @@ const HUNTER_SMALLTALK_RE = /\bhow are you\b|\bhow'?s it going\b|\bwhat'?s up\b/
 const HUNTER_SMALLTALK_REPLIES = [
   "Doing well, thanks! What are you searching for?",
   "Can't complain — let's find you a role. What are you looking for?",
+];
+// Covers a message that's really just correcting/waving off the
+// previous turn -- "no I was just saying hello", "just kidding", "never
+// mind" -- which used to fall through to the generic "not sure what to
+// do with that one" reply even though nothing was actually wrong. Kept
+// separate from HUNTER_GREETING_RE since these aren't greetings
+// themselves, they're clarifying that an earlier message wasn't meant
+// as a filter.
+const HUNTER_CASUAL_RE = /\b(?:just|only)\s+(?:saying|say)\s+(?:hi|hello|hey)\b|\bnever ?mind\b|\bjust (?:kidding|joking)\b|\bno reason\b/i;
+const HUNTER_CASUAL_REPLIES = [
+  "All good! Whenever you're ready, tell me what you're looking for.",
+  "No worries. I'm here whenever you want to start a search.",
+  "Ha, fair enough. Let me know when you've got a role in mind.",
 ];
 const HUNTER_STATUS_RE = /\bwhat (?:have i|do you have|did i (?:say|tell you)|'?ve i got)\b|\bwhat do you have (?:so far)?\b|\bwhat'?s in (?:my|the) search\b|\bshow me what you have\b|\bsummar(?:y|ize)\b/i;
 
@@ -1918,6 +1959,21 @@ function hunterParseMessage(rawText) {
       metroCityRe.lastIndex = 0; // string just changed length -- restart the scan over `working`
     }
   }
+  // Short colloquial city nicknames -- "sf", "nyc", "la", "dc" -- that
+  // aren't the city's real name so they can't live in the metro-city
+  // list above. Runs right after it for the same reason: a real city
+  // name should win over a nickname if somehow both appear, though in
+  // practice these never overlap. See CITY_ABBR_LABELS for the exact set
+  // and why each one is safe to match unconditionally.
+  CITY_ABBR_RE.lastIndex = 0;
+  let cam;
+  while ((cam = CITY_ABBR_RE.exec(working)) !== null) {
+    const label = CITY_ABBR_LABELS[cam[1].toLowerCase()];
+    if (!label) continue;
+    result.locationsAdded.push({ type: "text", value: label, label });
+    working = working.replace(cam[0], "");
+    CITY_ABBR_RE.lastIndex = 0; // string just changed length -- restart the scan over `working`
+  }
   // Trigger-word phrasing ("in Traverse City", "near that little town")
   // -- case-insensitive so it isn't tripped up by how someone actually
   // capitalizes while typing, gated by HUNTER_STOPWORDS so common non-
@@ -2068,6 +2124,7 @@ async function hunterHandleMessage(text) {
   // possible -- resolves to the more specific one first.
   if (!bits.length) {
     if (HUNTER_GREETING_RE.test(text)) { await hunterReply(pickOne(HUNTER_GREETING_REPLIES)); return; }
+    if (HUNTER_CASUAL_RE.test(text)) { await hunterReply(pickOne(HUNTER_CASUAL_REPLIES)); return; }
     if (HUNTER_SMALLTALK_RE.test(text)) { await hunterReply(pickOne(HUNTER_SMALLTALK_REPLIES)); return; }
     if (HUNTER_THANKS_RE.test(text)) { await hunterReply(pickOne(HUNTER_THANKS_REPLIES)); return; }
     if (HUNTER_STATUS_RE.test(text)) { await hunterReply(hunterStatusSummary()); return; }

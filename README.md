@@ -1442,6 +1442,31 @@ itself is synchronous — and reply wording is picked from small template
 pools (`pickOne()`) rather than a single fixed string per situation, so
 consecutive runs don't read as identically scripted.
 
+**Three more real conversations Hunter mishandled, since fixed**: a user
+typed "hey hunter" as a literal greeting, and it got parsed as search
+query text instead ("Got it — 'hey hunter' roles.") because
+`HUNTER_GREETING_RE` was anchored to match *only* a bare "hi"/"hey"/etc.
+with nothing else on the line — addressing Hunter by its own name never
+matched. Fixed by allowing an optional trailing "hunter" in the pattern.
+Next, they clarified with "no I was just saying hello", which fell into
+the generic "not sure what to do with that one" reply since it isn't
+itself a greeting, question, or filter — it's a correction about the
+*previous* turn. Added `HUNTER_CASUAL_RE` ("just saying hi/hello",
+"never mind", "just kidding") with its own reassuring reply pool
+(`HUNTER_CASUAL_REPLIES`), checked in the same zero-bits gate as the
+other small-talk patterns. Last, a bare "sf" (typed as a location, on
+its own) got no reply at all beyond "give me a number, a location...",
+because the metro-city list only matches a city's *actual* name ("san
+francisco"), not the nickname people type in a chat box. Added a small
+hardcoded `CITY_ABBR_LABELS` map (`sf`, `sfo`, `nyc`, `la`, `dc`,
+`philly`, `atl`, `vegas`, `nola`, each mapped straight to a finished
+"City, ST" label) and `CITY_ABBR_RE`, checked in `hunterParseMessage()`
+right after the metro-city pass. Deliberately a short, conservative list
+— every entry is a word that can't collide with normal English or with a
+department/YOE trigger phrase (a case like "sea" for Seattle was left
+out for exactly that reason), unlike a broader abbreviation dictionary
+that would risk misreading ordinary sentences as locations.
+
 **Department cleanup**: raw scraped `department` values are all over the
 place — "Engineering", "Software Engineering", "AI Research &
 Engineering", "GTM", "20213 S&M - Sales - Square Outside" — because
