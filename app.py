@@ -519,7 +519,13 @@ def api_site_config():
 @limiter.limit("3 per hour")
 def api_contact():
     if not contact_enabled():
-        return jsonify({"ok": False, "message": "The contact form isn't set up on this deployment yet."}), 503
+        # Not 503 -- see the longer comment further down this same function
+        # for why: Cloudflare (sitting in front of this deployment) swaps
+        # any 5xx origin response for its own generic error page instead
+        # of passing the real JSON body through. The frontend here doesn't
+        # branch on status code (just res.ok/data.ok, same as everywhere
+        # else), so there's no reason to risk a 5xx at all.
+        return jsonify({"ok": False, "message": "The contact form isn't set up on this deployment yet."})
 
     data = request.get_json(silent=True) or {}
     reason = (data.get("reason") or "").strip()
@@ -547,7 +553,21 @@ def api_contact():
         # send_contact_email()'s own logging -- but unlike login/forgot-
         # password there's no enumeration risk here, so it's fine to be
         # honest with the sender that it didn't go through.
-        return jsonify({"ok": False, "message": "Couldn't send that right now -- try again in a moment."}), 502
+        #
+        # Deliberately 200, not 502/503/504 -- this site sits behind
+        # Cloudflare, which by default swaps *any* 5xx origin response for
+        # its own generic "error code: 5xx" plain-text interstitial rather
+        # than passing the origin's body through. Confirmed live: this
+        # branch used to return 502 with a real JSON body -- gunicorn's own
+        # access log showed the correct 502 status and byte count leaving
+        # the app -- but curl (and the browser) only ever received
+        # Cloudflare's substituted plain-text page instead, which broke
+        # the frontend's `await res.json()` and surfaced as the generic
+        # "Something went wrong" catch-all instead of this actual message.
+        # The 400s above are unaffected (Cloudflare only intercepts 5xx),
+        # so this is the one response in this route that needed a non-5xx
+        # status purely to survive the proxy sitting in front of it.
+        return jsonify({"ok": False, "message": "Couldn't send that right now -- try again in a moment."})
 
     return jsonify({"ok": True, "message": "Thanks -- message sent. I'll get back to you soon."})
 
@@ -648,7 +668,13 @@ def api_signup():
         # already been rolled back and closed by conn_ctx by this point.
         if "unique" in str(e).lower() or "duplicate" in str(e).lower():
             return jsonify({"ok": False, "message": "That email's already registered. Try logging in instead."}), 409
-        return jsonify({"ok": False, "message": f"Couldn't create that account: {e}"}), 500
+        # Deliberately not 500 -- see the long comment on the equivalent
+        # contact-form failure branch in api_contact() below for why: this
+        # site sits behind Cloudflare, which swaps any 5xx origin response
+        # for its own generic plain-text error page rather than passing
+        # the origin's JSON body through, breaking the frontend's
+        # `await res.json()` call. 200 with ok:false survives untouched.
+        return jsonify({"ok": False, "message": f"Couldn't create that account: {e}"})
 
     session["user_id"] = user["id"]
     session.permanent = True

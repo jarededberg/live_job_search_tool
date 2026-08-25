@@ -987,6 +987,29 @@ either way. The end result: a broken network path to Resend now surfaces
 as a fast, honest "couldn't send that right now" to whoever's submitting
 the form, instead of an indefinitely spinning button.
 
+**Second bug found chasing the first one:** getting the timeout to fire
+promptly wasn't enough on its own -- the first deploy of the fix above
+still left the contact form showing a generic "Something went wrong. Try
+again." instead of the real message. Cause: `api_contact()`'s failure
+branch returned that real message with HTTP status 502, and this site
+sits behind Cloudflare, which by default substitutes its own generic
+plain-text "error code: 502" page for *any* 5xx origin response rather
+than passing the origin's body through -- confirmed via Render's own
+access log, which showed gunicorn genuinely sending a 502 with the
+correct JSON body and byte count, while `curl` (and the browser) only
+ever received Cloudflare's replacement page instead. The frontend's
+`await res.json()` then choked on that plain-text body and fell into its
+own generic catch-all. Fix: that branch (and the equivalent "not
+configured" branches for both the contact form and account signup) now
+returns HTTP 200 with `{"ok": false, "message": "..."}` instead of a 5xx
+-- every consumer of these routes already branches on `data.ok`, not the
+HTTP status, so nothing else needed to change, and a 200 can't be
+intercepted by Cloudflare's error-page substitution the way a 5xx can.
+(`accounts_required()`'s 503 for "accounts not configured" is the one
+deliberate exception -- `admin.html` branches on that exact status code,
+so it's left as-is; it also only ever fires when `DATABASE_URL` isn't
+set, which isn't the case on this deployment.)
+
 **Setup:**
 
 1. Create a free account at [resend.com](https://resend.com), grab an API
