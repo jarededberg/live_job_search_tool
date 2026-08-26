@@ -20,7 +20,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from urllib.error import URLError
 
-from flask import Flask, jsonify, request, send_from_directory, session
+from flask import Flask, Response, jsonify, request, send_from_directory, session
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -50,6 +50,18 @@ RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "Skip The Boards <onboar
 # load balancer. Falls back to request.url_root at send-time if unset,
 # which is fine for local dev but should be set explicitly in production.
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "").rstrip("/")
+# Absolute site origin for SEO purposes only (canonical link tags, Open
+# Graph/Twitter og:url, robots.txt's Sitemap: line, and sitemap.xml's own
+# <loc> entries) -- deliberately NOT built from request.url_root the way
+# the password-reset link above is. This app has no ProxyFix configured,
+# and Render/Cloudflare terminate TLS in front of it, so request.url_root
+# can't be trusted to report "https://" reliably without one; getting an
+# "http://" canonical URL into a page that's only ever served over https
+# is exactly the kind of thing that quietly confuses search engines.
+# Reuses APP_BASE_URL if that's already set (same env var, same meaning),
+# otherwise falls back to this app's actual production domain rather than
+# guessing from the request.
+SITE_URL = APP_BASE_URL or "https://skiptheboards.com"
 RESET_TOKEN_TTL_HOURS = 1
 # Optional GA4 traffic tracking -- off unless set, same graceful-
 # degradation pattern as everything else here. Injected client-side (see
@@ -1015,6 +1027,55 @@ def about_page():
     return send_from_directory(STATIC_DIR, "about.html")
 
 
+@app.route("/robots.txt")
+def robots_txt():
+    """A real robots.txt authored by this app -- until now there wasn't
+    one at all, so Cloudflare was serving its own generic default
+    "content signals" placeholder in front of it, which doesn't point
+    crawlers at a sitemap or say anything about /admin or /api. Allows
+    everything except the admin dashboard, the raw JSON API (nothing
+    there is meant to be indexed as a page -- see /sitemap.xml for what
+    actually should be), and the password-reset link (single-use token in
+    the URL, never something a search result should point at)."""
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /admin\n"
+        "Disallow: /api/\n"
+        "Disallow: /reset-password\n"
+        "\n"
+        f"Sitemap: {SITE_URL}/sitemap.xml\n"
+    )
+    return Response(body, mimetype="text/plain")
+
+
+@app.route("/sitemap.xml")
+def sitemap_xml():
+    """Static-page sitemap -- home, about, faq, contact. Deliberately
+    doesn't include /admin (noindex already, see its own <meta> tag) or
+    account-only pages. This is the first tier of SEO work here; a much
+    bigger dynamic sitemap covering individual job listings (the thing
+    that actually drives search-engine signups for a job board) is
+    tracked separately -- see README's SEO section."""
+    pages = [
+        (f"{SITE_URL}/", "daily", "1.0"),
+        (f"{SITE_URL}/about", "monthly", "0.5"),
+        (f"{SITE_URL}/faq", "monthly", "0.5"),
+        (f"{SITE_URL}/contact", "monthly", "0.3"),
+    ]
+    entries = "\n".join(
+        f"  <url><loc>{loc}</loc><changefreq>{freq}</changefreq><priority>{pri}</priority></url>"
+        for loc, freq, pri in pages
+    )
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{entries}\n"
+        "</urlset>\n"
+    )
+    return Response(xml, mimetype="application/xml")
+
+
 @app.route("/admin")
 def admin_page():
     # No server-side auth check here -- see admin_required()'s docstring:
@@ -1050,8 +1111,9 @@ if db_users.accounts_enabled() and not password_reset_enabled():
           "enable it.")
 if not contact_enabled():
     print("[app] RESEND_API_KEY and/or CONTACT_EMAIL not set -- the contact "
-          "form is disabled on this deployment; the footer falls back to a "
-          "mailto: link instead. See README's 'Contact form' section.")
+          "form is disabled on this deployment; the contact page shows a "
+          "plain 'not available right now' message instead (no mailto: "
+          "fallback -- see README's 'Contact form' section for why).")
 _scheduler = start_scheduler()
 
 if __name__ == "__main__":
