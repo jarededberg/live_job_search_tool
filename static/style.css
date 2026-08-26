@@ -1741,3 +1741,71 @@ footer {
   justify-content: center;
 }
 .assistant-form button:hover { background: var(--accent); }
+
+/* ---- individual job detail page (/jobs/<id>-<slug>, see app.py) ---- */
+.job-detail-page { padding-top: 40px; }
+
+.job-detail-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px 30px;
+  background: var(--bg);
+}
+
+.job-detail-title {
+  margin: 0 0 6px;
+  font-size: clamp(1.3rem, 3vw, 1.7rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.job-detail-sub {
+  font-size: 0.95rem;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+
+.job-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.job-detail-tags .tag { font-size: 0.76rem; padding: 4px 9px; }
+
+.job-detail-blurb {
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  -webkit-line-clamp: unset;
+  display: block;
+  margin-bottom: 16px;
+}
+.job-detail-blurb .yoe-badge { font-size: 0.76rem; padding: 2px 8px; margin-right: 4px; }
+
+.job-detail-page .job-tools { margin-bottom: 20px; font-size: 0.78rem; }
+
+.job-detail-apply-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 22px 0 18px;
+  flex-wrap: wrap;
+}
+
+.job-detail-back-link {
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+.job-detail-back-link:hover { color: var(--accent); }
+
+.job-detail-fineprint {
+  font-size: 0.78rem;
+  color: var(--muted-light);
+  line-height: 1.5;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 14px;
+  margin: 0;
+}

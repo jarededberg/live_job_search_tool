@@ -2,6 +2,7 @@
 db.py — tiny SQLite layer for the job cache.
 """
 
+import hashlib
 import re
 import sqlite3
 import os
@@ -19,6 +20,22 @@ DB_PATH = os.environ.get("JOBS_DB_PATH", os.path.join(os.path.dirname(os.path.ab
 MAX_CANDIDATES = 50000  # cap on rows pulled from SQLite before Python-side boolean evaluation
 
 _lock = threading.Lock()
+
+
+def compute_job_id(url):
+    """A short, stable, URL-safe identifier for a job, derived from its
+    own URL (the table's actual primary key) rather than a fresh
+    autoincrement id -- this table never had one, and adding one now
+    would mean every existing row gets renumbered on the next deploy,
+    which would break any /jobs/<id> links already shared or indexed by
+    a search engine by the time this ships. Deriving it from the URL
+    instead means the same job always gets the same id, forever, without
+    needing a migration to assign one. 12 hex chars (48 bits) is
+    overwhelmingly enough to avoid collisions at this dataset's size
+    (~100k rows) -- full SHA-256 would just make the URL uglier for no
+    practical benefit here. Used for the public /jobs/<job_id>-<slug>
+    detail page route (see app.py) and its sitemap."""
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()[:12]
 
 
 def get_conn():
@@ -89,10 +106,34 @@ def init_db():
             conn.execute("ALTER TABLE jobs ADD COLUMN years_experience TEXT")
         if "tools" not in cols:
             conn.execute("ALTER TABLE jobs ADD COLUMN tools TEXT DEFAULT '[]'")
+        if "job_id" not in cols:
+            # Backing column for the public /jobs/<job_id>-<slug> detail
+            # page (see app.py + compute_job_id() above). Added via ALTER
+            # rather than being part of the original CREATE TABLE since
+            # this ships after the table already has real production
+            # data; the backfill loop right below assigns every existing
+            # row its (deterministic) id in one pass so this only ever
+            # runs once per deployment, not on every startup.
+            conn.execute("ALTER TABLE jobs ADD COLUMN job_id TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_posted ON jobs(posted)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_title ON jobs(title)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_department ON jobs(department)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_commitment ON jobs(commitment)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_job_id ON jobs(job_id)")
+
+        # One-time backfill: any row with no job_id yet (freshly-added
+        # column, or a row upserted by an older deploy of scraper.py
+        # before this existed) gets one computed now. Cheap even at
+        # ~100k rows -- this is pure Python hashing, no network calls --
+        # and upsert_jobs() keeps every row populated going forward, so
+        # this loop naturally does less work (ideally nothing) on every
+        # startup after the first.
+        missing = conn.execute("SELECT url FROM jobs WHERE job_id IS NULL").fetchall()
+        if missing:
+            conn.executemany(
+                "UPDATE jobs SET job_id = ? WHERE url = ?",
+                [(compute_job_id(row["url"]), row["url"]) for row in missing],
+            )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS scrape_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,24 +162,26 @@ def upsert_jobs(jobs):
             blurb = j.get("blurb", "")
             years_experience = j.get("years_experience")
             tools = json.dumps(j.get("tools") or [])
+            job_id = compute_job_id(j["url"])
             cur = conn.execute("SELECT url FROM jobs WHERE url = ?", (j["url"],))
             if cur.fetchone() is None:
                 new_count += 1
                 conn.execute(
                     "INSERT INTO jobs (url, title, company, location, posted, source, department, "
                     "commitment, salary_min, salary_max, blurb, years_experience, tools, "
-                    "first_seen, last_seen) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "first_seen, last_seen, job_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (j["url"], j["title"], j["company"], j["location"], j["posted"], j["source"],
-                     dept, commit_, salary_min, salary_max, blurb, years_experience, tools, now, now),
+                     dept, commit_, salary_min, salary_max, blurb, years_experience, tools, now, now,
+                     job_id),
                 )
             else:
                 conn.execute(
                     "UPDATE jobs SET title=?, company=?, location=?, posted=?, source=?, department=?, "
                     "commitment=?, salary_min=?, salary_max=?, blurb=?, years_experience=?, tools=?, "
-                    "last_seen=? WHERE url=?",
+                    "last_seen=?, job_id=? WHERE url=?",
                     (j["title"], j["company"], j["location"], j["posted"], j["source"], dept, commit_,
-                     salary_min, salary_max, blurb, years_experience, tools, now, j["url"]),
+                     salary_min, salary_max, blurb, years_experience, tools, now, job_id, j["url"]),
                 )
         conn.commit()
     return new_count
@@ -663,6 +706,49 @@ def get_jobs_by_urls(urls):
             d["tools"] = []
         result[d["url"]] = d
     return result
+
+
+def get_job_by_job_id(job_id):
+    """Single job row for the public /jobs/<job_id>-<slug> detail page
+    (see app.py). Returns None if not found -- either job_id is garbage
+    (someone hand-typed a URL) or, far more commonly, it's a real id for
+    a posting that's since closed and dropped out of the live dataset
+    (see prune_stale); the route treats both the same way, a real 404,
+    not a soft-404 200, so search engines actually deindex the page
+    instead of leaving a permanently-stale result in results pages.
+    LIMIT 1 rather than assuming uniqueness -- job_id is a 12-hex-char
+    hash (see compute_job_id()), so a collision is astronomically
+    unlikely at this dataset's size but not provably impossible, and
+    silently returning one arbitrary match beats a crash if it ever
+    happens."""
+    with conn_ctx() as conn:
+        row = conn.execute("SELECT * FROM jobs WHERE job_id = ? LIMIT 1", (job_id,)).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    try:
+        d["tools"] = json.loads(d.get("tools") or "[]")
+    except (TypeError, ValueError):
+        d["tools"] = []
+    return d
+
+
+def list_jobs_for_sitemap(offset, limit):
+    """A stable page of (job_id, url, company, title, last_seen) tuples
+    for the dynamic jobs sitemap (see app.py's /sitemap-jobs-<n>.xml).
+    Ordered by url -- the table's real primary key -- purely so repeated
+    calls with the same offset/limit return the same page every time
+    (SQLite doesn't guarantee row order without an explicit ORDER BY,
+    and a sitemap that reshuffles which jobs land on which page between
+    requests would make search engines re-crawl pages that haven't
+    actually changed, and risk skipping ones that have)."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT job_id, url, company, title, last_seen FROM jobs "
+            "ORDER BY url LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def salary_bounds():

@@ -1694,13 +1694,55 @@ tier one -- fast, low-risk wins that don't touch the app's architecture:
   actual production domain, so canonical/`og:url`/sitemap URLs are never
   accidentally `http://`.
 
-**What this doesn't do, on purpose:** none of this gets individual job
-listings indexed -- every job's `url` field points at the original
-Greenhouse/Lever/Ashby posting, not a page on this domain, so Google has
-nothing of this site's own to rank for a specific-role search like
-"senior tax analyst jobs santa clara." For a job board, *that* -- not
-meta tags -- is what actually drives new-user search traffic (it's the
-mechanism Google for Jobs runs on). That's real feature work: a
-`/jobs/<id>` detail page per listing with `JobPosting` JSON-LD structured
-data, plus a dynamic sitemap covering active job URLs. Tracked as a
-follow-up, not bundled into this pass.
+**Tier two: individual job pages + Google for Jobs.** This is the part
+that actually drives new-user search traffic for a job board -- meta
+tags alone don't get anything new indexed, but a real page per listing
+does, and `JobPosting` structured data is the specific mechanism Google
+for Jobs runs on.
+
+- **`db.py`**: every job row now has a `job_id` -- a 12-hex-char
+  deterministic hash of the job's own `url` (`compute_job_id()`), since
+  the `jobs` table's actual primary key is `url` (text), not a numeric
+  id. Deriving it from the URL instead of adding a fresh autoincrement
+  column means every job keeps the same id forever without a renumbering
+  migration that would break links already shared or indexed by the time
+  this ships. Backfilled once for existing rows on the first startup
+  after this change (`init_db()`), then kept populated going forward by
+  `upsert_jobs()`. `get_job_by_job_id()` and `list_jobs_for_sitemap()`
+  are the two new read paths built on it.
+- **`GET /jobs/<job_id>-<slug>`** (`app.py`, `job_page()` /
+  `render_job_page()`) -- a real server-rendered page per listing: title,
+  company, location, salary/department/commitment tags, blurb, tools,
+  and an "Apply on `<company>`'s site" button linking out to the original
+  posting (that's still where applying actually happens -- this app has
+  never collected applications itself). Only the first 12 characters of
+  the path segment are ever used to look the job up; `-<slug>` is purely
+  cosmetic (human/SEO-readable), so a bare `/jobs/<job_id>` with no slug
+  at all resolves identically. A closed/expired listing (already dropped
+  by `db.prune_stale`) is a real HTTP 404, not a soft-404 200 -- search
+  engines need the real status code to actually deindex a stale page
+  rather than leaving it in results forever.
+- **`JobPosting` JSON-LD** embedded in every job page: `title`,
+  `description`, `datePosted`, `hiringOrganization`, `jobLocation`
+  (best-effort from the `location` string, same caveat as everywhere else
+  this data shows up), `employmentType` (mapped from `commitment` via
+  `EMPLOYMENT_TYPE_MAP` -- only values that map cleanly to schema.org's
+  closed enum are translated; anything else just omits the field),
+  `baseSalary` when salary is disclosed, and `validThrough` computed as
+  `last_seen + JOB_STALE_DAYS` -- a real date, not a guess, since that's
+  exactly when this app's own pruning will make the page 404 anyway.
+- **Dynamic jobs sitemap**: `/sitemap.xml` is now a sitemap *index* (not
+  a flat file -- this dataset is 100k+ jobs, way past the sitemap
+  protocol's 50,000-URL-per-file ceiling), pointing at
+  `/sitemap-static.xml` (the original 4 public pages, unchanged) plus
+  however many `/sitemap-jobs-<n>.xml` pages of `JOB_SITEMAP_PAGE_SIZE`
+  (10,000) it takes to cover every job currently in `db.py` --
+  recomputed from `db.total_jobs()` on every request, so it always
+  matches however many jobs actually exist without a redeploy.
+- **Not done this round, on purpose**: the homepage's own job cards
+  (`app.js`'s `jobCard()`) still link straight to the original ATS
+  posting, same as before -- adding an internal link to each job's own
+  `/jobs/<id>` page from search results would help crawl discovery
+  further, but changes the existing "click a job = go apply" click
+  target people are already used to, so it's left as a deliberate
+  follow-up rather than bundled into an SEO pass.

@@ -35,6 +35,14 @@ STATIC_DIR = os.path.join(APP_DIR, "static")
 
 SCRAPE_INTERVAL_HOURS = float(os.environ.get("SCRAPE_INTERVAL_HOURS", "8"))
 MAX_WORKERS = int(os.environ.get("SCRAPE_MAX_WORKERS", "4"))
+# How many days a job can go unseen by the scraper before db.prune_stale()
+# drops it (i.e. it's presumed closed/filled). Shared with the /jobs/<id>
+# detail page's JobPosting structured data below (see JOB_SITEMAP_PAGE_SIZE
+# and render_job_page()) so a listing's advertised validThrough date
+# actually lines up with when this app itself will make the page 404 --
+# was a hardcoded `10` inline at the one call site before this; pulled out
+# so the two places that need this number can't quietly drift apart.
+JOB_STALE_DAYS = 10
 MAX_RESUME_BYTES = 8 * 1024 * 1024  # 8 MB
 ALLOWED_RESUME_EXT = (".pdf", ".docx", ".txt")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -135,7 +143,7 @@ def run_scrape_job():
             new_count += db.upsert_jobs(jobs_batch)
 
         _, stats = scrape_all(max_workers=MAX_WORKERS, progress_cb=progress_cb, batch_cb=batch_cb)
-        removed = db.prune_stale(max_age_days=10)
+        removed = db.prune_stale(max_age_days=JOB_STALE_DAYS)
         finished = datetime.now(timezone.utc).isoformat()
         db.record_run(started, finished, "ok", stats, db.total_jobs())
         print(f"[scrape] done: {stats}, new={new_count}, pruned={removed}")
@@ -1049,14 +1057,39 @@ def robots_txt():
     return Response(body, mimetype="text/plain")
 
 
+JOB_SITEMAP_PAGE_SIZE = 10000  # sitemap protocol caps a single file at 50,000 URLs; well under that
+
+
 @app.route("/sitemap.xml")
 def sitemap_xml():
-    """Static-page sitemap -- home, about, faq, contact. Deliberately
-    doesn't include /admin (noindex already, see its own <meta> tag) or
-    account-only pages. This is the first tier of SEO work here; a much
-    bigger dynamic sitemap covering individual job listings (the thing
-    that actually drives search-engine signups for a job board) is
-    tracked separately -- see README's SEO section."""
+    """Sitemap INDEX, not a flat list -- this deployment has 100k+ live
+    jobs, way past the sitemap protocol's 50,000-URL-per-file ceiling, so
+    the actual URLs live in /sitemap-static.xml (the 4 public pages) and
+    however many /sitemap-jobs-<n>.xml pages of JOB_SITEMAP_PAGE_SIZE
+    each it takes to cover every job currently in db.py -- computed fresh
+    on every request from db.total_jobs(), so this always reflects
+    however many jobs actually exist right now without needing a
+    redeploy when that count changes."""
+    total = db.total_jobs()
+    num_job_pages = (total + JOB_SITEMAP_PAGE_SIZE - 1) // JOB_SITEMAP_PAGE_SIZE
+    sitemaps = [f"{SITE_URL}/sitemap-static.xml"]
+    sitemaps += [f"{SITE_URL}/sitemap-jobs-{n}.xml" for n in range(1, num_job_pages + 1)]
+    entries = "\n".join(f"  <sitemap><loc>{loc}</loc></sitemap>" for loc in sitemaps)
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{entries}\n"
+        "</sitemapindex>\n"
+    )
+    return Response(xml, mimetype="application/xml")
+
+
+@app.route("/sitemap-static.xml")
+def sitemap_static_xml():
+    """The original 4-page sitemap (home, about, faq, contact) -- moved
+    out of /sitemap.xml itself once that became a sitemap index (see
+    above) rather than a flat file. Deliberately doesn't include /admin
+    (noindex already, see its own <meta> tag) or account-only pages."""
     pages = [
         (f"{SITE_URL}/", "daily", "1.0"),
         (f"{SITE_URL}/about", "monthly", "0.5"),
@@ -1074,6 +1107,317 @@ def sitemap_xml():
         "</urlset>\n"
     )
     return Response(xml, mimetype="application/xml")
+
+
+@app.route("/sitemap-jobs-<int:page>.xml")
+def sitemap_jobs_xml(page):
+    """One page of up to JOB_SITEMAP_PAGE_SIZE job URLs -- this is the
+    actual point of today's SEO work: individual, crawlable, indexable
+    pages for every live job, not just the 4 static ones. `page` is
+    1-indexed to match /sitemap.xml's own listing. An out-of-range page
+    (e.g. requested after the job count shrinks) just returns an empty
+    <urlset> rather than a 404 -- a sitemap page briefly going empty
+    between a prune and the next crawl is normal and harmless; a 404
+    inside a sitemap a crawler already fetched once is more likely to
+    read as an error worth flagging."""
+    offset = (page - 1) * JOB_SITEMAP_PAGE_SIZE
+    rows = db.list_jobs_for_sitemap(offset, JOB_SITEMAP_PAGE_SIZE)
+    entries = []
+    for r in rows:
+        loc = f"{SITE_URL}{_job_path(r['job_id'], r['company'], r['title'])}"
+        lastmod = (r.get("last_seen") or "")[:10]  # YYYY-MM-DD is all sitemaps need
+        lastmod_tag = f"<lastmod>{lastmod}</lastmod>" if lastmod else ""
+        entries.append(f"  <url><loc>{loc}</loc>{lastmod_tag}<changefreq>daily</changefreq></url>")
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "\n".join(entries) + ("\n" if entries else "")
+        + "</urlset>\n"
+    )
+    return Response(xml, mimetype="application/xml")
+
+
+def _slugify(text):
+    """Lowercase, hyphenated, URL-safe version of a string -- used to
+    build the human-readable part of a job's URL. Purely cosmetic/for
+    SEO (search engines and people both read hyphenated words better
+    than a bare hash); the actual database lookup in job_page() below
+    never looks at this part of the path, only the job_id prefix, so
+    this never needs to exactly round-trip and there's no risk of a
+    weird title/company breaking the route."""
+    text = (text or "").lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")[:80] or "role"
+
+
+def _job_path(job_id, company, title):
+    """The canonical public path for a job -- /jobs/<job_id>-<slug>. Kept
+    as one shared function so the sitemap, the search-results cards (a
+    follow-up, not in this round), and the detail page's own <link
+    rel="canonical"> can never disagree with each other about what a
+    given job's URL is."""
+    slug = _slugify(f"{title}-{company}")
+    return f"/jobs/{job_id}-{slug}"
+
+
+# schema.org's JobPosting.employmentType is a closed enum -- this app's
+# own `commitment` field is free text pulled straight off each posting
+# (see companies_data.py/scraper.py), so only values that map cleanly are
+# translated; anything else just omits the field rather than guessing,
+# since an employmentType Google can't reconcile with the visible page
+# text is worse for a listing's credibility than not having one at all.
+EMPLOYMENT_TYPE_MAP = {
+    "full-time": "FULL_TIME", "full time": "FULL_TIME",
+    "part-time": "PART_TIME", "part time": "PART_TIME",
+    "contract": "CONTRACTOR", "contractor": "CONTRACTOR",
+    "temporary": "TEMPORARY", "temp": "TEMPORARY",
+    "internship": "INTERN", "intern": "INTERN",
+    "volunteer": "VOLUNTEER",
+    "per diem": "PER_DIEM",
+}
+
+
+def _job_salary_text(job):
+    """Human-readable salary line for the detail page -- same "~$Xk" /
+    "~$Xk-$Yk" convention app.js's formatSalary() uses for job cards, so
+    a listing reads identically whether you saw it in search results
+    first or landed straight on its own page from a search engine."""
+    if not job.get("salary_min"):
+        return ""
+    lo, hi = job["salary_min"], job.get("salary_max") or job["salary_min"]
+    fmt = lambda n: f"{n // 1000}k" if n % 1000 == 0 else f"{n / 1000:.0f}k"
+    if lo == hi:
+        return f"~${fmt(lo)}"
+    return f"~${fmt(lo)}–${fmt(hi)}"
+
+
+def render_job_page(job):
+    """Builds the full standalone HTML document for a single job's public
+    detail page -- title/meta description/canonical/OG/Twitter tags
+    specific to *this* job (not the site-wide defaults every other page
+    uses), a JobPosting JSON-LD block (the actual mechanism Google for
+    Jobs runs on), and a human-readable version of the same content using
+    the same .tag/.job-blurb/.tool-chip vocabulary job cards already use
+    elsewhere on the site (see app.js's jobCard()) so this doesn't
+    introduce a second, inconsistent visual language for a job listing.
+    No Jinja templating anywhere else in this app (everything else is
+    static files + a JSON API) -- this is the one server-rendered HTML
+    page, and it's built the same explicit-string way contact.html's
+    inline script or this file's robots.txt/sitemap routes already are,
+    rather than introducing a whole new templating dependency for one
+    route."""
+    job_id = job["job_id"]
+    title = job["title"]
+    company = job["company"]
+    location = job.get("location") or "Location not listed"
+    url = job["url"]
+    source = job.get("source") or ""
+    department = job.get("department") or ""
+    commitment = job.get("commitment") or ""
+    blurb = job.get("blurb") or ""
+    years_experience = job.get("years_experience") or ""
+    tools = job.get("tools") or []
+    posted = (job.get("posted") or "")[:10]
+    last_seen = job.get("last_seen") or ""
+
+    canonical_path = _job_path(job_id, company, title)
+    canonical_url = f"{SITE_URL}{canonical_path}"
+    page_title = f"{title} at {company} — Skip The Boards"
+    salary_text = _job_salary_text(job)
+
+    desc_bits = [f"{title} at {company}"]
+    if location and location != "Location not listed":
+        desc_bits.append(f"in {location}")
+    description = " ".join(desc_bits) + ". "
+    if blurb:
+        description += blurb[:160]
+    else:
+        description += (
+            f"Apply directly on {company}'s own career page via {source or 'their job board'} "
+            "-- no account required, no re-typing your resume into a new portal."
+        )
+    description = description[:300]
+
+    def esc(s):
+        return html.escape(str(s or ""))
+
+    tags_html = [f'<span class="tag tag-source">{esc(source)}</span>']
+    if department:
+        tags_html.append(f'<span class="tag tag-department">{esc(department)}</span>')
+    if commitment:
+        tags_html.append(f'<span class="tag tag-commitment">{esc(commitment)}</span>')
+    if salary_text:
+        tags_html.append(
+            f'<span class="tag tag-salary" title="Best-effort estimate pulled from the listing, '
+            f'not a guaranteed figure">{esc(salary_text)}</span>'
+        )
+
+    blurb_html = ""
+    if blurb or years_experience:
+        yoe_html = f'<span class="yoe-badge">{esc(years_experience)} YOE</span> ' if years_experience else ""
+        blurb_html = f'<div class="job-blurb job-detail-blurb">{yoe_html}{esc(blurb)}</div>'
+
+    tools_html = ""
+    if tools:
+        chips = "".join(f'<span class="tool-chip">{esc(t)}</span>' for t in tools)
+        tools_html = f'<div class="job-tools"><span class="tools-icon" aria-hidden="true">\U0001f527</span>{chips}</div>'
+
+    # ---- JobPosting JSON-LD ----
+    json_ld = {
+        "@context": "https://schema.org/",
+        "@type": "JobPosting",
+        "title": title,
+        "description": html.escape(blurb) if blurb else html.escape(description),
+        "hiringOrganization": {"@type": "Organization", "name": company},
+        "url": canonical_url,
+        "directApply": False,
+    }
+    if posted:
+        json_ld["datePosted"] = posted
+    # Best-effort validThrough: this app itself prunes a listing after
+    # JOB_STALE_DAYS of not seeing it again during a scrape (see
+    # db.prune_stale via run_scrape_job), so "the day this page is
+    # expected to stop existing" is a real, not guessed, date -- computed
+    # from last_seen (the most recent confirmation the posting was still
+    # live), not first_seen.
+    if last_seen:
+        try:
+            last_seen_dt = datetime.fromisoformat(last_seen)
+            valid_through = last_seen_dt + timedelta(days=JOB_STALE_DAYS)
+            json_ld["validThrough"] = valid_through.date().isoformat()
+        except (TypeError, ValueError):
+            pass
+    if location and location != "Location not listed":
+        json_ld["jobLocation"] = {
+            "@type": "Place",
+            "address": {"@type": "PostalAddress", "addressLocality": location, "addressCountry": "US"},
+        }
+    employment_type = EMPLOYMENT_TYPE_MAP.get(commitment.strip().lower())
+    if employment_type:
+        json_ld["employmentType"] = employment_type
+    if job.get("salary_min"):
+        json_ld["baseSalary"] = {
+            "@type": "MonetaryAmount",
+            "currency": "USD",
+            "value": {
+                "@type": "QuantitativeValue",
+                "minValue": job["salary_min"],
+                "maxValue": job.get("salary_max") or job["salary_min"],
+                "unitText": "YEAR",
+            },
+        }
+    json_ld_script = json.dumps(json_ld, ensure_ascii=False)
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="/favicon.svg?v=16" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=16" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=16" />
+<title>{esc(page_title)}</title>
+<meta name="description" content="{esc(description)}" />
+<link rel="canonical" href="{esc(canonical_url)}" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Skip The Boards" />
+<meta property="og:url" content="{esc(canonical_url)}" />
+<meta property="og:title" content="{esc(page_title)}" />
+<meta property="og:description" content="{esc(description)}" />
+<meta property="og:image" content="{esc(SITE_URL)}/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="{esc(page_title)}" />
+<meta name="twitter:description" content="{esc(description)}" />
+<meta name="twitter:image" content="{esc(SITE_URL)}/og-image.png" />
+<script type="application/ld+json">{json_ld_script}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css?v=16" />
+</head>
+<body>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <div class="brand">
+        <a href="/" style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;">
+          <span class="brand-mark">◆</span>
+          <span class="brand-name">Skip The Boards</span>
+        </a>
+      </div>
+      <div class="topnav-right">
+        <nav class="nav-links">
+          <a href="/">Home</a>
+          <a href="/about">About</a>
+          <a href="/faq">FAQ</a>
+          <a href="/contact">Contact</a>
+        </nav>
+        <a class="brand-link" href="/">← Back to search</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="content-page job-detail-page">
+    <div class="job-detail-card">
+      <h1 class="job-detail-title">{esc(title)}</h1>
+      <div class="job-detail-sub">{esc(company)} · {esc(location)}</div>
+      <div class="job-detail-tags">{"".join(tags_html)}</div>
+      {blurb_html}
+      {tools_html}
+      <div class="job-detail-apply-row">
+        <a class="btn-primary" href="{esc(url)}" target="_blank" rel="noopener noreferrer">Apply on {esc(company)}'s site ↗</a>
+        <a class="job-detail-back-link" href="/">← Back to search</a>
+      </div>
+      <p class="job-detail-fineprint">
+        This posting is pulled directly from {esc(company)}'s own {esc(source) or "career"} page and applying
+        happens on their site, not here. Posted{f" {esc(posted)}" if posted else ""}; Skip The Boards re-checks
+        every company's board regularly and removes listings that disappear from the source.
+      </p>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p class="footer-byline">
+        <strong>Jared Edberg</strong> · <a href="https://www.linkedin.com/in/jared-edberg" target="_blank" rel="noopener">LinkedIn ↗</a>
+      </p>
+    </div>
+  </footer>
+</body>
+</html>
+"""
+
+
+@app.route("/jobs/<path:segment>")
+def job_page(segment):
+    """Public detail page for a single job -- see render_job_page()'s
+    docstring for the full reasoning. `segment` is "<job_id>-<slug>";
+    only the first 12 characters (job_id's fixed length, see
+    db.compute_job_id) are ever actually used to look the job up, the
+    rest is decorative. This means a bare /jobs/<job_id> (no slug at all)
+    resolves exactly the same way -- useful for anyone who copies just
+    the id -- without needing a second route or a redirect.
+
+    A real 404 (not a soft-404 200) when the job_id doesn't match
+    anything current -- almost always because the listing closed and
+    db.prune_stale() already dropped it, not a broken link -- so search
+    engines actually deindex the page over time instead of a stale
+    listing lingering in results forever."""
+    job_id = segment[:12]
+    job = db.get_job_by_job_id(job_id)
+    if job is None:
+        body = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Role no longer available — Skip The Boards</title>
+<meta name="robots" content="noindex" />
+<link rel="stylesheet" href="/style.css?v=16" /></head>
+<body><main class="content-page"><h1>This role isn't available anymore</h1>
+<p class="content-page-intro">It's either been filled, taken down by the company, or the link's
+just wrong. <a href="/">Search current openings instead →</a></p></main></body></html>"""
+        return Response(body, status=404, mimetype="text/html")
+    return Response(render_job_page(job), mimetype="text/html")
 
 
 @app.route("/admin")
