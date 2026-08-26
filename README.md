@@ -1793,3 +1793,30 @@ jobs") that the site had nothing to offer for before.
   `_slugify()`), so nothing was lost, and it means this route can never
   structurally overlap with `/jobs/company/<slug>` or
   `/jobs/remote/<group>` regardless of Werkzeug's own rule-ordering.
+
+**Tier four: richer structured data + more internal links.** These don't
+add new pages; they get more out of the ones that already exist.
+
+- **`FAQPage` JSON-LD on `/faq`** -- every question and answer on the
+  page, duplicated verbatim as machine-readable structured data (Google
+  requires the visible text and the structured data to actually match,
+  so this can't just summarize). Makes the FAQ eligible to show as an
+  expandable accordion directly inside a search result, rather than a
+  plain link -- more space on the results page for the same ranking
+  position, at zero cost to how the page itself reads.
+- **`BreadcrumbList` JSON-LD** on job detail pages (Home → `<Company>
+  jobs` → the job title), company hub pages (Home → `<Company> jobs`),
+  and remote hub pages (Home → `<Region> jobs`) -- shared helper
+  `_breadcrumb_jsonld()` in `app.py`. The final ("you are here") entry
+  in each trail deliberately omits its own URL, matching Google's own
+  convention for the current page. Purely a structured-data / rich-result
+  signal -- doesn't change any visible on-page navigation.
+- **"More at `<Company>`" block** on job detail pages: up to 4 of that
+  company's other current openings, each linking to its own detail page,
+  plus a link to the full company hub. More real internal links for
+  crawlers to follow, and a next click for a visitor who lands on one
+  posting and finds it's not quite the fit.
+- **Company hub 404s now also carry `<meta name="robots" content="noindex">`**,
+  matching the job-detail 404's existing behavior -- a small
+  inconsistency from when hub pages first shipped, fixed while touching
+  `render_hub_page()` for the breadcrumb work above (new `noindex` param).

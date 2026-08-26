@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="favicon.svg?v=17" type="image/svg+xml" />
-<link rel="alternate icon" href="favicon.ico?v=17" />
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=17" />
+<link rel="icon" href="favicon.svg?v=18" type="image/svg+xml" />
+<link rel="alternate icon" href="favicon.ico?v=18" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=18" />
 <title>FAQ — Skip The Boards</title>
 <meta name="description" content="Answers to common questions about Skip The Boards: how listings are sourced from company career pages, how salary and experience data is parsed, and how boolean search works." />
 <link rel="canonical" href="https://skiptheboards.com/faq" />
@@ -24,7 +24,128 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=17" />
+<link rel="stylesheet" href="style.css?v=18" />
+<!--
+  FAQPage structured data -- every question/answer below is duplicated
+  here verbatim as machine-readable JSON-LD rather than summarized or
+  reworded, since Google requires the visible page content and the
+  structured data to actually match. This is what makes the individual
+  Q&As eligible to show as an expandable FAQ rich result directly in
+  search results, rather than just a plain blue link -- more real
+  estate on the results page for the same ranking position.
+-->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Is this actually free?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes — searching is free with no account required. Creating an account is optional and only unlocks saved searches and applied-job tracking."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Where do the listings come from?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Pulled directly from roughly 4,300 companies' own Greenhouse, Lever, and Ashby career pages — not scraped or re-posted from other job boards — so there's no middleman and no stale duplicates."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How often does the data refresh?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Automatically, on a schedule, straight from those company career pages. If a posting's been taken down, it drops out of results too."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How accurate is the salary data?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Only shown when the employer discloses it directly on the posting — that's roughly 45% of listings. Figures are parsed from free text and marked with \"~\" as a best-effort read, not a guaranteed-exact number."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does the years-of-experience badge mean?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Same idea as salary — a best-effort parse of the posting's own text, not verified data. The filter box accepts any minimum you type, regardless of what's actually in the data."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What do the match badges (best/good/poor) mean?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "They only appear after you upload a resume, and they're a keyword-overlap heuristic against the titles and skills pulled from it — not deep semantic matching. Treat them as a rough sort, not a verdict."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does uploading my resume store it anywhere?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No — it's parsed in memory to extract search terms and a rough location, and the file itself is never saved on the server."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why do some locations disappear from my results?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "If your resume places you in the US, roles that clearly aren't viable for you (a bare foreign city, remote-outside-the-US labels, etc.) are removed entirely rather than just ranked lower — so the list only shows things you could actually take."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I use boolean search syntax?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes — bare words are an implicit AND, plus OR, NOT, quoted phrases for exact matches, and parentheses to group. Click \"Syntax\" next to the search box on the homepage for an example."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Who's Hunter?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Hunter is the assistant behind the \"AI Search\" button — tell it what you're looking for in plain English (role, location, salary, experience level, whatever you've got) and it sets up the real search filters for you. You can also just hand it your resume. No account needed."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is my account data safe?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Passwords are hashed, never stored in plain text. Password reset links are single-use and expire after an hour."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I get my company's job board added?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes — use the Contact link and choose \"Add my company's job board,\" with your career page URL. New Greenhouse, Lever, and Ashby boards are straightforward to add."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Who built this?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "One person — Jared Edberg, while running his own job search. See the LinkedIn link in the footer."
+      }
+    }
+  ]
+}
+</script>
 </head>
 <body>
   <nav class="topnav">

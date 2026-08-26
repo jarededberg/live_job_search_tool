@@ -1238,6 +1238,30 @@ def _job_salary_text(job):
     return f"~${fmt(lo)}–${fmt(hi)}"
 
 
+def _breadcrumb_jsonld(items):
+    """BreadcrumbList JSON-LD, shared by every page that has one (job
+    detail, company hub, remote hub) -- `items` is an ordered list of
+    (name, url) tuples from the site root down to the current page.
+    `url` should be None on the final entry: that's the "you are here"
+    convention Google's own structured-data docs use, since a page
+    linking to itself as its own breadcrumb target adds nothing. This is
+    purely an eligibility signal for the breadcrumb trail search results
+    sometimes show above a result's title/URL -- it doesn't change
+    anything about the page's own visible navigation."""
+    elements = []
+    for i, (name, url) in enumerate(items, start=1):
+        entry = {"@type": "ListItem", "position": i, "name": name}
+        if url:
+            entry["item"] = url
+        elements.append(entry)
+    schema = {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": elements,
+    }
+    return json.dumps(schema, ensure_ascii=False)
+
+
 def render_job_page(job):
     """Builds the full standalone HTML document for a single job's public
     detail page -- title/meta description/canonical/OG/Twitter tags
@@ -1355,14 +1379,42 @@ def render_job_page(job):
         }
     json_ld_script = json.dumps(json_ld, ensure_ascii=False)
 
+    company_hub_path = f"/jobs/company/{_slugify(company)}"
+    breadcrumb_script = _breadcrumb_jsonld([
+        ("Home", f"{SITE_URL}/"),
+        (f"{company} jobs", f"{SITE_URL}{company_hub_path}"),
+        (title, None),
+    ])
+
+    # "More at this company" -- a handful of the same company's other
+    # current openings, each linking to its own detail page, plus a link
+    # to the full company hub. Purely an internal-linking/engagement
+    # addition (more real links between real pages a crawler can follow,
+    # more reason for a visitor to stay on-site after this one posting
+    # isn't the fit) -- capped at 4 so it stays a sidebar-style list, not
+    # a second full listing competing with the hub page itself.
+    other_jobs = [j for j in db.jobs_for_company(company, limit=5) if j.get("job_id") != job_id][:4]
+    more_jobs_html = ""
+    if other_jobs:
+        items = "".join(
+            f'<li><a href="{esc(_job_path(j["job_id"], company, j["title"]))}">{esc(j["title"])}</a></li>'
+            for j in other_jobs
+        )
+        more_jobs_html = f"""
+      <div class="job-detail-more">
+        <h2>More at {esc(company)}</h2>
+        <ul class="job-detail-more-list">{items}</ul>
+        <a class="job-detail-more-link" href="{esc(company_hub_path)}">See all {esc(company)} jobs →</a>
+      </div>"""
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=17" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=17" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=17" />
+<link rel="icon" href="/favicon.svg?v=18" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=18" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=18" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -1379,10 +1431,11 @@ def render_job_page(job):
 <meta name="twitter:description" content="{esc(description)}" />
 <meta name="twitter:image" content="{esc(SITE_URL)}/og-image.png" />
 <script type="application/ld+json">{json_ld_script}</script>
+<script type="application/ld+json">{breadcrumb_script}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=17" />
+<link rel="stylesheet" href="/style.css?v=18" />
 </head>
 <body>
   <nav class="topnav">
@@ -1421,7 +1474,7 @@ def render_job_page(job):
         happens on their site, not here. Posted{f" {esc(posted)}" if posted else ""}; Skip The Boards re-checks
         every company's board regularly and removes listings that disappear from the source.
       </p>
-    </div>
+    </div>{more_jobs_html}
   </main>
 
   <footer>
@@ -1470,7 +1523,7 @@ def job_page(segment):
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Role no longer available — Skip The Boards</title>
 <meta name="robots" content="noindex" />
-<link rel="stylesheet" href="/style.css?v=17" /></head>
+<link rel="stylesheet" href="/style.css?v=18" /></head>
 <body><main class="content-page"><h1>This role isn't available anymore</h1>
 <p class="content-page-intro">It's either been filled, taken down by the company, or the link's
 just wrong. <a href="/">Search current openings instead →</a></p></main></body></html>"""
@@ -1514,7 +1567,7 @@ def _job_list_item_html(job):
     """
 
 
-def render_hub_page(page_title, description, canonical_path, h1, intro_text, jobs, empty_message):
+def render_hub_page(page_title, description, canonical_path, h1, intro_text, jobs, empty_message, noindex=False):
     """Shared shell for the two kinds of listing/"hub" pages this site
     has -- /jobs/company/<slug> and /jobs/remote/<group> -- both are
     "here's a real, crawlable page for a whole category of jobs, each
@@ -1526,6 +1579,10 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
     "Acme Corp jobs" or "remote jobs," then click through to individual
     postings from there."""
     canonical_url = f"{SITE_URL}{canonical_path}"
+    breadcrumb_script = _breadcrumb_jsonld([
+        ("Home", f"{SITE_URL}/"),
+        (h1, None),
+    ])
 
     def esc(s):
         return html.escape(str(s or ""))
@@ -1540,12 +1597,13 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=17" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=17" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=17" />
+<link rel="icon" href="/favicon.svg?v=18" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=18" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=18" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
+{'<meta name="robots" content="noindex" />' if noindex else ""}
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Skip The Boards" />
 <meta property="og:url" content="{esc(canonical_url)}" />
@@ -1556,10 +1614,11 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <meta name="twitter:title" content="{esc(page_title)}" />
 <meta name="twitter:description" content="{esc(description)}" />
 <meta name="twitter:image" content="{esc(SITE_URL)}/og-image.png" />
+<script type="application/ld+json">{breadcrumb_script}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=17" />
+<link rel="stylesheet" href="/style.css?v=18" />
 </head>
 <body>
   <nav class="topnav">
@@ -1630,7 +1689,7 @@ def company_hub_page(slug):
                 "Company not found — Skip The Boards", "",
                 f"/jobs/company/{slug}", "No current openings",
                 "Either this company has no open roles right now, or the link's wrong.",
-                [], "",
+                [], "", noindex=True,
             ),
             status=404, mimetype="text/html",
         )
