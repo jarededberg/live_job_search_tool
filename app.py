@@ -494,6 +494,19 @@ def api_jobs():
         for j in jobs:
             j["applied"] = False
 
+    # detail_path -- the job's own /jobs/<id>-<slug> page (see _job_path()
+    # below and render_job_page()). Added here so app.js's job cards can
+    # link to it directly instead of that page only ever being reachable
+    # via the sitemap; an internal link from a page Google already crawls
+    # (this search results grid) is worth far more to crawl priority than
+    # a sitemap entry alone. `.get("job_id")` rather than `["job_id"]` is
+    # just defensive -- every row has one after db.py's backfill, but a
+    # missing/falsy id (should never happen) degrades to no link instead
+    # of a 500.
+    for j in jobs:
+        if j.get("job_id"):
+            j["detail_path"] = _job_path(j["job_id"], j["company"], j["title"])
+
     return jsonify({
         "jobs": jobs,
         "total": total,
@@ -1064,15 +1077,19 @@ JOB_SITEMAP_PAGE_SIZE = 10000  # sitemap protocol caps a single file at 50,000 U
 def sitemap_xml():
     """Sitemap INDEX, not a flat list -- this deployment has 100k+ live
     jobs, way past the sitemap protocol's 50,000-URL-per-file ceiling, so
-    the actual URLs live in /sitemap-static.xml (the 4 public pages) and
-    however many /sitemap-jobs-<n>.xml pages of JOB_SITEMAP_PAGE_SIZE
-    each it takes to cover every job currently in db.py -- computed fresh
-    on every request from db.total_jobs(), so this always reflects
-    however many jobs actually exist right now without needing a
-    redeploy when that count changes."""
+    the actual URLs live in /sitemap-static.xml (the 4 public pages plus
+    the 5 remote-region hub pages -- well under the URL ceiling, no need
+    for their own file), /sitemap-companies.xml (one hub page per company
+    with a current opening -- still just a few thousand rows even at this
+    dataset's scale, comfortably one file), and however many
+    /sitemap-jobs-<n>.xml pages of JOB_SITEMAP_PAGE_SIZE each it takes to
+    cover every job currently in db.py -- computed fresh on every request
+    from db.total_jobs(), so this always reflects however many jobs
+    actually exist right now without needing a redeploy when that count
+    changes."""
     total = db.total_jobs()
     num_job_pages = (total + JOB_SITEMAP_PAGE_SIZE - 1) // JOB_SITEMAP_PAGE_SIZE
-    sitemaps = [f"{SITE_URL}/sitemap-static.xml"]
+    sitemaps = [f"{SITE_URL}/sitemap-static.xml", f"{SITE_URL}/sitemap-companies.xml"]
     sitemaps += [f"{SITE_URL}/sitemap-jobs-{n}.xml" for n in range(1, num_job_pages + 1)]
     entries = "\n".join(f"  <sitemap><loc>{loc}</loc></sitemap>" for loc in sitemaps)
     xml = (
@@ -1086,15 +1103,22 @@ def sitemap_xml():
 
 @app.route("/sitemap-static.xml")
 def sitemap_static_xml():
-    """The original 4-page sitemap (home, about, faq, contact) -- moved
-    out of /sitemap.xml itself once that became a sitemap index (see
-    above) rather than a flat file. Deliberately doesn't include /admin
-    (noindex already, see its own <meta> tag) or account-only pages."""
+    """The original 4-page sitemap (home, about, faq, contact), now also
+    carrying the 5 remote-region hub pages (/jobs/remote/<group> -- see
+    REMOTE_HUB_GROUPS below) -- only 9 URLs total, nowhere near needing
+    their own dedicated sitemap file the way jobs and company hubs do.
+    Moved out of /sitemap.xml itself once that became a sitemap index
+    (see above) rather than a flat file. Deliberately doesn't include
+    /admin (noindex already, see its own <meta> tag) or account-only
+    pages."""
     pages = [
         (f"{SITE_URL}/", "daily", "1.0"),
         (f"{SITE_URL}/about", "monthly", "0.5"),
         (f"{SITE_URL}/faq", "monthly", "0.5"),
         (f"{SITE_URL}/contact", "monthly", "0.3"),
+    ]
+    pages += [
+        (f"{SITE_URL}/jobs/remote/{slug}", "daily", "0.7") for slug in REMOTE_HUB_GROUPS
     ]
     entries = "\n".join(
         f"  <url><loc>{loc}</loc><changefreq>{freq}</changefreq><priority>{pri}</priority></url>"
@@ -1128,6 +1152,29 @@ def sitemap_jobs_xml(page):
         lastmod = (r.get("last_seen") or "")[:10]  # YYYY-MM-DD is all sitemaps need
         lastmod_tag = f"<lastmod>{lastmod}</lastmod>" if lastmod else ""
         entries.append(f"  <url><loc>{loc}</loc>{lastmod_tag}<changefreq>daily</changefreq></url>")
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "\n".join(entries) + ("\n" if entries else "")
+        + "</urlset>\n"
+    )
+    return Response(xml, mimetype="application/xml")
+
+
+@app.route("/sitemap-companies.xml")
+def sitemap_companies_xml():
+    """One URL per company that currently has at least one live opening
+    -- the /jobs/company/<slug> hub pages (see company_hub_page() further
+    down). A separate file from sitemap-static.xml (unlike the 5 remote
+    hub pages) because this one scales with the dataset -- a few thousand
+    companies today, more as the scraper's company list grows -- while
+    still comfortably under the single-file 50,000-URL cap, so unlike
+    jobs it doesn't need paging across multiple files yet."""
+    rows = db.list_companies_with_open_jobs()
+    entries = []
+    for r in rows:
+        loc = f"{SITE_URL}/jobs/company/{_slugify(r['company'])}"
+        entries.append(f"  <url><loc>{loc}</loc><changefreq>daily</changefreq></url>")
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -1313,9 +1360,9 @@ def render_job_page(job):
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=16" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=16" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=16" />
+<link rel="icon" href="/favicon.svg?v=17" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=17" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=17" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -1335,7 +1382,7 @@ def render_job_page(job):
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=16" />
+<link rel="stylesheet" href="/style.css?v=17" />
 </head>
 <body>
   <nav class="topnav">
@@ -1389,7 +1436,7 @@ def render_job_page(job):
 """
 
 
-@app.route("/jobs/<path:segment>")
+@app.route("/jobs/<segment>")
 def job_page(segment):
     """Public detail page for a single job -- see render_job_page()'s
     docstring for the full reasoning. `segment` is "<job_id>-<slug>";
@@ -1398,6 +1445,17 @@ def job_page(segment):
     rest is decorative. This means a bare /jobs/<job_id> (no slug at all)
     resolves exactly the same way -- useful for anyone who copies just
     the id -- without needing a second route or a redirect.
+
+    Deliberately the default string converter, not <path:segment> -- a
+    job slug never contains a literal "/" (see _slugify()), so there's no
+    real path underneath one to capture, and using the plain converter
+    means this route can only ever match exactly one path segment. That
+    matters once /jobs/company/<slug> and /jobs/remote/<group> exist
+    alongside it (see below): those are unambiguously distinct URL
+    shapes from this route's point of view, rather than relying on
+    Werkzeug's rule-specificity ordering to sort out an overlap between
+    this route and a hypothetical /jobs/company/... it could otherwise
+    have swallowed.
 
     A real 404 (not a soft-404 200) when the job_id doesn't match
     anything current -- almost always because the listing closed and
@@ -1412,12 +1470,228 @@ def job_page(segment):
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Role no longer available — Skip The Boards</title>
 <meta name="robots" content="noindex" />
-<link rel="stylesheet" href="/style.css?v=16" /></head>
+<link rel="stylesheet" href="/style.css?v=17" /></head>
 <body><main class="content-page"><h1>This role isn't available anymore</h1>
 <p class="content-page-intro">It's either been filled, taken down by the company, or the link's
 just wrong. <a href="/">Search current openings instead →</a></p></main></body></html>"""
         return Response(body, status=404, mimetype="text/html")
     return Response(render_job_page(job), mimetype="text/html")
+
+
+def _job_list_item_html(job):
+    """One row of a hub page's job listing (company page, remote-region
+    page -- see below). Deliberately simpler than app.js's jobCard(): no
+    match badges (resume matching is a client-side-only feature, there's
+    no resume to compare against on a server-rendered page) and the
+    title links to this site's own /jobs/<id> page, not straight out to
+    the ATS -- unlike the homepage's job cards, a hub page's whole job
+    is to hand a crawler (or a person) off to the individual job page,
+    not to be a second place to apply from."""
+    def esc(s):
+        return html.escape(str(s or ""))
+    location = job.get("location") or "Location not listed"
+    posted = (job.get("posted") or "")[:10]
+    path = _job_path(job["job_id"], job["company"], job["title"])
+    salary_text = _job_salary_text(job)
+    tags = [f'<span class="tag tag-source">{esc(job.get("source"))}</span>']
+    if job.get("department"):
+        tags.append(f'<span class="tag tag-department">{esc(job["department"])}</span>')
+    if salary_text:
+        tags.append(f'<span class="tag tag-salary">{esc(salary_text)}</span>')
+    return f"""
+      <div class="job-card">
+        <div class="job-card-header">
+          <div class="job-header-text">
+            <div class="job-title"><a href="{esc(path)}">{esc(job["title"])}</a></div>
+            <div class="job-sub">{esc(job["company"])} · {esc(location)}</div>
+          </div>
+        </div>
+        <div class="job-footer">
+          <span class="job-posted">{esc(posted)}</span>
+          {"".join(tags)}
+        </div>
+      </div>
+    """
+
+
+def render_hub_page(page_title, description, canonical_path, h1, intro_text, jobs, empty_message):
+    """Shared shell for the two kinds of listing/"hub" pages this site
+    has -- /jobs/company/<slug> and /jobs/remote/<group> -- both are
+    "here's a real, crawlable page for a whole category of jobs, each
+    linking to its own page" rather than a single-job detail page (that's
+    render_job_page()). No JobPosting structured data here on purpose --
+    that schema describes one specific posting, not a list of them; a
+    hub page's job is purely to be a well-linked entry point search
+    engines and people can land on for a category-level query like
+    "Acme Corp jobs" or "remote jobs," then click through to individual
+    postings from there."""
+    canonical_url = f"{SITE_URL}{canonical_path}"
+
+    def esc(s):
+        return html.escape(str(s or ""))
+
+    if jobs:
+        cards_html = "".join(_job_list_item_html(j) for j in jobs)
+    else:
+        cards_html = f'<p class="content-page-intro">{esc(empty_message)}</p>'
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="/favicon.svg?v=17" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=17" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=17" />
+<title>{esc(page_title)}</title>
+<meta name="description" content="{esc(description)}" />
+<link rel="canonical" href="{esc(canonical_url)}" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Skip The Boards" />
+<meta property="og:url" content="{esc(canonical_url)}" />
+<meta property="og:title" content="{esc(page_title)}" />
+<meta property="og:description" content="{esc(description)}" />
+<meta property="og:image" content="{esc(SITE_URL)}/og-image.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="{esc(page_title)}" />
+<meta name="twitter:description" content="{esc(description)}" />
+<meta name="twitter:image" content="{esc(SITE_URL)}/og-image.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css?v=17" />
+</head>
+<body>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <div class="brand">
+        <a href="/" style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;">
+          <span class="brand-mark">◆</span>
+          <span class="brand-name">Skip The Boards</span>
+        </a>
+      </div>
+      <div class="topnav-right">
+        <nav class="nav-links">
+          <a href="/">Home</a>
+          <a href="/about">About</a>
+          <a href="/faq">FAQ</a>
+          <a href="/contact">Contact</a>
+        </nav>
+        <a class="brand-link" href="/">← Back to search</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="content-page hub-page">
+    <h1>{esc(h1)}</h1>
+    <p class="content-page-intro">{esc(intro_text)}</p>
+    <div class="hub-job-list">
+      {cards_html}
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p class="footer-byline">
+        <strong>Jared Edberg</strong> · <a href="https://www.linkedin.com/in/jared-edberg" target="_blank" rel="noopener">LinkedIn ↗</a>
+      </p>
+    </div>
+  </footer>
+</body>
+</html>
+"""
+
+
+def _find_company_by_slug(slug):
+    """Reverse-lookup from a URL slug back to the real company string
+    stored in jobs.company. There's no separate slug column -- slugs are
+    derived on the fly from whatever's actually in the data (see
+    _slugify()), so this just slugifies every company with a current
+    opening and checks for a match. Cheap enough at this dataset's scale
+    (a few thousand distinct companies, not rows) to not need caching."""
+    for row in db.list_companies_with_open_jobs():
+        if _slugify(row["company"]) == slug:
+            return row["company"]
+    return None
+
+
+@app.route("/jobs/company/<slug>")
+def company_hub_page(slug):
+    """One company's current openings, all linking to their own /jobs/<id>
+    pages -- a real page for a "<Company> jobs" search to land on,
+    something this site had nothing to offer for before today. 404s (not
+    a soft-404) for a company with no current openings, same reasoning
+    as job_page()'s 404 -- a company that's since had every role filled
+    shouldn't have a lingering indexed page with nothing on it."""
+    company = _find_company_by_slug(slug)
+    if company is None:
+        return Response(
+            render_hub_page(
+                "Company not found — Skip The Boards", "",
+                f"/jobs/company/{slug}", "No current openings",
+                "Either this company has no open roles right now, or the link's wrong.",
+                [], "",
+            ),
+            status=404, mimetype="text/html",
+        )
+    jobs = db.jobs_for_company(company)
+    page_title = f"{company} jobs — Skip The Boards"
+    description = (
+        f"{len(jobs)} open role{'s' if len(jobs) != 1 else ''} at {company}, pulled directly from "
+        f"their own career page. Apply directly, no account required."
+    )
+    body = render_hub_page(
+        page_title, description, f"/jobs/company/{slug}",
+        f"{company} jobs", description, jobs,
+        f"{company} doesn't have any current openings in this dataset.",
+    )
+    return Response(body, mimetype="text/html")
+
+
+# Canonical group -> (URL slug, human label) -- deliberately the same 5
+# groups location_groups.py already defines and db.search_jobs() already
+# knows how to filter by (the exact chips the homepage's location filter
+# offers). Reusing that instead of inventing a fresh classification means
+# these hub pages can never disagree with what "Remote (US)" etc. means
+# anywhere else on the site.
+REMOTE_HUB_GROUPS = {
+    "us": ("remote_us", "Remote (US)"),
+    "canada": ("remote_canada", "Remote (Canada)"),
+    "uk": ("remote_uk", "Remote (UK)"),
+    "europe": ("remote_europe", "Remote (Europe)"),
+    "anywhere": ("remote_anywhere", "Remote (unspecified / global)"),
+}
+
+
+@app.route("/jobs/remote/<slug>")
+def remote_hub_page(slug):
+    """A hub page per remote-region group -- "remote jobs" and its
+    variants are some of the highest-volume job-search queries there are,
+    and until today this site had no page of its own to offer for any of
+    them. Deliberately scoped to just these 5 curated groups rather than
+    also building one per raw city/metro string: location data here is
+    free text straight off each ATS (see FAQ's "best-effort" framing
+    throughout), and building city-level hub pages well would mean
+    solving the same city-name-normalization problem metro_areas.py only
+    partially solves for resume matching -- worth doing right as its own
+    follow-up, not worth rushing into a pile of near-duplicate thin pages
+    for slightly different spellings of the same place."""
+    group = REMOTE_HUB_GROUPS.get(slug)
+    if group is None:
+        return Response("Not found", status=404, mimetype="text/plain")
+    group_key, label = group
+    jobs, total = db.search_jobs(location_groups=[group_key], sort="newest", page=1, per_page=300)
+    page_title = f"{label} jobs — Skip The Boards"
+    description = (
+        f"{total} {label.lower()} openings across Greenhouse, Lever, and Ashby career pages. "
+        "Apply directly, no account required."
+    )
+    body = render_hub_page(
+        page_title, description, f"/jobs/remote/{slug}",
+        f"{label} jobs", description, jobs,
+        f"No current {label.lower()} openings in this dataset.",
+    )
+    return Response(body, mimetype="text/html")
 
 
 @app.route("/admin")

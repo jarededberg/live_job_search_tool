@@ -751,6 +751,43 @@ def list_jobs_for_sitemap(offset, limit):
     return [dict(r) for r in rows]
 
 
+def list_companies_with_open_jobs():
+    """(company, count) for every company that currently has at least one
+    live job -- used to build the /jobs/company/<slug> hub pages and
+    their sitemap (see app.py). Deliberately only companies with a
+    current opening: a hub page for a company with zero live roles would
+    just be a dead end, exactly the kind of thin/empty page that drags
+    down how a search engine weighs the rest of the site's content."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT company, COUNT(*) AS c FROM jobs GROUP BY company ORDER BY company"
+        ).fetchall()
+    return [{"company": r["company"], "count": r["c"]} for r in rows]
+
+
+def jobs_for_company(company, limit=300):
+    """Every current job at one company, newest first -- the listing
+    body of a /jobs/company/<slug> hub page. `limit` is a sane ceiling
+    (a handful of companies post hundreds of roles at once); this is a
+    page meant to be skimmed and clicked through to individual job
+    pages, not a full paginated search in itself -- that's what the
+    homepage search is for."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE company = ? ORDER BY posted DESC LIMIT ?",
+            (company, limit),
+        ).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["tools"] = json.loads(d.get("tools") or "[]")
+        except (TypeError, ValueError):
+            d["tools"] = []
+        result.append(d)
+    return result
+
+
 def salary_bounds():
     """(min, max) of salary_min/salary_max across every job that reports
     both -- used to size the salary range slider's endpoints so the

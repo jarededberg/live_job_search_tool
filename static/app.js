@@ -424,6 +424,18 @@ function jobCard(job) {
          onclick="toggleApplied('${escapeAttr(job.url)}', this)">${job.applied ? "✓ Applied" : "Mark applied"}</button>`
     : "";
 
+  // This site's own page for the job (see /jobs/<id>-<slug> in app.py) --
+  // a real internal link, not just the sitemap, so search engines that
+  // have already crawled this results grid can find each job's own page
+  // through actual site navigation, not only a sitemap entry. Deliberately
+  // NOT replacing the title's existing external apply link above -- that's
+  // the one-click "go apply" path people are already used to, and changing
+  // its target would add friction to the site's actual core action. This
+  // is a second, low-key link instead.
+  const detailLink = job.detail_path
+    ? `<a class="job-detail-link" href="${escapeAttr(job.detail_path)}">Details</a>`
+    : "";
+
   return `
     <div class="job-card">
       <div class="job-card-header">
@@ -439,6 +451,7 @@ function jobCard(job) {
       <div class="job-footer">
         <span class="job-posted">${escapeHtml(posted)}</span>
         ${tags.join("")}
+        ${detailLink}
         ${appliedBtn}
       </div>
     </div>

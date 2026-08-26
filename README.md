@@ -1739,10 +1739,57 @@ for Jobs runs on.
   (10,000) it takes to cover every job currently in `db.py` --
   recomputed from `db.total_jobs()` on every request, so it always
   matches however many jobs actually exist without a redeploy.
-- **Not done this round, on purpose**: the homepage's own job cards
-  (`app.js`'s `jobCard()`) still link straight to the original ATS
-  posting, same as before -- adding an internal link to each job's own
-  `/jobs/<id>` page from search results would help crawl discovery
-  further, but changes the existing "click a job = go apply" click
-  target people are already used to, so it's left as a deliberate
-  follow-up rather than bundled into an SEO pass.
+**Tier three: internal linking + hub pages.** Individual job pages and a
+sitemap only get a page *discovered*; how much weight a search engine
+gives a page (and how often it gets recrawled) leans heavily on whether
+it's reachable through real links from pages already being crawled, not
+just a sitemap entry. This round adds exactly that, plus two new kinds
+of landing page for category-level searches ("Acme Corp jobs," "remote
+jobs") that the site had nothing to offer for before.
+
+- **Job cards now link to their own detail page, in addition to the
+  external apply link.** `GET /api/jobs` (`app.py`) adds a `detail_path`
+  field to every job (`/jobs/<id>-<slug>`, via the same `_job_path()`
+  the sitemap and detail page already use). `app.js`'s `jobCard()` renders
+  it as a small "Details" link in the card's footer. Deliberately a
+  *second* link, not a replacement -- the job title itself still opens
+  the original ATS posting in a new tab, exactly as before. Changing
+  that click target would add friction to the site's actual core action
+  (go apply) just to gain a crawl-graph benefit; adding a second, clearly
+  secondary link gets the SEO benefit without touching the existing UX.
+- **`GET /jobs/company/<slug>`** (`app.py`, `company_hub_page()`,
+  rendered via the shared `render_hub_page()` -- also used by the remote
+  pages below) -- one page per company with at least one
+  current opening, listing every live role there with a link to its own
+  detail page. `db.list_companies_with_open_jobs()` and
+  `db.jobs_for_company()` (`db.py`) back it. A company slug with no
+  current openings is a real 404, same reasoning as an expired job page
+  -- a hub page for zero live roles is a dead end, not something worth
+  keeping indexed. `GET /sitemap-companies.xml` lists every current hub
+  URL (its own file, not folded into `sitemap-static.xml`, since this one
+  scales with the company list rather than staying fixed at a handful of
+  pages) and is now included in `/sitemap.xml`'s index.
+- **`GET /jobs/remote/<us|canada|uk|europe|anywhere>`** (`app.py`,
+  `remote_hub_page()`) -- one page per remote-region group, reusing
+  `location_groups.py`'s existing `LOCATION_GROUPS`/`matches_group()` and
+  `db.search_jobs(location_groups=[...])` (the exact same classification
+  already powering the homepage's "Remote (US)" etc. filter chips, so a
+  hub page can never disagree with the filter about what counts). "Remote
+  jobs" and its variants are some of the highest-volume job-search
+  queries there are; until now this site had no page of its own to rank
+  for any of them. These 5 URLs are folded into `sitemap-static.xml`
+  (only 5 more rows, not worth a dedicated file).
+- **Deliberately scoped out again this round**: per-city/metro hub pages
+  (`/jobs/location/san-francisco-ca`, etc.). `location` is free text
+  straight off each ATS, inconsistent in ways `metro_areas.py`'s curated
+  nearby-metro lists don't fully solve even for resume matching (full
+  state names vs. abbreviations, "SF" vs. "San Francisco" vs. "San
+  Francisco, CA," and so on) -- building city-level hub pages well means
+  solving that normalization problem properly first, not shipping a pile
+  of near-duplicate thin pages for slightly different spellings of the
+  same city. Worth doing as its own follow-up, not bundled in here.
+- `/jobs/<segment>`'s route is now the default string converter (was
+  `<path:segment>`) -- a job slug never contains a literal `/` (see
+  `_slugify()`), so nothing was lost, and it means this route can never
+  structurally overlap with `/jobs/company/<slug>` or
+  `/jobs/remote/<group>` regardless of Werkzeug's own rule-ordering.

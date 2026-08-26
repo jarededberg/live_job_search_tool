@@ -1175,6 +1175,14 @@ main {
   width: 100%;
 }
 
+.job-detail-link {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--border);
+}
+.job-detail-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
 .tag {
   display: inline-flex;
   align-items: center;
@@ -1809,3 +1817,14 @@ footer {
   padding-top: 14px;
   margin: 0;
 }
+
+/* ---- hub pages (/jobs/company/<slug>, /jobs/remote/<group>) ---- */
+.hub-page { max-width: 900px; }
+
+.hub-job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.hub-job-list .job-card { max-width: none; }
+.hub-job-list .job-title { -webkit-line-clamp: unset; }
