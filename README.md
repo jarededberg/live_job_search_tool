@@ -1820,3 +1820,17 @@ add new pages; they get more out of the ones that already exist.
   matching the job-detail 404's existing behavior -- a small
   inconsistency from when hub pages first shipped, fixed while touching
   `render_hub_page()` for the breadcrumb work above (new `noindex` param).
+- **Fixed: `JobPosting.jobLocation.address.addressCountry` was hardcoded
+  to `"US"` for every job**, regardless of what the location string
+  actually said -- caught via Google's own Rich Results Test on a real
+  "Paris, France" posting, which it was reporting as being in the US.
+  `_job_address()` (`app.py`) now reuses `location_groups.py`'s own
+  US/Canada/UK signal-detection (the same classifiers already trusted
+  for the "Remote (US)" etc. filter chips) plus a small country-name
+  lookup for the handful of European countries that show up in this
+  dataset, and only sets `addressCountry`/`addressRegion` when there's an
+  actual textual signal for one. No signal at all (e.g. a bare "Prague"
+  with no country/state word in it) now omits the field entirely rather
+  than guessing -- a wrong country claim is worse for a listing's
+  credibility with Google than an absent optional one, same principle
+  `db.py`'s salary/YOE filters already apply to missing data elsewhere.

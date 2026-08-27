@@ -29,6 +29,10 @@ import db_users
 from scraper import scrape_all
 from companies_data import COMPANIES
 import resume_parser
+from location_groups import (
+    US_WORD_RE, US_STATE_NAMES, US_STATE_ABBR_RE,
+    CANADA_WORD_RE, CANADA_PROVINCE_NAMES, UK_WORD_RE,
+)
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
@@ -1238,6 +1242,66 @@ def _job_salary_text(job):
     return f"~${fmt(lo)}–${fmt(hi)}"
 
 
+# ISO 3166-1 alpha-2 codes for the specific countries
+# location_groups.EUROPE_COUNTRY_NAMES actually names -- excludes that
+# set's two generic, non-country entries ("europe", "emea"), since
+# neither has a single country code to assign.
+_EUROPE_COUNTRY_ISO = {
+    "germany": "DE", "france": "FR", "spain": "ES", "italy": "IT",
+    "netherlands": "NL", "belgium": "BE", "sweden": "SE", "norway": "NO",
+    "denmark": "DK", "finland": "FI", "poland": "PL", "portugal": "PT",
+    "austria": "AT", "switzerland": "CH", "ireland": "IE", "greece": "GR",
+    "czech republic": "CZ", "hungary": "HU", "romania": "RO",
+}
+
+
+def _job_address(location):
+    """Best-effort schema.org PostalAddress for a job's raw, free-text
+    location string -- used by render_job_page()'s JobPosting JSON-LD.
+    Reuses location_groups.py's own US/Canada/UK signal detection (the
+    same classifiers already trusted for the "Remote (US)" etc. filter
+    chips) rather than inventing a second, separate guess at what counts
+    as a US location.
+
+    Only ever asserts `addressCountry` when there's an actual textual
+    signal for one in the raw string. This replaced an earlier version
+    that hardcoded every job's addressCountry to "US" unconditionally --
+    caught via Google's Rich Results Test on a real "Paris, France"
+    posting, which was reporting the job as being in the US. Google's own
+    structured-data guidelines treat a factually wrong field as worse
+    than an absent optional one, so "no confident signal" here means
+    omitting `addressCountry`/`addressRegion` entirely, not defaulting to
+    a guess -- same "don't guess wrong" principle db.py's salary/YOE
+    filters already follow for missing data."""
+    if not location:
+        return None
+    addr = {"@type": "PostalAddress"}
+    city_part = location.rpartition(",")[0].strip() if "," in location else location.strip()
+    addr["addressLocality"] = city_part or location.strip()
+
+    low = location.lower()
+    if (
+        US_WORD_RE.search(location)
+        or US_STATE_ABBR_RE.search(location)
+        or any(name in low for name in US_STATE_NAMES)
+    ):
+        addr["addressCountry"] = "US"
+        abbr = US_STATE_ABBR_RE.search(location)
+        if abbr:
+            addr["addressRegion"] = abbr.group(1)
+    elif CANADA_WORD_RE.search(location) or any(name in low for name in CANADA_PROVINCE_NAMES):
+        addr["addressCountry"] = "CA"
+    elif UK_WORD_RE.search(location):
+        addr["addressCountry"] = "GB"
+    else:
+        for name, iso in _EUROPE_COUNTRY_ISO.items():
+            if name in low:
+                addr["addressCountry"] = iso
+                break
+
+    return addr
+
+
 def _breadcrumb_jsonld(items):
     """BreadcrumbList JSON-LD, shared by every page that has one (job
     detail, company hub, remote hub) -- `items` is an ordered list of
@@ -1359,10 +1423,9 @@ def render_job_page(job):
         except (TypeError, ValueError):
             pass
     if location and location != "Location not listed":
-        json_ld["jobLocation"] = {
-            "@type": "Place",
-            "address": {"@type": "PostalAddress", "addressLocality": location, "addressCountry": "US"},
-        }
+        address = _job_address(location)
+        if address:
+            json_ld["jobLocation"] = {"@type": "Place", "address": address}
     employment_type = EMPLOYMENT_TYPE_MAP.get(commitment.strip().lower())
     if employment_type:
         json_ld["employmentType"] = employment_type
