@@ -1834,3 +1834,66 @@ add new pages; they get more out of the ones that already exist.
   than guessing -- a wrong country claim is worse for a listing's
   credibility with Google than an absent optional one, same principle
   `db.py`'s salary/YOE filters already apply to missing data elsewhere.
+
+## MCP server
+
+`POST /mcp` (`mcp_server.py` + the route in `app.py`) is a remote MCP
+(Model Context Protocol) server -- it lets an AI agent search this site's
+jobs directly, mid-conversation, without a person driving a browser to
+skiptheboards.com at all. Same underlying data as the website (`db.py`),
+just a second, machine-facing way in.
+
+**Protocol version: `2025-06-18`, deliberately not the newest one.** MCP's
+spec had a big revision land as `2026-07-28` (a "Release Candidate" at
+publication) that removes the `initialize` handshake and protocol-level
+sessions entirely in favor of a fully stateless per-request model. It's a
+real improvement on paper, but it's also the kind of breaking change that
+takes real MCP clients (Claude Desktop, Claude.ai custom connectors,
+third-party agent frameworks) months to catch up to after a spec update
+that size. Targeting it now would mean a server that's technically more
+current but that most people's actual AI tools can't talk to yet.
+`2025-06-18`'s `initialize` -> `tools/list` -> `tools/call` flow has been
+stable and broadly implemented for over a year, so that's the actual
+target -- `mcp_server.py`'s method dispatch is a plain dict (`METHODS`),
+specifically so adding the newer stateless flow later, or supporting
+both per the spec's own backward-compatibility guidance, is additive
+rather than a rewrite.
+
+**Three tools, each a thin wrapper over an existing `db.py` function:**
+
+- `search_jobs` -- same boolean title search, location/department/
+  commitment/recency filters, and sort options the homepage search
+  offers, via `db.search_jobs()`. Capped at 20 results per call (an
+  agent doesn't need, and a model's context doesn't want, hundreds of
+  rows back from one tool call) and returns each job's own detail-page
+  URL alongside its direct external apply URL.
+- `get_job_details` -- full blurb/qualifications text and listed tools
+  for one job by `job_id`, via `db.get_job_by_job_id()`.
+- `search_companies` -- substring match against company names with at
+  least one current opening, via `db.list_companies_with_open_jobs()`,
+  each with a link to that company's `/jobs/company/<slug>` hub page.
+  Exists so "what's open at Acme" resolves without the agent having to
+  guess a title-based search that happens to match.
+
+**Deliberately excluded from `mcp_server.py`'s own request handling, kept
+in `app.py`'s route instead:** all HTTP mechanics -- JSON parsing, status
+codes, and rate limiting (`@limiter.limit("30 per minute")`, the same
+`flask_limiter` instance every other rate-limited route in this file
+already uses). `mcp_server.handle_request()` takes a parsed JSON-RPC dict
+and returns a response dict or `None`, nothing HTTP-specific -- keeps the
+protocol logic testable and transport-agnostic, same separation the rest
+of this app already draws between `db.py` and `app.py`.
+
+No `Origin` header validation, unlike the spec's guidance for locally-
+bound servers -- that check exists to stop DNS-rebinding attacks against
+a server listening on `localhost`, which doesn't apply to a public,
+already-internet-facing deployment like this one. This endpoint is meant
+to be reachable by any MCP client, the same way `/api/jobs` already is
+by any browser.
+
+**To connect a client:** point it at `https://skiptheboards.com/mcp` as a
+custom/remote MCP server (in Claude.ai: Settings -> Connectors -> Add
+custom connector; Claude Desktop and other agent frameworks have
+similar "add a remote MCP server by URL" flows). No API key or auth
+required -- it's the same public, read-only job data the website itself
+serves with no account needed.

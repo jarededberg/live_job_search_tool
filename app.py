@@ -33,6 +33,7 @@ from location_groups import (
     US_WORD_RE, US_STATE_NAMES, US_STATE_ABBR_RE,
     CANADA_WORD_RE, CANADA_PROVINCE_NAMES, UK_WORD_RE,
 )
+import mcp_server
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
@@ -647,6 +648,65 @@ def api_contact():
         return jsonify({"ok": False, "message": "Couldn't send that right now -- try again in a moment."})
 
     return jsonify({"ok": True, "message": "Thanks -- message sent. I'll get back to you soon."})
+
+
+@app.route("/mcp", methods=["POST"])
+@limiter.limit("30 per minute")
+def mcp_endpoint():
+    """The MCP (Model Context Protocol) endpoint -- lets an AI agent call
+    this site's job search directly, without a person driving a browser.
+    See mcp_server.py for the actual protocol logic and the reasoning
+    behind targeting protocol version 2025-06-18 rather than the newest
+    2026-07-28 revision.
+
+    This route owns only the HTTP mechanics (parsing, status codes, rate
+    limiting); mcp_server.handle_request() owns everything protocol-
+    specific. Rate limit is per-IP via the same flask_limiter instance
+    every other rate-limited route in this file uses -- 30/minute is
+    generous for a single agent's back-and-forth (each user turn is
+    usually one or two tool calls) while still bounding worst-case load
+    on the shared SQLite file from a misbehaving or abusive client.
+
+    No `Origin` validation here unlike the spec's guidance for locally-
+    bound servers: that check exists to prevent DNS-rebinding attacks
+    against a server listening on localhost, which doesn't apply to a
+    public, already-internet-facing deployment like this one -- this
+    endpoint is meant to be reachable by any MCP client, the same way
+    /api/jobs already is.
+    """
+    body = request.get_json(silent=True)
+    if body is None:
+        return jsonify({
+            "jsonrpc": "2.0", "id": None,
+            "error": {"code": -32700, "message": "Parse error: request body must be valid JSON"},
+        }), 400
+
+    try:
+        result = mcp_server.handle_request(body)
+    except ValueError as e:
+        return jsonify({
+            "jsonrpc": "2.0", "id": body.get("id") if isinstance(body, dict) else None,
+            "error": {"code": -32600, "message": f"Invalid Request: {e}"},
+        }), 400
+
+    if result is None:
+        # A JSON-RPC notification (no `id`) -- the client isn't waiting
+        # for a reply, so per the Streamable HTTP transport spec this is
+        # a bare 202 Accepted with no body, not an empty JSON object.
+        return "", 202
+
+    return jsonify(result)
+
+
+@app.route("/mcp", methods=["GET", "DELETE"])
+def mcp_endpoint_unsupported():
+    """This server doesn't support the old HTTP+SSE transport's GET-for-
+    standalone-stream or session-termination-via-DELETE -- both are
+    optional even under the older, widely-supported protocol revision
+    this server targets (see mcp_server.py), and 405 is exactly the
+    documented fallback response for a server that doesn't implement
+    them."""
+    return Response(status=405)
 
 
 @app.route("/api/status")
