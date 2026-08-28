@@ -351,6 +351,23 @@ def _match_info(job, title_terms, skill_terms):
     return tier, score
 
 
+def _apply_filter_cap(tier, score, unconfirmed):
+    """If a job's salary/YOE data couldn't be confirmed against an active
+    range filter (see search_jobs' `_unconfirmed_filter` marking, set on
+    the salary and YOE filter blocks above), it's still shown -- not
+    excluded -- but its tier is capped at "good": we can't verify it
+    actually satisfies a range the candidate deliberately set, so it
+    shouldn't outrank a job that provably does. Only ever lowers "best"
+    to "good" -- never touches "good" or "poor" (nothing to cap), and
+    never applies to a job that isn't flagged unconfirmed at all. The
+    1000-point score deduction mirrors _match_info's own tier_weight*1000
+    term, so a capped job's score lands in the same range a naturally
+    "good"-tier job's would, keeping match-sort order consistent."""
+    if unconfirmed and tier == "best":
+        return "good", score - 1000
+    return tier, score
+
+
 def search_jobs(query="", location="", locations=None, location_groups=None, days=None,
                  department="", departments=None, commitment="", sort=DEFAULT_SORT,
                  resume_title_terms=None, resume_skill_terms=None, resume_us_based=False,
@@ -440,18 +457,23 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     `salary_bounds()`/`years_bounds()`). Each pair is independently
     optional -- `None` on one side means "no ceiling"/"no floor" on that
     side, and `None` on both means the filter isn't active at all (the
-    common case: most searches never touch the sliders). A job only
-    passes a filter that IS active if it actually reports the relevant
-    data AND that data's own range overlaps the requested range --
-    salary via the real `salary_min`/`salary_max` columns in SQL, YOE via
-    parsing the free-text `years_experience` column in Python (same
-    `parse_years_range()` used to compute `years_bounds()`). Jobs with no
-    salary/YOE data are excluded once the corresponding filter is active,
-    on the theory that a candidate who deliberately narrowed the range
-    wants confirmed matches, not unknowns padding the count -- this
-    mirrors how most job boards handle salary filters, and is a
-    deliberate departure from the "benefit of the doubt" treatment given
-    to missing location data elsewhere in this file.
+    common case: most searches never touch the sliders). A job whose
+    salary/YOE data is present and CONFIRMED to fall outside the
+    requested range is excluded -- that's a real, known mismatch. A job
+    with no salary/YOE data at all is a different case and is no longer
+    excluded: there's nothing to confirm it doesn't fit, so removing it
+    outright would be throwing away real listings over a data gap, not a
+    real mismatch. It's kept in results but flagged internally
+    (`_unconfirmed_filter`, stripped before the row leaves this function)
+    so `_match_info`'s tier for that job gets capped at "good" rather
+    than "best" when a resume is uploaded -- unconfirmed against a filter
+    the candidate deliberately set shouldn't outrank a job that provably
+    satisfies it, but it also shouldn't just vanish. (No resume uploaded
+    at all means no tiers exist regardless, so an unconfirmed job just
+    appears like any other result, no special treatment.) This used to
+    hard-exclude missing data entirely, mirroring how most job boards
+    handle salary filters -- changed per explicit user feedback that a
+    job shouldn't disappear just because a field failed to parse.
     """
     ast = parse_query(query)
     order_sql = SORT_OPTIONS.get(sort, SORT_OPTIONS[DEFAULT_SORT])
@@ -505,7 +527,8 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         where.append("commitment = ?")
         params.append(commitment.strip())
 
-    if salary_min is not None or salary_max is not None:
+    salary_filter_active = salary_min is not None or salary_max is not None
+    if salary_filter_active:
         # Range-overlap test against the real salary_min/salary_max
         # columns: a job passes if its own posted range overlaps the
         # requested [lo, hi] at all, not just if it's fully contained --
@@ -514,11 +537,18 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         # `salary_min`/`salary_max` on either side falls back to
         # unbounded (0 / a very large number) rather than narrowing that
         # side at all.
+        #
+        # A job with NO salary data at all also passes here (the
+        # `salary_min IS NULL` branch) rather than being excluded -- see
+        # this function's docstring. It gets flagged as unconfirmed
+        # further down, once `candidates` exists as real Python dicts, so
+        # its match tier (if any) can be capped instead of the row being
+        # dropped entirely.
         lo = salary_min if salary_min is not None else 0
         hi = salary_max if salary_max is not None else 10**9
         where.append(
-            "(salary_min IS NOT NULL AND salary_max IS NOT NULL "
-            "AND salary_max >= ? AND salary_min <= ?)"
+            "(salary_min IS NULL OR salary_max IS NULL "
+            "OR (salary_max >= ? AND salary_min <= ?))"
         )
         params.append(lo)
         params.append(hi)
@@ -548,6 +578,16 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
     # single request.
     if ast is not None:
         candidates = [r for r in candidates if evaluate(ast, r["title"])]
+
+    if salary_filter_active:
+        # The SQL above already let missing-salary rows through instead of
+        # excluding them -- this just marks which ones so the match-tier
+        # step below (if a resume is uploaded) knows to cap them at "good"
+        # rather than treat them as a confirmed fit. See search_jobs'
+        # docstring.
+        for r in candidates:
+            if not r.get("salary_min") or not r.get("salary_max"):
+                r["_unconfirmed_filter"] = True
 
     if dept_list:
         # Canonical labels ("Engineering", "Sales", ..., plus the
@@ -619,19 +659,29 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         yoe_lo = yoe_min if yoe_min is not None else 0
         yoe_hi = yoe_max if yoe_max is not None else 999
 
-        def _yoe_overlaps(r):
+        def _yoe_status(r):
+            """'mismatch' (confirmed outside the range -- exclude),
+            'unconfirmed' (no parseable YOE at all -- keep, but flag for
+            the match-tier cap below), or 'match'."""
             job_lo, job_hi = parse_years_range(r.get("years_experience"))
             if job_lo is None:
-                return False  # can't confirm a fit -- exclude rather than
-                               # guess, same call as the salary filter
+                return "unconfirmed"
             if job_hi is None:
                 # Open-ended "X+" from the posting -- treat it as
                 # satisfying any requested ceiling rather than excluding
                 # a "10+" job just because the filter's ceiling is 12.
                 job_hi = 999
-            return job_hi >= yoe_lo and job_lo <= yoe_hi
+            return "match" if (job_hi >= yoe_lo and job_lo <= yoe_hi) else "mismatch"
 
-        candidates = [r for r in candidates if _yoe_overlaps(r)]
+        kept = []
+        for r in candidates:
+            status = _yoe_status(r)
+            if status == "mismatch":
+                continue  # confirmed doesn't fit -- a real reason to exclude
+            if status == "unconfirmed":
+                r["_unconfirmed_filter"] = True
+            kept.append(r)
+        candidates = kept
 
     title_terms = [t.lower() for t in (resume_title_terms or []) if t]
     skill_terms = [t.lower() for t in (resume_skill_terms or []) if t]
@@ -644,6 +694,7 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         # to page 1 on its own, so this has to happen before pagination.
         for r in candidates:
             tier, score = _match_info(r, title_terms, skill_terms)
+            tier, score = _apply_filter_cap(tier, score, r.get("_unconfirmed_filter", False))
             r["match_tier"] = tier
             r["_match_score"] = score
         # Two stable sorts = one two-key sort: establish newest-first as the
@@ -669,10 +720,12 @@ def search_jobs(query="", location="", locations=None, location_groups=None, day
         # the full unfiltered dataset on every request.
         for r in page_rows:
             tier, _score = _match_info(r, title_terms, skill_terms)
+            tier, _score = _apply_filter_cap(tier, _score, r.get("_unconfirmed_filter", False))
             r["match_tier"] = tier
 
     for r in page_rows:
         r.pop("_match_score", None)  # internal sort key, not part of the API response
+        r.pop("_unconfirmed_filter", None)  # internal tier-cap flag, not part of the API response
         try:
             r["tools"] = json.loads(r.get("tools") or "[]")
         except (TypeError, ValueError):
