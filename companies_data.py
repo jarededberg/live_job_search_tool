@@ -5217,6 +5217,34 @@ COMPANIES = [
     ("The Voleon Group",        "voleon"),           # Ashby; quantitative investment management
     ("0x",                      "0x"),               # Ashby; crypto/DeFi trading infrastructure
 
+    # ── User-requested additions (Aug 2026 batch 3) ────────────────────────────
+    # Every slug below was hit directly against its live boards-api/
+    # posting-api/postings endpoint (curl) before being added. Three of the
+    # eleven requested companies were dropped from this batch, not added:
+    #   - Trade Republic (slug "traderepublicbank") -- already present above
+    #     at line ~2487, added in an earlier batch. Re-adding would just be
+    #     a duplicate scrape of the same board every cycle for no benefit.
+    #   - Accela (slug "accela") -- already present above at line ~2674,
+    #     same reason.
+    #   - Customer.io (slug "customerio") -- already present TWICE above
+    #     (lines ~1051 and ~1444, itself a pre-existing duplicate from
+    #     before this batch, left alone rather than touched here since
+    #     fixing it wasn't part of what was asked).
+    # "Loop" was requested (Ashby) but not added at all -- ambiguous name
+    # (Loop Returns, Loop Health, Loop Earplugs, Loopio, and Loop/loop.com
+    # freight fintech were all considered), and none had a matching live
+    # board on any of the three ATSes after ~15 slug guesses across all
+    # three APIs. Skipped rather than guessing a dead entry -- flag which
+    # "Loop" was meant to get it added properly.
+    ("Eve",                     "eve"),              # Greenhouse; legal AI for plaintiff law firms (eve.legal) — requested as "eve"
+    ("Recorded Future",         "recordedfuture"),   # Greenhouse; threat intelligence/cybersecurity
+    ("Red Cell Partners",       "redcellpartners"),  # Greenhouse; healthcare/cyber/nat-sec incubator — requested as "Red Cell", ambiguous name resolved to this active DC-based hirer
+    ("Oneleet",                 "oneleet"),          # Ashby; SOC2/compliance SaaS — requested as "Onelett", corrected spelling
+    ("OnePay",                  "oneapp"),           # Ashby; Walmart-backed consumer fintech — board slug is "oneapp", NOT "onepay" (confirmed via onepay.com/careers linking directly to jobs.ashbyhq.com/oneapp)
+    ("Lumos",                   "lumos"),            # Ashby; identity/access security
+    ("Coder",                   "coder"),            # Ashby; cloud dev environments (coder.com)
+    ("Highland Electric Fleets","highlandfleets-2"), # Lever; EV fleet electrification — requested as "Highland Fleets"; slug has a "-2" suffix, plain "highlandfleets" is not the live board
+
 ]
 
 # ── Workday companies (reference only — search disabled) ──────────────────────
