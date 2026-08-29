@@ -5245,6 +5245,35 @@ COMPANIES = [
     ("Coder",                   "coder"),            # Ashby; cloud dev environments (coder.com)
     ("Highland Electric Fleets","highlandfleets-2"), # Lever; EV fleet electrification — requested as "Highland Fleets"; slug has a "-2" suffix, plain "highlandfleets" is not the live board
 
+    # ── User-requested additions (Aug 2026 batch 4) ────────────────────────────
+    # Every slug below was hit directly against its live boards-api/
+    # posting-api/postings endpoint (curl) before being added. Life 360,
+    # Addepar, and Iterable were requested again in this batch but already
+    # exist above with matching slugs ("life360", "addepar", "iterable"),
+    # so they're intentionally not repeated here.
+    # "Latitude" was requested (Ashby) but NOT added -- there's a real
+    # company by that name (formerly AI Dungeon, AI-native games) that does
+    # use Ashby, but its board's public job-list endpoint 404s (individual
+    # job-detail URLs return 401, suggesting the board itself is set to
+    # unlisted/restricted rather than the slug being wrong). This is
+    # unrelated to the existing ("Latitude WMS", "latitude") entry above,
+    # which is a different company entirely and lives on Greenhouse.
+    ("Prenuvo",                 "prenuvo"),           # Greenhouse; whole-body MRI preventive screening
+    ("Aio Logic",               "aiologic"),          # Greenhouse; lending/loan-servicing SaaS
+    ("Tract",                   "tract"),             # Greenhouse; data-center land development — requested as "Tract Capital", no such board exists, this is the real "Tract"
+    ("Frontline Wildfire Defense","frontlinewildfire"), # Greenhouse; wildfire home defense — slug drops "defense"
+    ("Form Health",             "formhealth"),        # Greenhouse; obesity medicine telehealth
+    ("Counterpart",             "counterpart"),       # Greenhouse; management/professional liability insurtech
+    ("Miter",                   "miter"),             # Ashby; construction workforce management software
+    ("iCounter",                "icounter"),          # Ashby; third-party cyber risk intelligence
+    ("TLDR",                    "tldr.tech"),         # Ashby; tech newsletter — slug is "tldr.tech", not "tldr"
+    ("Pano AI",                 "pano-ai"),           # Ashby; wildfire detection AI — slug is hyphenated
+    ("Ontic",                   "ontic"),             # Ashby; physical security / protective intelligence software
+    ("Averi",                   "averi"),             # Ashby; AI Verification and Evaluation Research Institute
+    ("Rifa AI",                 "rifa"),              # Ashby; AI agents for contact centers — requested as "Rifa Ai", slug is just "rifa"
+    ("Bidgely",                 "bidgely-inc"),       # Ashby; AI energy analytics for utilities — slug is "bidgely-inc", not "bidgely"
+    ("Black Cloak",             "BlackCloak"),        # Lever; digital executive protection — slug is case-sensitive, lowercase 404s
+
 ]
 
 # ── Workday companies (reference only — search disabled) ──────────────────────
