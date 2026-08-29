@@ -35,6 +35,7 @@ from location_groups import (
     US_WORD_RE, US_STATE_NAMES, US_STATE_ABBR_RE,
     CANADA_WORD_RE, CANADA_PROVINCE_NAMES, UK_WORD_RE,
 )
+from role_groups import ROLE_LABELS_BY_SLUG
 import mcp_server
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -275,6 +276,8 @@ def start_scheduler():
     # emails/day per saved search, which is spam, not a digest.
     scheduler.add_job(run_saved_search_alerts_job, "interval", hours=24, id="search_alerts",
                        next_run_time=_compute_next_alert_time())
+    scheduler.add_job(run_mcp_search_alerts_job, "interval", hours=24, id="mcp_search_alerts",
+                       next_run_time=_compute_next_mcp_alert_time())
     scheduler.add_job(run_weekly_digest_job, "interval", days=7, id="weekly_digest",
                        next_run_time=_compute_next_digest_time())
     scheduler.start()
@@ -627,6 +630,93 @@ def run_saved_search_alerts_job():
         db_users.mark_search_checked(s["id"], now)
     db_users.record_alert_run(now, len(searches), emails_sent)
     print(f"[alerts] checked {len(searches)} saved searches, sent {emails_sent} emails")
+
+
+def run_mcp_search_alerts_job():
+    """The MCP-tool equivalent of run_saved_search_alerts_job() above --
+    same "new since last check, by first_seen" logic and the same
+    send_saved_search_alert_email() (that function only cares about
+    to_email/search_name/jobs, nothing about where the search itself was
+    stored, so it's reused as-is rather than duplicated) -- but reading
+    from db.py's mcp_saved_searches table (discrete columns, no JSON
+    blob, no login) instead of db_users.py's saved_searches. Kept as a
+    separate function/scheduled job rather than merged into the other
+    one specifically so a bug or slowdown in one alert path can never
+    affect the other, and so MCP-created alerts keep working even on a
+    deployment with no Postgres/DATABASE_URL configured at all (accounts
+    disabled) -- this path never touches db_users."""
+    if not (RESEND_API_KEY and RESEND_FROM_EMAIL):
+        return
+    searches = db.list_mcp_searches_for_alerts()
+    emails_sent = 0
+    now = datetime.now(timezone.utc)
+    for s in searches:
+        cutoff = s.get("last_checked_at") or s.get("created_at")
+        try:
+            cutoff = datetime.fromisoformat(cutoff) if isinstance(cutoff, str) else cutoff
+        except (TypeError, ValueError):
+            cutoff = None
+        if cutoff and cutoff.tzinfo is None:
+            cutoff = cutoff.replace(tzinfo=timezone.utc)
+        kwargs = {
+            "query": s.get("query") or "",
+            "location": s.get("location") or "",
+            "department": s.get("department") or "",
+            "commitment": s.get("commitment") or "",
+        }
+        if s.get("location_group"):
+            kwargs["location_groups"] = [s["location_group"]]
+        try:
+            rows, _total = db.search_jobs(**kwargs, page=1, per_page=SEARCH_ALERT_FETCH_LIMIT)
+        except Exception as e:
+            print(f"[mcp-alerts] search failed for mcp saved search {s['id']}: {e}")
+            continue
+        new_rows = []
+        for r in rows:
+            first_seen = r.get("first_seen")
+            if not first_seen:
+                continue
+            try:
+                fs = datetime.fromisoformat(first_seen)
+            except ValueError:
+                continue
+            if fs.tzinfo is None:
+                fs = fs.replace(tzinfo=timezone.utc)
+            if not cutoff or fs > cutoff:
+                new_rows.append(r)
+        if new_rows:
+            name = s.get("name") or "your MCP search"
+            if send_saved_search_alert_email(s["email"], name, new_rows):
+                emails_sent += 1
+        db.mark_mcp_search_checked(s["id"], now)
+    print(f"[mcp-alerts] checked {len(searches)} MCP-created alerts, sent {emails_sent} emails")
+
+
+def _compute_next_mcp_alert_time():
+    """Same reasoning as _compute_next_alert_time() -- schedule off the
+    last recorded activity instead of firing on every deploy. No
+    dedicated "run" record for this job (unlike the other three
+    scheduled jobs) since mcp_saved_searches rows themselves carry
+    last_checked_at -- this just looks at the single most-recently-
+    checked row as a stand-in for "when did this job last actually run."
+    """
+    try:
+        rows = db.list_mcp_searches_for_alerts()
+    except Exception:
+        return datetime.now() + timedelta(hours=1)
+    checked_ats = [r.get("last_checked_at") for r in rows if r.get("last_checked_at")]
+    if not checked_ats:
+        return datetime.now()
+    last = max(checked_ats)
+    try:
+        last = datetime.fromisoformat(last) if isinstance(last, str) else last
+    except (TypeError, ValueError):
+        return datetime.now()
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    due = last + timedelta(hours=24)
+    now = datetime.now(timezone.utc)
+    return due if due > now else now
 
 
 def run_weekly_digest_job():
@@ -1098,7 +1188,7 @@ def unsubscribe_page():
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <title>Unsubscribe — Skip The Boards</title>
-<link rel="stylesheet" href="/style.css?v=21" />
+<link rel="stylesheet" href="/style.css?v=23" />
 </head>
 <body>
   <main class="content-page">
@@ -1675,7 +1765,10 @@ def sitemap_xml():
     changes."""
     total = db.total_jobs()
     num_job_pages = (total + JOB_SITEMAP_PAGE_SIZE - 1) // JOB_SITEMAP_PAGE_SIZE
-    sitemaps = [f"{SITE_URL}/sitemap-static.xml", f"{SITE_URL}/sitemap-companies.xml"]
+    sitemaps = [
+        f"{SITE_URL}/sitemap-static.xml", f"{SITE_URL}/sitemap-companies.xml",
+        f"{SITE_URL}/sitemap-salary.xml",
+    ]
     sitemaps += [f"{SITE_URL}/sitemap-jobs-{n}.xml" for n in range(1, num_job_pages + 1)]
     entries = "\n".join(f"  <sitemap><loc>{loc}</loc></sitemap>" for loc in sitemaps)
     xml = (
@@ -1810,6 +1903,41 @@ EMPLOYMENT_TYPE_MAP = {
     "volunteer": "VOLUNTEER",
     "per diem": "PER_DIEM",
 }
+
+
+def _time_ago(iso_string):
+    """Server-side twin of app.js's timeAgo() -- same coarse
+    minutes/hours/days/weeks/months buckets, so the "confirmed X ago"
+    trust signal reads identically whether it's rendered here (this
+    file's one server-rendered page, render_job_page()) or client-side on
+    the search results grid's job cards. Returns "" for anything
+    unparseable rather than raising -- this is a nice-to-have trust
+    signal, not something that should ever 500 a job detail page."""
+    if not iso_string:
+        return ""
+    try:
+        then = datetime.fromisoformat(iso_string)
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return ""
+    diff = datetime.now(timezone.utc) - then
+    mins = int(diff.total_seconds() // 60)
+    if mins < 1:
+        return "just now"
+    if mins < 60:
+        return f"{mins} minute{'' if mins == 1 else 's'} ago"
+    hours = mins // 60
+    if hours < 24:
+        return f"{hours} hour{'' if hours == 1 else 's'} ago"
+    days = hours // 24
+    if days < 7:
+        return f"{days} day{'' if days == 1 else 's'} ago"
+    weeks = days // 7
+    if weeks < 5:
+        return f"{weeks} week{'' if weeks == 1 else 's'} ago"
+    months = days // 30
+    return f"{months} month{'' if months == 1 else 's'} ago"
 
 
 def _job_salary_text(job):
@@ -1987,6 +2115,17 @@ def render_job_page(job):
             f'<span class="tag tag-salary" title="Best-effort estimate pulled from the listing, '
             f'not a guaranteed figure">{esc(salary_text)}</span>'
         )
+    # Trust signal: when our own scraper last confirmed this exact listing
+    # was still live -- see app.js's matching freshnessBadge on search
+    # result cards for the full reasoning (distinct from "posted", which
+    # never changes even once a listing's gone stale).
+    last_seen_ago = _time_ago(last_seen)
+    if last_seen_ago:
+        tags_html.append(
+            f'<span class="tag tag-freshness" title="Our scraper last confirmed this listing was '
+            f'still live on {esc(company)}\'s own career page {esc(last_seen_ago)}">'
+            f'✓ Confirmed {esc(last_seen_ago)}</span>'
+        )
 
     blurb_html = ""
     if blurb or years_experience:
@@ -2084,9 +2223,9 @@ def render_job_page(job):
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=21" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=21" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=21" />
+<link rel="icon" href="/favicon.svg?v=23" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=23" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=23" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -2107,7 +2246,7 @@ def render_job_page(job):
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=21" />
+<link rel="stylesheet" href="/style.css?v=23" />
 </head>
 <body>
   <nav class="topnav">
@@ -2252,7 +2391,7 @@ def job_page(segment):
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Role no longer available — Skip The Boards</title>
 <meta name="robots" content="noindex" />
-<link rel="stylesheet" href="/style.css?v=21" /></head>
+<link rel="stylesheet" href="/style.css?v=23" /></head>
 <body><main class="content-page"><h1>This role isn't available anymore</h1>
 <p class="content-page-intro">It's either been filled, taken down by the company, or the link's
 just wrong. <a href="/">Search current openings instead →</a></p></main></body></html>"""
@@ -2327,9 +2466,9 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=21" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=21" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=21" />
+<link rel="icon" href="/favicon.svg?v=23" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=23" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=23" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -2348,7 +2487,7 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=21" />
+<link rel="stylesheet" href="/style.css?v=23" />
 </head>
 <body>
   <nav class="topnav">
@@ -2431,10 +2570,21 @@ def company_hub_page(slug):
         f"{len(jobs)} open role{'s' if len(jobs) != 1 else ''} at {company}, pulled directly from "
         f"their own career page. Apply directly, no account required."
     )
+    # Cross-link to the salary insight page for this company, but only if
+    # it actually has enough disclosed-salary postings to show anything
+    # (see db.salary_stats_for_company()'s minimum-sample-size cutoff) --
+    # linking to a page that would just 404/show "not enough data" is
+    # worse than not linking at all.
+    salary_stats = db.salary_stats_for_company(company)
+    extra_html = (
+        f'<p class="salary-back-link"><a href="/salary/company/{slug}">See {html.escape(company)} salary data →</a></p>'
+        if salary_stats else ""
+    )
     body = render_hub_page(
         page_title, description, f"/jobs/company/{slug}",
         f"{company} jobs", description, jobs,
         f"{company} doesn't have any current openings in this dataset.",
+        extra_intro_html=extra_html,
     )
     return Response(body, mimetype="text/html")
 
@@ -2551,6 +2701,191 @@ def weekly_digest_page():
         extra_intro_html=subscribe_html,
     )
     return Response(body, mimetype="text/html")
+
+
+def _fmt_k(n):
+    """"$95k"-style formatting for a whole dollar figure -- same "~$Xk"
+    convention _job_salary_text()/app.js's formatSalary() already use for
+    individual job cards, so the salary insight pages read consistently
+    with every other salary figure on the site."""
+    n = int(round(n))
+    return f"${n // 1000}k" if n % 1000 == 0 else f"${n / 1000:.1f}k"
+
+
+def _salary_stats_html(stats, extra_note=""):
+    """Shared little summary card for a single role/company salary page --
+    median, range, and sample size, plus a one-line caveat that this is
+    self-reported/scraped data, not a survey. Kept as one function so the
+    role and company pages can never show this in two subtly different
+    formats."""
+    return f"""
+      <div class="salary-stats-block">
+        <div class="salary-stat"><span class="salary-stat-value">{_fmt_k(stats['median'])}</span><span class="salary-stat-label">Median posted salary</span></div>
+        <div class="salary-stat"><span class="salary-stat-value">{_fmt_k(stats['low'])}–{_fmt_k(stats['high'])}</span><span class="salary-stat-label">Full range</span></div>
+        <div class="salary-stat"><span class="salary-stat-value">{stats['count']}</span><span class="salary-stat-label">Postings with disclosed salary</span></div>
+      </div>
+      <p class="salary-caveat">Based on {stats['count']} current postings that disclosed a salary range on the employer's own career page -- not a survey, and not adjusted for level or location.{(' ' + extra_note) if extra_note else ''}</p>
+    """
+
+
+@app.route("/salary")
+def salary_index_page():
+    """The /salary hub -- one row per canonical role family and a
+    top-paying-companies table, each linking to its own aggregate page.
+    Real, crawlable "software engineer salary" / "<company> salary"
+    style landing pages, built entirely from this site's own scraped
+    salary data (see db.salary_stats_by_role()/salary_stats_by_company())
+    -- nothing here is a survey or self-reported figure, just a rollup of
+    real current postings."""
+    role_stats = db.salary_stats_by_role()
+    company_stats = db.salary_stats_by_company(limit=40)
+
+    role_rows = "".join(
+        f'<tr><td><a href="/salary/{_role_slug(s["label"])}">{html.escape(s["label"])}</a></td>'
+        f'<td>{_fmt_k(s["median"])}</td><td>{_fmt_k(s["low"])}–{_fmt_k(s["high"])}</td><td>{s["count"]}</td></tr>'
+        for s in role_stats
+    ) or '<tr><td colspan="4">Not enough disclosed-salary data yet -- check back as more postings come in.</td></tr>'
+
+    company_rows = "".join(
+        f'<tr><td><a href="/salary/company/{_slugify(s["company"])}">{html.escape(s["company"])}</a></td>'
+        f'<td>{_fmt_k(s["median"])}</td><td>{_fmt_k(s["low"])}–{_fmt_k(s["high"])}</td><td>{s["count"]}</td></tr>'
+        for s in company_stats
+    ) or '<tr><td colspan="4">Not enough disclosed-salary data yet -- check back as more postings come in.</td></tr>'
+
+    extra_html = f"""
+      <div class="salary-table-wrap">
+        <h2 class="salary-table-heading">By role</h2>
+        <table class="salary-table">
+          <thead><tr><th>Role</th><th>Median</th><th>Range</th><th>Postings</th></tr></thead>
+          <tbody>{role_rows}</tbody>
+        </table>
+      </div>
+      <div class="salary-table-wrap">
+        <h2 class="salary-table-heading">Highest-paying companies</h2>
+        <table class="salary-table">
+          <thead><tr><th>Company</th><th>Median</th><th>Range</th><th>Postings</th></tr></thead>
+          <tbody>{company_rows}</tbody>
+        </table>
+      </div>
+    """
+    description = (
+        "Median and range of disclosed salaries by role and by company, computed live from "
+        "current Greenhouse/Lever/Ashby postings -- not a survey."
+    )
+    body = render_hub_page(
+        "Salary Insights — Skip The Boards", description, "/salary",
+        "Salary insights", description, [], "",
+        extra_intro_html=extra_html,
+    )
+    return Response(body, mimetype="text/html")
+
+
+def _role_slug(label):
+    for slug, lbl in ROLE_LABELS_BY_SLUG.items():
+        if lbl == label:
+            return slug
+    return ""
+
+
+@app.route("/salary/<slug>")
+def role_salary_page(slug):
+    """One canonical role's aggregate salary stats plus its current
+    highest-paying disclosed-salary postings. 404s (not a soft-404) for
+    an unrecognized slug or a role with too little data to show yet --
+    same "don't publish a thin/misleading page" reasoning as
+    company_hub_page()'s no-current-openings 404."""
+    label = ROLE_LABELS_BY_SLUG.get(slug)
+    if label is None:
+        return Response("Not found", status=404, mimetype="text/plain")
+    stats = db.salary_stats_for_role(label)
+    if stats is None:
+        return Response(
+            render_hub_page(
+                f"{label} salary — Skip The Boards", "", f"/salary/{slug}",
+                f"{label} salary", "Not enough disclosed-salary postings for this role yet.",
+                [], "", noindex=True,
+            ),
+            status=404, mimetype="text/html",
+        )
+    jobs = db.jobs_for_role(label, limit=50)
+    description = (
+        f"Median disclosed salary for {label} roles is {_fmt_k(stats['median'])}, based on "
+        f"{stats['count']} current postings across Greenhouse, Lever, and Ashby career pages."
+    )
+    extra_html = _salary_stats_html(stats) + '<p class="salary-back-link"><a href="/salary">← All roles &amp; companies</a></p>'
+    body = render_hub_page(
+        f"{label} salary — Skip The Boards", description, f"/salary/{slug}",
+        f"{label} salary", description, jobs,
+        f"No current {label} postings disclose a salary right now.",
+        extra_intro_html=extra_html,
+    )
+    return Response(body, mimetype="text/html")
+
+
+@app.route("/salary/company/<slug>")
+def company_salary_page(slug):
+    """One company's aggregate disclosed-salary stats plus its current
+    highest-paying disclosed-salary postings. Reuses the exact same slug
+    scheme as /jobs/company/<slug> (see _find_company_by_slug()) so the
+    two pages can always cross-link to each other without any separate
+    slug bookkeeping."""
+    company = _find_company_by_slug(slug)
+    if company is None:
+        return Response("Not found", status=404, mimetype="text/plain")
+    stats = db.salary_stats_for_company(company)
+    if stats is None:
+        return Response(
+            render_hub_page(
+                f"{company} salary — Skip The Boards", "", f"/salary/company/{slug}",
+                f"{company} salary", "Not enough disclosed-salary postings for this company yet.",
+                [], "", noindex=True,
+            ),
+            status=404, mimetype="text/html",
+        )
+    jobs = sorted(
+        (j for j in db.jobs_for_company(company, limit=500) if j.get("salary_min") and j.get("salary_max")),
+        key=lambda j: j.get("salary_max") or 0, reverse=True,
+    )
+    description = (
+        f"Median disclosed salary at {company} is {_fmt_k(stats['median'])}, based on "
+        f"{stats['count']} current postings on their own career page."
+    )
+    extra_html = (
+        _salary_stats_html(stats)
+        + f'<p class="salary-back-link"><a href="/jobs/company/{slug}">See all {html.escape(company)} jobs →</a> · '
+        f'<a href="/salary">All roles &amp; companies</a></p>'
+    )
+    body = render_hub_page(
+        f"{company} salary — Skip The Boards", description, f"/salary/company/{slug}",
+        f"{company} salary", description, jobs,
+        f"No current {company} postings disclose a salary right now.",
+        extra_intro_html=extra_html,
+    )
+    return Response(body, mimetype="text/html")
+
+
+@app.route("/sitemap-salary.xml")
+def sitemap_salary_xml():
+    """/salary plus one URL per role page and per company-with-enough-
+    salary-data page -- a separate file from sitemap-static.xml because,
+    like sitemap-companies.xml, the company list here scales with the
+    dataset rather than being a fixed handful of pages."""
+    pages = [(f"{SITE_URL}/salary", "weekly", "0.6")]
+    for s in db.salary_stats_by_role():
+        pages.append((f"{SITE_URL}/salary/{_role_slug(s['label'])}", "weekly", "0.5"))
+    for s in db.salary_stats_by_company(limit=1000):
+        pages.append((f"{SITE_URL}/salary/company/{_slugify(s['company'])}", "weekly", "0.4"))
+    entries = "\n".join(
+        f"  <url><loc>{loc}</loc><changefreq>{freq}</changefreq><priority>{pri}</priority></url>"
+        for loc, freq, pri in pages
+    )
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{entries}\n"
+        "</urlset>\n"
+    )
+    return Response(xml, mimetype="application/xml")
 
 
 @app.route("/admin")

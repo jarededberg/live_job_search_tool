@@ -1214,6 +1214,7 @@ main {
 .tag-department { background: #eefaf3; color: #147a4d; }
 .tag-commitment { background: #fdf5e9; color: #9a6a15; }
 .tag-salary { background: #f2effc; color: #5b3ec8; cursor: help; }
+.tag-freshness { background: #eefaf3; color: #147a4d; cursor: help; }
 
 .match-badge {
   display: inline-flex;
@@ -1852,6 +1853,82 @@ footer {
   color: var(--muted);
   margin-top: 6px;
 }
+
+/* ---------- Salary insight pages (/salary, /salary/<role>, /salary/company/<slug>) ---------- */
+
+.salary-stats-block {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin: 8px 0 10px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-subtle);
+}
+.salary-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.salary-stat-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+.salary-stat-label {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.salary-caveat {
+  font-size: 0.78rem;
+  color: var(--muted-light);
+  margin: 0 0 18px;
+  max-width: 640px;
+  line-height: 1.5;
+}
+.salary-back-link {
+  font-size: 0.85rem;
+  margin: 0 0 24px;
+}
+.salary-back-link a { color: var(--accent); text-decoration: none; }
+.salary-back-link a:hover { text-decoration: underline; }
+
+.salary-table-wrap {
+  margin: 0 0 32px;
+}
+.salary-table-heading {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 10px;
+}
+.salary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+.salary-table th {
+  text-align: left;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 10px 8px 0;
+}
+.salary-table td {
+  padding: 8px 10px 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--ink-soft);
+}
+.salary-table td:first-child a {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+.salary-table td:first-child a:hover { color: var(--accent); }
 
 .job-flag-block {
   margin-top: 10px;

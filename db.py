@@ -15,6 +15,7 @@ from boolean_search import parse_query, evaluate, leaf_terms
 from location_groups import matches_group, is_clearly_non_us, is_remote, city_state_variants
 from department_groups import classify_department, DEPARTMENT_DISPLAY_ORDER
 from blurb_extractor import parse_years_range
+from role_groups import classify_role, ROLE_DISPLAY_ORDER
 
 DB_PATH = os.environ.get("JOBS_DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "jobs.db"))
 MAX_CANDIDATES = 50000  # cap on rows pulled from SQLite before Python-side boolean evaluation
@@ -236,6 +237,36 @@ def init_db():
                 subscribers_emailed INTEGER
             )
         """)
+
+        # mcp_saved_searches: the MCP server's save_search/create_job_alert
+        # tools (see mcp_server.py) -- an email-based equivalent of
+        # db_users.py's saved_searches+alerts_enabled for callers with no
+        # login at all (an AI agent acting on someone's behalf over MCP
+        # has no session cookie to attach a real account to). Lives here
+        # in the no-account SQLite db for the same reason company_requests/
+        # job_flags/digest_subscribers do -- discrete filter columns
+        # rather than one JSON blob (unlike db_users.saved_searches' own
+        # params_json) since every filter an MCP tool call can express
+        # maps onto one of db.search_jobs()'s own keyword arguments
+        # one-to-one, with no legacy singular/plural shape to stay
+        # backward-compatible with the way the browser UI's params blob
+        # does.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS mcp_saved_searches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                query TEXT NOT NULL DEFAULT '',
+                location TEXT NOT NULL DEFAULT '',
+                location_group TEXT NOT NULL DEFAULT '',
+                department TEXT NOT NULL DEFAULT '',
+                commitment TEXT NOT NULL DEFAULT '',
+                alerts_enabled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                last_checked_at TEXT
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mcp_saved_searches_email ON mcp_saved_searches(email)")
         conn.commit()
 
 
@@ -473,6 +504,82 @@ def last_digest_run():
     with conn_ctx() as conn:
         row = conn.execute("SELECT * FROM digest_runs ORDER BY id DESC LIMIT 1").fetchone()
         return dict(row) if row else None
+
+
+def create_mcp_saved_search(email, name="", query="", location="", location_group="",
+                             department="", commitment="", alerts_enabled=False):
+    """Creates one row for mcp_server.py's save_search/create_job_alert
+    tools. `alerts_enabled` is the only difference between the two tools
+    at the storage layer -- save_search inserts with it False (a pure
+    bookmark), create_job_alert inserts with it True (also gets picked up
+    by the scheduled alert job, see app.py's run_mcp_search_alerts_job()).
+    Returns the new row's id."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _lock, conn_ctx() as conn:
+        cur = conn.execute(
+            "INSERT INTO mcp_saved_searches (email, name, query, location, location_group, "
+            "department, commitment, alerts_enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (email, name, query, location, location_group, department, commitment,
+             1 if alerts_enabled else 0, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def list_mcp_saved_searches_for_email(email):
+    """Every saved search/alert belonging to one email, newest first --
+    powers the list_my_searches MCP tool. Ownership here is just "knows
+    the email" (no password, no login) -- same trust model as the
+    unsubscribe-by-email-plus-token links elsewhere on this site, but
+    even lighter since there's no destructive action gated behind it
+    (worst case someone who doesn't own the address turns email alerts
+    on/off for a search that's about as sensitive as a Google Alert)."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT * FROM mcp_saved_searches WHERE email = ? ORDER BY id DESC", (email,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_mcp_saved_search(search_id):
+    with conn_ctx() as conn:
+        row = conn.execute("SELECT * FROM mcp_saved_searches WHERE id = ?", (search_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def set_mcp_search_alerts(search_id, email, enabled):
+    """Flips alerts_enabled for one row, scoped to `email` matching what's
+    on file for that id -- powers cancel_job_alert (and could re-enable
+    one later). Returns True only if a row was actually found AND owned
+    by that email, so a wrong/mistyped email can't silently no-op look
+    like success to the caller."""
+    with _lock, conn_ctx() as conn:
+        cur = conn.execute(
+            "UPDATE mcp_saved_searches SET alerts_enabled = ? WHERE id = ? AND email = ?",
+            (1 if enabled else 0, search_id, email),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def list_mcp_searches_for_alerts():
+    """Every row with alerts_enabled -- the MCP-alert equivalent of
+    db_users.list_searches_for_alerts(), consumed by app.py's
+    run_mcp_search_alerts_job()."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT * FROM mcp_saved_searches WHERE alerts_enabled = 1"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def mark_mcp_search_checked(search_id, checked_at):
+    with conn_ctx() as conn:
+        conn.execute(
+            "UPDATE mcp_saved_searches SET last_checked_at = ? WHERE id = ?",
+            (checked_at.isoformat() if hasattr(checked_at, "isoformat") else checked_at, search_id),
+        )
+        conn.commit()
 
 
 SORT_OPTIONS = {
@@ -1117,6 +1224,172 @@ def salary_bounds():
     lo = (row["lo"] // 5000) * 5000
     hi = -(-row["hi"] // 5000) * 5000  # ceiling division
     return int(lo), int(hi)
+
+
+def _median(sorted_values):
+    """Standard median of an already-sorted list -- average of the two
+    middle values on an even count, the single middle value on odd.
+    Separate tiny helper (rather than inlining) because both
+    salary_stats_by_role() and salary_stats_by_company() need the exact
+    same definition, and a stats page showing a different median
+    convention between its two tables would look like a bug."""
+    n = len(sorted_values)
+    if n == 0:
+        return None
+    mid = n // 2
+    if n % 2 == 1:
+        return sorted_values[mid]
+    return (sorted_values[mid - 1] + sorted_values[mid]) / 2
+
+
+MIN_SALARY_SAMPLE_SIZE = 3  # see salary_stats_by_role()/salary_stats_by_company() docstrings
+
+
+def _salary_rollup_rows():
+    """Every (title, company, salary_min, salary_max) tuple for jobs that
+    report BOTH salary bounds -- the shared raw material for both
+    role-level and company-level salary rollups below. One query, reused
+    by both, so the two pages can never drift out of sync about which
+    underlying jobs counted."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT title, company, salary_min, salary_max FROM jobs "
+            "WHERE salary_min IS NOT NULL AND salary_max IS NOT NULL"
+        ).fetchall()
+    return rows
+
+
+def _rollup_stats(midpoints, lo_values, hi_values):
+    """Shared aggregate shape for one bucket (one role or one company):
+    sample size, median of each job's own (min+max)/2 midpoint (a single
+    number per posting is more meaningful to show as "the" salary for a
+    bucket than separately medianing mins and maxes against each other),
+    and the overall low/high range actually posted anywhere in the
+    bucket."""
+    midpoints_sorted = sorted(midpoints)
+    return {
+        "count": len(midpoints),
+        "median": _median(midpoints_sorted),
+        "low": min(lo_values),
+        "high": max(hi_values),
+    }
+
+
+def salary_stats_by_role():
+    """One row per canonical role (see role_groups.py) that has at least
+    MIN_SALARY_SAMPLE_SIZE salary-confirmed postings currently in the
+    dataset -- {"label", "slug", "count", "median", "low", "high"},
+    ordered by ROLE_DISPLAY_ORDER. Powers the /salary index page. The
+    minimum-sample-size cutoff exists so a role with just one or two
+    confirmed postings (which could be a single outlier company's pay
+    band) doesn't get presented as if it were a reliable market figure --
+    same "don't overclaim confidence a small sample can't support"
+    reasoning as showing a real 404 rather than a thin/misleading page
+    elsewhere on this site."""
+    rows = _salary_rollup_rows()
+    buckets = {}
+    for r in rows:
+        label = classify_role(r["title"])
+        if label is None:
+            continue
+        buckets.setdefault(label, {"mid": [], "lo": [], "hi": []})
+        buckets[label]["mid"].append((r["salary_min"] + r["salary_max"]) / 2)
+        buckets[label]["lo"].append(r["salary_min"])
+        buckets[label]["hi"].append(r["salary_max"])
+
+    results = []
+    for label in ROLE_DISPLAY_ORDER:
+        b = buckets.get(label)
+        if not b or len(b["mid"]) < MIN_SALARY_SAMPLE_SIZE:
+            continue
+        stats = _rollup_stats(b["mid"], b["lo"], b["hi"])
+        stats["label"] = label
+        results.append(stats)
+    return results
+
+
+def salary_stats_for_role(role_label):
+    """Same aggregate shape as one entry of salary_stats_by_role(), for a
+    single canonical role -- returns None if that role has fewer than
+    MIN_SALARY_SAMPLE_SIZE confirmed postings right now (caller should
+    404, same convention as _find_company_by_slug()'s no-current-openings
+    case)."""
+    rows = _salary_rollup_rows()
+    mid, lo, hi = [], [], []
+    for r in rows:
+        if classify_role(r["title"]) == role_label:
+            mid.append((r["salary_min"] + r["salary_max"]) / 2)
+            lo.append(r["salary_min"])
+            hi.append(r["salary_max"])
+    if len(mid) < MIN_SALARY_SAMPLE_SIZE:
+        return None
+    return _rollup_stats(mid, lo, hi)
+
+
+def jobs_for_role(role_label, limit=100):
+    """Current salary-confirmed postings that classify into one canonical
+    role, highest-salary first -- the listing body of a /salary/<slug>
+    page (people land there to see what roles like this actually pay, so
+    leading with the highest-paying real postings is the most useful
+    order, same idea as the weekly digest's salary_high sort)."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE salary_min IS NOT NULL AND salary_max IS NOT NULL"
+        ).fetchall()
+    matched = [dict(r) for r in rows if classify_role(r["title"]) == role_label]
+    matched.sort(key=lambda r: r.get("salary_max") or 0, reverse=True)
+    result = []
+    for d in matched[:limit]:
+        try:
+            d["tools"] = json.loads(d.get("tools") or "[]")
+        except (TypeError, ValueError):
+            d["tools"] = []
+        result.append(d)
+    return result
+
+
+def salary_stats_by_company(min_sample=MIN_SALARY_SAMPLE_SIZE, limit=500):
+    """One row per company with at least `min_sample` salary-confirmed
+    postings -- {"company", "count", "median", "low", "high"}, sorted by
+    median descending (highest-paying companies first, the natural way
+    someone browsing a "salary insights" index would want this ranked).
+    Same minimum-sample-size reasoning as salary_stats_by_role(): a
+    company with one or two disclosed salaries shouldn't be presented
+    next to companies with dozens, ranked as if they were equally
+    reliable figures."""
+    rows = _salary_rollup_rows()
+    buckets = {}
+    for r in rows:
+        buckets.setdefault(r["company"], {"mid": [], "lo": [], "hi": []})
+        buckets[r["company"]]["mid"].append((r["salary_min"] + r["salary_max"]) / 2)
+        buckets[r["company"]]["lo"].append(r["salary_min"])
+        buckets[r["company"]]["hi"].append(r["salary_max"])
+
+    results = []
+    for company, b in buckets.items():
+        if len(b["mid"]) < min_sample:
+            continue
+        stats = _rollup_stats(b["mid"], b["lo"], b["hi"])
+        stats["company"] = company
+        results.append(stats)
+    results.sort(key=lambda s: s["median"], reverse=True)
+    return results[:limit]
+
+
+def salary_stats_for_company(company):
+    """Same aggregate shape as one entry of salary_stats_by_company(), for
+    a single company -- returns None if that company has fewer than
+    MIN_SALARY_SAMPLE_SIZE confirmed postings right now."""
+    rows = _salary_rollup_rows()
+    mid, lo, hi = [], [], []
+    for r in rows:
+        if r["company"] == company:
+            mid.append((r["salary_min"] + r["salary_max"]) / 2)
+            lo.append(r["salary_min"])
+            hi.append(r["salary_max"])
+    if len(mid) < MIN_SALARY_SAMPLE_SIZE:
+        return None
+    return _rollup_stats(mid, lo, hi)
 
 
 YOE_SLIDER_MAX = 20  # see years_bounds() docstring
