@@ -2574,8 +2574,13 @@ def company_hub_page(slug):
     # it actually has enough disclosed-salary postings to show anything
     # (see db.salary_stats_for_company()'s minimum-sample-size cutoff) --
     # linking to a page that would just 404/show "not enough data" is
-    # worse than not linking at all.
-    salary_stats = db.salary_stats_for_company(company)
+    # worse than not linking at all. Reads from the in-memory salary
+    # cache (see _refresh_salary_cache_if_stale()), NOT a direct db call
+    # -- this route is probably the single most-visited page type on the
+    # whole site, and a real production outage happened because this
+    # exact check used to run a full unindexed table scan on every view.
+    _refresh_salary_cache_if_stale()
+    salary_stats = _salary_cache["by_company_dict"].get(company)
     extra_html = (
         f'<p class="salary-back-link"><a href="/salary/company/{slug}">See {html.escape(company)} salary data →</a></p>'
         if salary_stats else ""
@@ -2728,6 +2733,72 @@ def _salary_stats_html(stats, extra_note=""):
     """
 
 
+# ---------------------------------------------------------------------------
+# Salary stats cache -- see db.salary_confirmed_jobs_by_role()'s docstring
+# for the real production incident this exists to fix: every /salary*
+# route originally called db.salary_stats_by_role()/salary_stats_by_company()/
+# salary_stats_for_company()/jobs_for_role() directly, each doing its own
+# full unindexed scan (plus a classify_role() call per row) over the
+# WHOLE jobs table, on every single HTTP request. Against the tiny fake
+# datasets used while building the feature this was instant; against a
+# real ~100k-row production table, a single one of these requests could
+# take long enough to tie up the app's worker process, backing up every
+# other request behind it until Cloudflare gave up on the whole site
+# (a 524, not a 500 -- the app never crashed, it just never got around to
+# answering). The worst single offender was company_hub_page()'s new
+# "see salary data" cross-link check, which ran this same expensive scan
+# on every /jobs/company/<slug> view -- probably the single most-visited
+# page type on the whole site.
+#
+# Fix: compute all of it once, cache it in memory, and serve every
+# request from the cache until it's stale. This data doesn't need to be
+# more current than "as of the last scrape cycle" anyway -- a salary
+# median moving by one newly-scraped posting isn't something anyone
+# needs to see within seconds of it happening.
+_SALARY_CACHE_TTL = timedelta(minutes=20)
+_salary_cache_lock = threading.Lock()
+_salary_cache = {
+    "computed_at": None,
+    "by_role": [],          # list of stats dicts, in ROLE_DISPLAY_ORDER order
+    "by_role_dict": {},     # label -> stats dict, for O(1) lookup
+    "by_company": [],       # full list, sorted by median descending
+    "by_company_dict": {},  # company -> stats dict, for O(1) lookup
+    "jobs_by_role": {},     # label -> list of job dicts (already salary-sorted)
+}
+
+
+def _refresh_salary_cache_if_stale(force=False):
+    """Recomputes the salary cache if it's empty or older than
+    _SALARY_CACHE_TTL (or unconditionally if force=True, used to warm the
+    cache once at startup -- see start_scheduler()'s caller). Double-
+    checks staleness after acquiring the lock so two requests racing to
+    refresh at the same moment don't both pay the (expensive, see above)
+    recomputation cost -- the second one just finds the first one already
+    did it and returns immediately."""
+    now = datetime.now(timezone.utc)
+    computed_at = _salary_cache["computed_at"]
+    if not force and computed_at is not None and (now - computed_at) < _SALARY_CACHE_TTL:
+        return
+    with _salary_cache_lock:
+        computed_at = _salary_cache["computed_at"]
+        if not force and computed_at is not None and (datetime.now(timezone.utc) - computed_at) < _SALARY_CACHE_TTL:
+            return
+        by_role = db.salary_stats_by_role()
+        # No `limit` here (a very high one instead) -- this cache holds
+        # the FULL company list once; each caller slices whatever prefix
+        # it needs (40 for the index page, 1000 for the sitemap) out of
+        # the same cached list rather than the cache holding multiple
+        # differently-limited copies.
+        by_company = db.salary_stats_by_company(limit=1_000_000)
+        jobs_by_role = db.salary_confirmed_jobs_by_role(limit_per_role=50)
+        _salary_cache["by_role"] = by_role
+        _salary_cache["by_role_dict"] = {s["label"]: s for s in by_role}
+        _salary_cache["by_company"] = by_company
+        _salary_cache["by_company_dict"] = {s["company"]: s for s in by_company}
+        _salary_cache["jobs_by_role"] = jobs_by_role
+        _salary_cache["computed_at"] = datetime.now(timezone.utc)
+
+
 @app.route("/salary")
 def salary_index_page():
     """The /salary hub -- one row per canonical role family and a
@@ -2737,8 +2808,9 @@ def salary_index_page():
     salary data (see db.salary_stats_by_role()/salary_stats_by_company())
     -- nothing here is a survey or self-reported figure, just a rollup of
     real current postings."""
-    role_stats = db.salary_stats_by_role()
-    company_stats = db.salary_stats_by_company(limit=40)
+    _refresh_salary_cache_if_stale()
+    role_stats = _salary_cache["by_role"]
+    company_stats = _salary_cache["by_company"][:40]
 
     role_rows = "".join(
         f'<tr><td><a href="/salary/{_role_slug(s["label"])}">{html.escape(s["label"])}</a></td>'
@@ -2797,7 +2869,8 @@ def role_salary_page(slug):
     label = ROLE_LABELS_BY_SLUG.get(slug)
     if label is None:
         return Response("Not found", status=404, mimetype="text/plain")
-    stats = db.salary_stats_for_role(label)
+    _refresh_salary_cache_if_stale()
+    stats = _salary_cache["by_role_dict"].get(label)
     if stats is None:
         return Response(
             render_hub_page(
@@ -2807,7 +2880,7 @@ def role_salary_page(slug):
             ),
             status=404, mimetype="text/html",
         )
-    jobs = db.jobs_for_role(label, limit=50)
+    jobs = _salary_cache["jobs_by_role"].get(label, [])
     description = (
         f"Median disclosed salary for {label} roles is {_fmt_k(stats['median'])}, based on "
         f"{stats['count']} current postings across Greenhouse, Lever, and Ashby career pages."
@@ -2832,7 +2905,8 @@ def company_salary_page(slug):
     company = _find_company_by_slug(slug)
     if company is None:
         return Response("Not found", status=404, mimetype="text/plain")
-    stats = db.salary_stats_for_company(company)
+    _refresh_salary_cache_if_stale()
+    stats = _salary_cache["by_company_dict"].get(company)
     if stats is None:
         return Response(
             render_hub_page(
@@ -2869,11 +2943,16 @@ def sitemap_salary_xml():
     """/salary plus one URL per role page and per company-with-enough-
     salary-data page -- a separate file from sitemap-static.xml because,
     like sitemap-companies.xml, the company list here scales with the
-    dataset rather than being a fixed handful of pages."""
+    dataset rather than being a fixed handful of pages. Reads from the
+    in-memory salary cache (see _refresh_salary_cache_if_stale()) rather
+    than calling db.py directly -- a crawler hitting this sitemap was one
+    of the likely triggers of a real production outage before this
+    cache existed (see that function's docstring)."""
+    _refresh_salary_cache_if_stale()
     pages = [(f"{SITE_URL}/salary", "weekly", "0.6")]
-    for s in db.salary_stats_by_role():
+    for s in _salary_cache["by_role"]:
         pages.append((f"{SITE_URL}/salary/{_role_slug(s['label'])}", "weekly", "0.5"))
-    for s in db.salary_stats_by_company(limit=1000):
+    for s in _salary_cache["by_company"][:1000]:
         pages.append((f"{SITE_URL}/salary/company/{_slugify(s['company'])}", "weekly", "0.4"))
     entries = "\n".join(
         f"  <url><loc>{loc}</loc><changefreq>{freq}</changefreq><priority>{pri}</priority></url>"
@@ -2927,6 +3006,16 @@ if not contact_enabled():
           "plain 'not available right now' message instead (no mailto: "
           "fallback -- see README's 'Contact form' section for why).")
 _scheduler = start_scheduler()
+
+# Warm the salary cache once at startup, in a background thread -- NOT
+# synchronously here at module import time, since that would block every
+# worker process from finishing boot on the exact same expensive
+# full-table scan this cache exists to get off the request path (see
+# _refresh_salary_cache_if_stale()'s docstring). A cold cache is already
+# handled safely either way (the first request to a /salary* route just
+# triggers the same refresh inline), this just makes that unlikely to be
+# the first thing that happens after a deploy.
+threading.Thread(target=_refresh_salary_cache_if_stale, kwargs={"force": True}, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))

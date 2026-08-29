@@ -1376,6 +1376,49 @@ def salary_stats_by_company(min_sample=MIN_SALARY_SAMPLE_SIZE, limit=500):
     return results[:limit]
 
 
+def salary_confirmed_jobs_by_role(limit_per_role=50):
+    """Every canonical role's current highest-paying disclosed-salary
+    postings, computed in ONE pass over the jobs table -- {label: [job,
+    ...]}. This replaces calling jobs_for_role() once per role (22
+    separate full-table scans, one per canonical role) with a single
+    scan that buckets every row by its classified role as it goes.
+
+    This function exists specifically because of a real production
+    outage: the original /salary/<role> route called db.jobs_for_role()
+    (its own full "SELECT * FROM jobs WHERE salary_min/max IS NOT NULL"
+    scan plus a classify_role() call per row) directly, on every single
+    page view, with no caching -- fine against the tiny fake datasets
+    used while building the feature, but a full unindexed scan against
+    a real ~100k-row production table is expensive enough that a single
+    slow request could tie up the app's one worker process and time out
+    every other visitor behind it (a Cloudflare 524 on the ENTIRE site,
+    not just /salary). The fix on the app.py side is an in-memory cache
+    with a TTL that calls this function once per refresh instead of once
+    per request; this function's job is just to make one refresh cost
+    one scan instead of 22."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE salary_min IS NOT NULL AND salary_max IS NOT NULL"
+        ).fetchall()
+    buckets = {}
+    for r in rows:
+        label = classify_role(r["title"])
+        if label is None:
+            continue
+        buckets.setdefault(label, []).append(dict(r))
+    result = {}
+    for label, jobs in buckets.items():
+        jobs.sort(key=lambda j: j.get("salary_max") or 0, reverse=True)
+        trimmed = jobs[:limit_per_role]
+        for d in trimmed:
+            try:
+                d["tools"] = json.loads(d.get("tools") or "[]")
+            except (TypeError, ValueError):
+                d["tools"] = []
+        result[label] = trimmed
+    return result
+
+
 def salary_stats_for_company(company):
     """Same aggregate shape as one entry of salary_stats_by_company(), for
     a single company -- returns None if that company has fewer than

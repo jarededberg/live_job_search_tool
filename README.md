@@ -1548,6 +1548,45 @@ was also switched from an absolute locale timestamp to the same relative
 phrasing, for the same reason a relative time reads as more immediately
 trustworthy than a raw date the visitor has to do subtraction on.
 
+## Incident: salary stats caused a full-site outage
+
+Shortly after the salary insight pages shipped, the entire site (not just
+`/salary`) started returning Cloudflare 524s (origin timeout) to every
+visitor. Root cause: `db.salary_stats_by_role()`/`salary_stats_by_company()`/
+`salary_stats_for_company()`/`jobs_for_role()` each ran a full,
+unindexed scan over the whole `jobs` table (plus a `classify_role()`
+regex pass per row for the role-based ones) -- and ran it fresh on
+**every single HTTP request**, not once. Against the tiny fake datasets
+used while building the feature this was instant, so it was never
+caught before shipping. Against the real ~100k-row production table, a
+single one of these requests was slow enough to tie up the app's worker
+process, and every other request queued up behind it until Cloudflare
+gave up on the whole site. The single worst offender was
+`company_hub_page()`'s "see salary data" cross-link, which ran this
+same expensive scan on every `/jobs/company/<slug>` view -- likely the
+most-visited page type on the entire site.
+
+**Fix:** an in-memory cache (`app.py`'s `_salary_cache` +
+`_refresh_salary_cache_if_stale()`, `_SALARY_CACHE_TTL = 20 minutes`)
+computes all of it once and every `/salary*` route plus the company-hub
+cross-link now reads from the cache instead of hitting `db.py` directly.
+`db.salary_confirmed_jobs_by_role()` is a new bulk function that
+computes every role's job listing in ONE table scan instead of the 22
+separate scans `jobs_for_role()` would otherwise need per cache refresh.
+A background thread warms the cache once at startup (not synchronously
+at import time, which would just move the same blocking problem to
+every worker's boot instead of the first request) so a fresh deploy
+doesn't leave the very first visitor to pay the refresh cost either.
+Verified against a 60,000-row synthetic dataset (comparable order of
+magnitude to production): a full cache refresh takes under a second,
+and every cached route responds in about a millisecond afterward.
+
+**Lesson for future rounds:** any new aggregate/rollup computation over
+the full `jobs` table needs to be tested against a dataset sized like
+production (tens of thousands of rows), not a handful of fake rows --
+correctness passing against a tiny dataset says nothing about whether
+the same code will finish in reasonable time at real scale.
+
 ## FAQ / About
 
 Both static content, no backend involved beyond the page routes
