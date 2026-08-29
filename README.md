@@ -1525,6 +1525,29 @@ cutoff) and from the homepage footer. Has its own `/sitemap-salary.xml`
 same reasoning `sitemap-companies.xml` already has for its own separate
 file), registered in `/sitemap.xml`'s index.
 
+## "Confirmed X ago" trust signal
+
+Every job card and job detail page shows a small green "✓ Confirmed X ago"
+tag, computed from that specific listing's own `last_seen` timestamp (the
+most recent scrape that re-confirmed the posting was still live) — not
+the same thing as "posted", which is whatever date the employer's own ATS
+reports and never changes even once a listing's gone stale. This is a
+different, more specific trust signal than the homepage footer's
+site-wide "dataset last refreshed" line: it tells a visitor whether *this
+particular* listing was recently re-checked, not just when the scraper
+last ran at all.
+
+`app.js`'s `timeAgo()` (client-side, for search result cards) and
+`app.py`'s `_time_ago()` (server-side, for the one server-rendered job
+detail page) are two separate small functions on purpose — one's JS, one's
+Python, and there's no shared template layer between them — but they use
+the exact same coarse minutes/hours/days/weeks/months bucketing so a
+listing never reads as "confirmed 2 hours ago" on its card and something
+different on its own page. The homepage footer's "last refreshed" line
+was also switched from an absolute locale timestamp to the same relative
+phrasing, for the same reason a relative time reads as more immediately
+trustworthy than a raw date the visitor has to do subtraction on.
+
 ## FAQ / About
 
 Both static content, no backend involved beyond the page routes
@@ -2061,7 +2084,8 @@ specifically so adding the newer stateless flow later, or supporting
 both per the spec's own backward-compatibility guidance, is additive
 rather than a rewrite.
 
-**Three tools, each a thin wrapper over an existing `db.py` function:**
+**Three tools, each a thin, read-only wrapper over an existing `db.py`
+function:**
 
 - `search_jobs` -- same boolean title search, location/department/
   commitment/recency filters, and sort options the homepage search
@@ -2097,5 +2121,5 @@ by any browser.
 custom/remote MCP server (in Claude.ai: Settings -> Connectors -> Add
 custom connector; Claude Desktop and other agent frameworks have
 similar "add a remote MCP server by URL" flows). No API key or auth
-required -- it's the same public, read-only job data the website itself
-serves with no account needed.
+required -- this is the same public, read-only job data the website
+itself serves with no account needed.

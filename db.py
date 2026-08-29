@@ -237,6 +237,7 @@ def init_db():
                 subscribers_emailed INTEGER
             )
         """)
+
         conn.commit()
 
 

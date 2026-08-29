@@ -1214,6 +1214,7 @@ main {
 .tag-department { background: #eefaf3; color: #147a4d; }
 .tag-commitment { background: #fdf5e9; color: #9a6a15; }
 .tag-salary { background: #f2effc; color: #5b3ec8; cursor: help; }
+.tag-freshness { background: #eefaf3; color: #147a4d; cursor: help; }
 
 .match-badge {
   display: inline-flex;

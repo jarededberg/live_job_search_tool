@@ -1099,7 +1099,7 @@ def unsubscribe_page():
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <title>Unsubscribe — Skip The Boards</title>
-<link rel="stylesheet" href="/style.css?v=22" />
+<link rel="stylesheet" href="/style.css?v=23" />
 </head>
 <body>
   <main class="content-page">
@@ -1816,6 +1816,41 @@ EMPLOYMENT_TYPE_MAP = {
 }
 
 
+def _time_ago(iso_string):
+    """Server-side twin of app.js's timeAgo() -- same coarse
+    minutes/hours/days/weeks/months buckets, so the "confirmed X ago"
+    trust signal reads identically whether it's rendered here (this
+    file's one server-rendered page, render_job_page()) or client-side on
+    the search results grid's job cards. Returns "" for anything
+    unparseable rather than raising -- this is a nice-to-have trust
+    signal, not something that should ever 500 a job detail page."""
+    if not iso_string:
+        return ""
+    try:
+        then = datetime.fromisoformat(iso_string)
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return ""
+    diff = datetime.now(timezone.utc) - then
+    mins = int(diff.total_seconds() // 60)
+    if mins < 1:
+        return "just now"
+    if mins < 60:
+        return f"{mins} minute{'' if mins == 1 else 's'} ago"
+    hours = mins // 60
+    if hours < 24:
+        return f"{hours} hour{'' if hours == 1 else 's'} ago"
+    days = hours // 24
+    if days < 7:
+        return f"{days} day{'' if days == 1 else 's'} ago"
+    weeks = days // 7
+    if weeks < 5:
+        return f"{weeks} week{'' if weeks == 1 else 's'} ago"
+    months = days // 30
+    return f"{months} month{'' if months == 1 else 's'} ago"
+
+
 def _job_salary_text(job):
     """Human-readable salary line for the detail page -- same "~$Xk" /
     "~$Xk-$Yk" convention app.js's formatSalary() uses for job cards, so
@@ -1991,6 +2026,17 @@ def render_job_page(job):
             f'<span class="tag tag-salary" title="Best-effort estimate pulled from the listing, '
             f'not a guaranteed figure">{esc(salary_text)}</span>'
         )
+    # Trust signal: when our own scraper last confirmed this exact listing
+    # was still live -- see app.js's matching freshnessBadge on search
+    # result cards for the full reasoning (distinct from "posted", which
+    # never changes even once a listing's gone stale).
+    last_seen_ago = _time_ago(last_seen)
+    if last_seen_ago:
+        tags_html.append(
+            f'<span class="tag tag-freshness" title="Our scraper last confirmed this listing was '
+            f'still live on {esc(company)}\'s own career page {esc(last_seen_ago)}">'
+            f'✓ Confirmed {esc(last_seen_ago)}</span>'
+        )
 
     blurb_html = ""
     if blurb or years_experience:
@@ -2088,9 +2134,9 @@ def render_job_page(job):
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=22" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=22" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=22" />
+<link rel="icon" href="/favicon.svg?v=23" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=23" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=23" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -2111,7 +2157,7 @@ def render_job_page(job):
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=22" />
+<link rel="stylesheet" href="/style.css?v=23" />
 </head>
 <body>
   <nav class="topnav">
@@ -2256,7 +2302,7 @@ def job_page(segment):
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Role no longer available — Skip The Boards</title>
 <meta name="robots" content="noindex" />
-<link rel="stylesheet" href="/style.css?v=22" /></head>
+<link rel="stylesheet" href="/style.css?v=23" /></head>
 <body><main class="content-page"><h1>This role isn't available anymore</h1>
 <p class="content-page-intro">It's either been filled, taken down by the company, or the link's
 just wrong. <a href="/">Search current openings instead →</a></p></main></body></html>"""
@@ -2331,9 +2377,9 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=22" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=22" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=22" />
+<link rel="icon" href="/favicon.svg?v=23" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=23" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=23" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -2352,7 +2398,7 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=22" />
+<link rel="stylesheet" href="/style.css?v=23" />
 </head>
 <body>
   <nav class="topnav">
