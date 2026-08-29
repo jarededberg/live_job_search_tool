@@ -4,14 +4,14 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex, nofollow" />
-<link rel="icon" href="favicon.svg?v=18" type="image/svg+xml" />
-<link rel="alternate icon" href="favicon.ico?v=18" />
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=18" />
+<link rel="icon" href="favicon.svg?v=21" type="image/svg+xml" />
+<link rel="alternate icon" href="favicon.ico?v=21" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=21" />
 <title>Admin — Skip The Boards</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=18" />
+<link rel="stylesheet" href="style.css?v=21" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 </head>
 <body>
@@ -29,6 +29,7 @@
           <a href="/about">About</a>
           <a href="/faq">FAQ</a>
           <a href="/contact">Contact</a>
+          <a href="/request-company">Request a company</a>
         </nav>
         <a class="brand-link" href="/">← Back to search</a>
       </div>
@@ -78,6 +79,29 @@
       <div class="admin-chart-wrap">
         <canvas id="signup-chart" height="90"></canvas>
       </div>
+
+      <div class="admin-chart-header">
+        <h2>Company requests</h2>
+        <select id="admin-request-status">
+          <option value="pending" selected>Pending</option>
+          <option value="added">Added</option>
+          <option value="duplicate">Duplicate</option>
+          <option value="rejected">Rejected</option>
+          <option value="">All</option>
+        </select>
+      </div>
+      <div id="company-requests-list">Loading…</div>
+
+      <div class="admin-chart-header">
+        <h2>Flagged listings</h2>
+        <select id="admin-flag-status">
+          <option value="pending" selected>Pending</option>
+          <option value="resolved">Resolved</option>
+          <option value="dismissed">Dismissed</option>
+          <option value="">All</option>
+        </select>
+      </div>
+      <div id="job-flags-list">Loading…</div>
     </div>
   </main>
 
@@ -157,10 +181,114 @@
       });
 
       showOnly(contentEl);
+      loadCompanyRequests(requestStatusSelect.value); // only once we know this visitor is an authorized admin
+      loadJobFlags(flagStatusSelect.value);
     }
 
     rangeSelect.addEventListener("change", () => loadStats(rangeSelect.value));
     loadStats(rangeSelect.value);
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    const requestStatusSelect = document.getElementById("admin-request-status");
+    const requestsListEl = document.getElementById("company-requests-list");
+
+    async function loadCompanyRequests(status) {
+      requestsListEl.textContent = "Loading…";
+      let res;
+      try {
+        const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+        res = await fetch(`/api/admin/company-requests${qs}`);
+      } catch (e) {
+        requestsListEl.textContent = "Couldn't load company requests.";
+        return;
+      }
+      if (!res.ok) { requestsListEl.textContent = "Couldn't load company requests."; return; }
+      const data = await res.json();
+      if (!data.ok) { requestsListEl.textContent = "Couldn't load company requests."; return; }
+      if (!data.requests.length) {
+        requestsListEl.innerHTML = `<div class="empty-modal-state">Nothing here.</div>`;
+        return;
+      }
+      requestsListEl.innerHTML = data.requests.map((r) => `
+        <div class="saved-search-row" style="align-items:flex-start;flex-wrap:wrap;">
+          <div style="flex:1;min-width:220px;">
+            <div class="saved-search-name">${escapeHtml(r.company_name)}</div>
+            ${r.careers_url ? `<div style="font-size:0.78rem;"><a href="${escapeHtml(r.careers_url)}" target="_blank" rel="noopener">${escapeHtml(r.careers_url)}</a></div>` : ""}
+            ${r.requester_email ? `<div style="font-size:0.78rem;color:var(--muted);">${escapeHtml(r.requester_email)}</div>` : ""}
+            ${r.note ? `<div style="font-size:0.78rem;color:var(--muted);margin-top:4px;">${escapeHtml(r.note)}</div>` : ""}
+            <div style="font-size:0.72rem;color:var(--muted-light);margin-top:4px;">${escapeHtml(r.status)} · ${escapeHtml((r.created_at || "").slice(0, 10))}</div>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button type="button" class="row-action-btn" data-set-status="added" data-id="${r.id}">Added</button>
+            <button type="button" class="row-action-btn" data-set-status="duplicate" data-id="${r.id}">Duplicate</button>
+            <button type="button" class="row-action-btn danger" data-set-status="rejected" data-id="${r.id}">Reject</button>
+          </div>
+        </div>
+      `).join("");
+      requestsListEl.querySelectorAll("[data-set-status]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          await fetch(`/api/admin/company-requests/${btn.dataset.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: btn.dataset.setStatus }),
+          });
+          loadCompanyRequests(requestStatusSelect.value);
+        });
+      });
+    }
+
+    requestStatusSelect.addEventListener("change", () => loadCompanyRequests(requestStatusSelect.value));
+
+    const flagStatusSelect = document.getElementById("admin-flag-status");
+    const jobFlagsListEl = document.getElementById("job-flags-list");
+
+    async function loadJobFlags(status) {
+      jobFlagsListEl.textContent = "Loading…";
+      let res;
+      try {
+        const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+        res = await fetch(`/api/admin/job-flags${qs}`);
+      } catch (e) {
+        jobFlagsListEl.textContent = "Couldn't load flagged listings.";
+        return;
+      }
+      if (!res.ok) { jobFlagsListEl.textContent = "Couldn't load flagged listings."; return; }
+      const data = await res.json();
+      if (!data.ok) { jobFlagsListEl.textContent = "Couldn't load flagged listings."; return; }
+      if (!data.flags.length) {
+        jobFlagsListEl.innerHTML = `<div class="empty-modal-state">Nothing here.</div>`;
+        return;
+      }
+      jobFlagsListEl.innerHTML = data.flags.map((f) => `
+        <div class="saved-search-row" style="align-items:flex-start;flex-wrap:wrap;">
+          <div style="flex:1;min-width:220px;">
+            <div class="saved-search-name">${escapeHtml(f.job_title || "(untitled)")} — ${escapeHtml(f.company || "")}</div>
+            <div style="font-size:0.78rem;"><a href="${escapeHtml(f.job_url)}" target="_blank" rel="noopener">${escapeHtml(f.job_url)}</a></div>
+            <div style="font-size:0.78rem;color:var(--muted);margin-top:4px;">${escapeHtml(f.reason)}${f.note ? " — " + escapeHtml(f.note) : ""}</div>
+            <div style="font-size:0.72rem;color:var(--muted-light);margin-top:4px;">${escapeHtml(f.status)} · ${escapeHtml((f.created_at || "").slice(0, 10))}</div>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button type="button" class="row-action-btn" data-set-flag-status="resolved" data-id="${f.id}">Resolved</button>
+            <button type="button" class="row-action-btn danger" data-set-flag-status="dismissed" data-id="${f.id}">Dismiss</button>
+          </div>
+        </div>
+      `).join("");
+      jobFlagsListEl.querySelectorAll("[data-set-flag-status]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          await fetch(`/api/admin/job-flags/${btn.dataset.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: btn.dataset.setFlagStatus }),
+          });
+          loadJobFlags(flagStatusSelect.value);
+        });
+      });
+    }
+
+    flagStatusSelect.addEventListener("change", () => loadJobFlags(flagStatusSelect.value));
   </script>
 </body>
 </html>

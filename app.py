@@ -10,12 +10,14 @@ Then open http://localhost:8000
 
 import functools
 import hashlib
+import hmac
 import html
 import json
 import os
 import re
 import secrets
 import threading
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from urllib.error import URLError
@@ -147,11 +149,21 @@ def run_scrape_job():
             nonlocal new_count
             new_count += db.upsert_jobs(jobs_batch)
 
-        _, stats = scrape_all(max_workers=MAX_WORKERS, progress_cb=progress_cb, batch_cb=batch_cb)
+        platform_cache = db.get_platform_cache()
+        platform_updates = {}
+
+        def platform_cb(slug, platform):
+            platform_updates[slug] = platform
+
+        _, stats = scrape_all(max_workers=MAX_WORKERS, progress_cb=progress_cb, batch_cb=batch_cb,
+                               platform_cache=platform_cache, platform_cb=platform_cb)
+        db.upsert_platform_cache(platform_updates)
         removed = db.prune_stale(max_age_days=JOB_STALE_DAYS)
         finished = datetime.now(timezone.utc).isoformat()
         db.record_run(started, finished, "ok", stats, db.total_jobs())
-        print(f"[scrape] done: {stats}, new={new_count}, pruned={removed}")
+        _check_scrape_health(stats)
+        print(f"[scrape] done: {stats}, new={new_count}, pruned={removed}, "
+              f"platform_cache={len(platform_cache)}->{len(platform_updates)} updates")
     except Exception as e:
         finished = datetime.now(timezone.utc).isoformat()
         db.record_run(started, finished, f"error: {e}", {}, db.total_jobs())
@@ -159,6 +171,56 @@ def run_scrape_job():
     finally:
         _scrape_in_progress = False
         _scrape_lock.release()
+
+
+_HEALTH_ALERT_MIN_RUNS = 5  # need at least this many prior runs before trusting a "spike" comparison
+_HEALTH_ALERT_RATIO = 1.5   # not_found rate has to be 50% worse than the recent average to alert
+_HEALTH_ALERT_MIN_NOT_FOUND = 50  # ...and it has to be a meaningfully large number, not noise on a tiny scan
+
+
+def _check_scrape_health(stats):
+    """Compares this run's companies_not_found against the average of the
+    last _HEALTH_ALERT_MIN_RUNS runs (excluding this one). A sudden jump
+    usually means something broke on Claude's/Jared's end (a bad
+    companies_data.py edit, a code regression in scraper.py) rather than
+    hundreds of companies coincidentally shutting down their career pages
+    on the same day, so it's worth a one-off email rather than silently
+    scrolling past it in server logs. Deliberately conservative (needs
+    history AND a real ratio AND a real absolute count) so this doesn't
+    cry wolf on small fluctuations or during the first few runs after a
+    fresh deploy when there's no baseline yet."""
+    if not (RESEND_API_KEY and CONTACT_EMAIL):
+        return
+    not_found = stats.get("companies_not_found", 0)
+    scanned = stats.get("companies_scanned", 0) or 1
+    history = db.recent_runs(limit=_HEALTH_ALERT_MIN_RUNS + 1)[1:]  # drop the run just recorded
+    if len(history) < _HEALTH_ALERT_MIN_RUNS:
+        return
+    baseline = [h.get("companies_not_found") or 0 for h in history]
+    avg_baseline = sum(baseline) / len(baseline)
+    if not_found < _HEALTH_ALERT_MIN_NOT_FOUND:
+        return
+    if avg_baseline > 0 and not_found < avg_baseline * _HEALTH_ALERT_RATIO:
+        return
+    if avg_baseline == 0 and not_found < _HEALTH_ALERT_MIN_NOT_FOUND:
+        return
+    subject = f"Skip The Boards: scrape health alert ({not_found} companies not found)"
+    body = (
+        f"<p>The latest scrape run found {not_found} of {scanned} companies "
+        f"not resolving on any ATS platform (Greenhouse/Lever/Ashby).</p>"
+        f"<p>Recent baseline average: {avg_baseline:.1f} not-found per run "
+        f"(over the last {len(baseline)} runs).</p>"
+        f"<p>This could mean a bad edit to companies_data.py, a code "
+        f"regression in scraper.py, or a real outage on one of the three "
+        f"ATS platforms' APIs -- worth a quick look.</p>"
+    )
+    payload = json.dumps({
+        "from": RESEND_FROM_EMAIL,
+        "to": [CONTACT_EMAIL],
+        "subject": subject,
+        "html": body,
+    }).encode("utf-8")
+    _post_to_resend(payload)
 
 
 def _compute_next_scrape_time():
@@ -207,6 +269,14 @@ def start_scheduler():
     scheduler = BackgroundScheduler(daemon=True)
     scheduler.add_job(run_scrape_job, "interval", hours=SCRAPE_INTERVAL_HOURS, id="scrape",
                        next_run_time=_compute_next_scrape_time())
+    # Runs once a day, independent of the (much more frequent) scrape
+    # cadence -- alerting on every single scrape cycle (every
+    # SCRAPE_INTERVAL_HOURS, default 8h/3x a day) would mean up to 3
+    # emails/day per saved search, which is spam, not a digest.
+    scheduler.add_job(run_saved_search_alerts_job, "interval", hours=24, id="search_alerts",
+                       next_run_time=_compute_next_alert_time())
+    scheduler.add_job(run_weekly_digest_job, "interval", days=7, id="weekly_digest",
+                       next_run_time=_compute_next_digest_time())
     scheduler.start()
     return scheduler
 
@@ -439,6 +509,213 @@ def send_contact_email(reason, name, from_email, message):
     return _post_to_resend(payload)
 
 
+# ---------------- saved-search email alerts ----------------
+
+SEARCH_ALERT_MAX_JOBS_PER_EMAIL = 25  # caps the email body; subject line still states the true total
+SEARCH_ALERT_FETCH_LIMIT = 500  # how many matching rows to pull before filtering to "new since last check"
+
+
+def _saved_search_to_query_kwargs(params):
+    """Maps the free-form dict a saved search stores (see app.js's
+    currentSearchParams()) onto db.search_jobs()'s keyword arguments.
+    Tolerant of older saved-search shapes (a singular `department`/
+    `location` from before the multi-select arrays existed) by falling
+    back to them only when the array form isn't present, same precedence
+    db.search_jobs() itself documents."""
+    kwargs = {
+        "query": params.get("q", "") or "",
+        "days": params.get("days") or None,
+        "commitment": params.get("commitment", "") or "",
+    }
+    departments = params.get("departments")
+    if departments:
+        kwargs["departments"] = departments
+    elif params.get("department"):
+        kwargs["department"] = params.get("department")
+    locations = params.get("locations")
+    if locations:
+        kwargs["locations"] = locations
+    elif params.get("location"):
+        kwargs["location"] = params.get("location")
+    for key in ("salary_min", "salary_max", "yoe_min", "yoe_max"):
+        if params.get(key) is not None:
+            kwargs[key] = params[key]
+    return kwargs
+
+
+def send_saved_search_alert_email(to_email, search_name, jobs):
+    """Sends a digest of newly-matching jobs for one saved search, via the
+    same Resend path as the contact form / password reset (see
+    _post_to_resend's docstring for the hard-timeout reasoning). Uses
+    html.escape() directly rather than render_job_page()'s local `esc`
+    helper, which is scoped inside that function and not reachable here."""
+    esc = html.escape
+    shown = jobs[:SEARCH_ALERT_MAX_JOBS_PER_EMAIL]
+    rows_html = "".join(
+        f"<li><a href=\"{esc(SITE_URL + _job_path(j['job_id'], j['company'], j['title']))}\">"
+        f"{esc(j['title'])}</a> — {esc(j['company'])}"
+        f"{' — ' + esc(j['location']) if j.get('location') else ''}</li>"
+        for j in shown
+    )
+    more_note = (
+        f"<p>...and {len(jobs) - len(shown)} more. "
+        f"<a href=\"{esc(SITE_URL)}/\">See all on Skip The Boards</a>.</p>"
+        if len(jobs) > len(shown) else ""
+    )
+    subject = f"Skip The Boards: {len(jobs)} new job{'s' if len(jobs) != 1 else ''} for \"{search_name}\""
+    payload = json.dumps({
+        "from": RESEND_FROM_EMAIL,
+        "to": [to_email],
+        "subject": subject,
+        "html": (
+            f"<p>New postings matching your saved search \"{esc(search_name)}\":</p>"
+            f"<ul>{rows_html}</ul>"
+            f"{more_note}"
+            f"<p style=\"color:#888;font-size:12px;\">You're getting this because email "
+            f"alerts are on for this saved search. Turn them off anytime from "
+            f"\"Saved searches\" on the site.</p>"
+        ),
+    }).encode("utf-8")
+    return _post_to_resend(payload)
+
+
+def run_saved_search_alerts_job():
+    """Runs once a day (see start_scheduler()): checks every saved search
+    with alerts_enabled, finds jobs newly discovered (by first_seen --
+    when THIS site first scraped it, not the ATS's own `posted` date,
+    which is sometimes backdated or missing) since that search was last
+    checked, and emails a digest if there are any. Applies the search's
+    own saved filters as-is on top of that (so a search saved with
+    `days=3` still only alerts on jobs matching that filter too)."""
+    if not db_users.accounts_enabled():
+        return
+    if not (RESEND_API_KEY and RESEND_FROM_EMAIL):
+        return
+    searches = db_users.list_searches_for_alerts()
+    emails_sent = 0
+    now = datetime.now(timezone.utc)
+    for s in searches:
+        try:
+            params = json.loads(s["params_json"])
+        except (TypeError, ValueError):
+            params = {}
+        cutoff = s.get("last_checked_at") or s.get("created_at")
+        if cutoff and cutoff.tzinfo is None:
+            cutoff = cutoff.replace(tzinfo=timezone.utc)
+        kwargs = _saved_search_to_query_kwargs(params)
+        try:
+            rows, _total = db.search_jobs(**kwargs, page=1, per_page=SEARCH_ALERT_FETCH_LIMIT)
+        except Exception as e:
+            print(f"[alerts] search failed for saved search {s['id']}: {e}")
+            continue
+        new_rows = []
+        for r in rows:
+            first_seen = r.get("first_seen")
+            if not first_seen:
+                continue
+            try:
+                fs = datetime.fromisoformat(first_seen)
+            except ValueError:
+                continue
+            if fs.tzinfo is None:
+                fs = fs.replace(tzinfo=timezone.utc)
+            if not cutoff or fs > cutoff:
+                new_rows.append(r)
+        if new_rows:
+            if send_saved_search_alert_email(s["email"], s["name"], new_rows):
+                emails_sent += 1
+        db_users.mark_search_checked(s["id"], now)
+    db_users.record_alert_run(now, len(searches), emails_sent)
+    print(f"[alerts] checked {len(searches)} saved searches, sent {emails_sent} emails")
+
+
+def run_weekly_digest_job():
+    """Sends the same list /weekly-digest shows publicly to every active
+    subscriber, once a week. Requires _fetch_digest_jobs() (defined
+    further down this file, after REMOTE_HUB_GROUPS/render_hub_page) to
+    already be resolvable at call time -- fine, since this only ever runs
+    from the scheduler, long after the whole module has finished
+    importing, not at import time itself."""
+    if not (RESEND_API_KEY and RESEND_FROM_EMAIL):
+        return
+    subscribers = db.list_active_digest_subscribers()
+    if not subscribers:
+        db.record_digest_run(datetime.now(timezone.utc), 0)
+        return
+    jobs = _fetch_digest_jobs()
+    rows_html = "".join(
+        f"<li><a href=\"{html.escape(SITE_URL + _job_path(j['job_id'], j['company'], j['title']))}\">"
+        f"{html.escape(j['title'])}</a> — {html.escape(j['company'])}"
+        f"{' — ' + html.escape(_job_salary_text(j)) if _job_salary_text(j) else ''}</li>"
+        for j in jobs
+    )
+    sent = 0
+    for email in subscribers:
+        token = _digest_unsub_token(email)
+        unsub_url = f"{SITE_URL}/unsubscribe?email={urllib.parse.quote(email)}&token={token}"
+        payload = json.dumps({
+            "from": RESEND_FROM_EMAIL,
+            "to": [email],
+            "subject": f"Skip The Boards: {len(jobs)} best remote roles this week",
+            "html": (
+                f"<p>This week's highest-paying remote postings from the last 7 days:</p>"
+                f"<ul>{rows_html}</ul>"
+                f"<p><a href=\"{html.escape(SITE_URL)}/weekly-digest\">See the full, always-current list</a></p>"
+                f"<p style=\"color:#888;font-size:12px;\">"
+                f"<a href=\"{html.escape(unsub_url)}\">Unsubscribe</a> from this weekly email.</p>"
+            ),
+        }).encode("utf-8")
+        if _post_to_resend(payload):
+            sent += 1
+    db.record_digest_run(datetime.now(timezone.utc), sent)
+    print(f"[digest] sent to {sent}/{len(subscribers)} subscribers")
+
+
+def _compute_next_digest_time():
+    """Same reasoning as _compute_next_scrape_time()/_compute_next_alert_time()
+    -- schedule off the last recorded run instead of firing on every deploy."""
+    try:
+        last = db.last_digest_run()
+    except Exception:
+        return datetime.now() + timedelta(hours=1)
+    if last is None:
+        return datetime.now()
+    ran_at = last.get("ran_at")
+    try:
+        ran_at = datetime.fromisoformat(ran_at) if isinstance(ran_at, str) else ran_at
+    except (TypeError, ValueError):
+        return datetime.now()
+    if ran_at is None:
+        return datetime.now()
+    if ran_at.tzinfo is None:
+        ran_at = ran_at.replace(tzinfo=timezone.utc)
+    due = ran_at + timedelta(days=7)
+    now = datetime.now(timezone.utc)
+    return due if due > now else now
+
+
+def _compute_next_alert_time():
+    """Same reasoning as _compute_next_scrape_time() -- don't fire the
+    alert job immediately on every deploy, schedule it for whenever it
+    was actually next due based on the last recorded run."""
+    if not db_users.accounts_enabled():
+        return datetime.now() + timedelta(days=1)
+    try:
+        last = db_users.last_alert_run()
+    except Exception:
+        return datetime.now() + timedelta(hours=1)
+    if last is None:
+        return datetime.now()
+    ran_at = last.get("ran_at")
+    if ran_at is None:
+        return datetime.now()
+    if ran_at.tzinfo is None:
+        ran_at = ran_at.replace(tzinfo=timezone.utc)
+    due = ran_at + timedelta(hours=24)
+    now = datetime.now(timezone.utc)
+    return due if due > now else now
+
+
 @app.route("/api/jobs")
 def api_jobs():
     q = request.args.get("q", "")
@@ -648,6 +925,191 @@ def api_contact():
         return jsonify({"ok": False, "message": "Couldn't send that right now -- try again in a moment."})
 
     return jsonify({"ok": True, "message": "Thanks -- message sent. I'll get back to you soon."})
+
+
+MAX_COMPANY_NAME_LEN = 200
+MAX_CAREERS_URL_LEN = 500
+MAX_COMPANY_REQUEST_NOTE_LEN = 1000
+
+
+@app.route("/api/request-company", methods=["POST"])
+@limiter.limit("10 per hour")
+def api_request_company():
+    """Public "request a company" form -- structured (company name +
+    optional careers URL) rather than free text, specifically so these can
+    be verified and batch-added faster than parsing prose out of contact-
+    form submissions (see CONTACT_REASONS' existing "Add my company's job
+    board" option, which still works fine for anyone who finds the contact
+    page first, but this is the faster, more scalable path). Stored in
+    db.py's SQLite job cache (see company_requests table) rather than the
+    Postgres accounts db -- see create_company_request()'s docstring."""
+    data = request.get_json(silent=True) or {}
+    company_name = (data.get("company_name") or "").strip()
+    careers_url = (data.get("careers_url") or "").strip()
+    requester_email = (data.get("requester_email") or "").strip().lower()
+    note = (data.get("note") or "").strip()
+
+    if not company_name:
+        return jsonify({"ok": False, "message": "Please enter the company name."}), 400
+    if len(company_name) > MAX_COMPANY_NAME_LEN:
+        return jsonify({"ok": False, "message": "That company name is too long."}), 400
+    if careers_url and len(careers_url) > MAX_CAREERS_URL_LEN:
+        return jsonify({"ok": False, "message": "That URL is too long."}), 400
+    if careers_url and not re.match(r"^https?://", careers_url, re.IGNORECASE):
+        return jsonify({"ok": False, "message": "Careers URL should start with http:// or https://"}), 400
+    if requester_email and not EMAIL_RE.match(requester_email):
+        return jsonify({"ok": False, "message": "That doesn't look like a valid email address."}), 400
+    if len(note) > MAX_COMPANY_REQUEST_NOTE_LEN:
+        return jsonify({"ok": False, "message": f"That note is too long (max {MAX_COMPANY_REQUEST_NOTE_LEN} characters)."}), 400
+
+    db.create_company_request(company_name, careers_url, requester_email, note)
+
+    # Best-effort email notification -- same "never let this block or fail
+    # the visible response" treatment as everywhere else Resend is used.
+    # Not the only way these surface (see /api/admin/company-requests),
+    # so a failed/disabled send here just means checking the admin list
+    # instead of getting pinged immediately.
+    if RESEND_API_KEY and CONTACT_EMAIL:
+        safe_name = html.escape(company_name)
+        safe_url = html.escape(careers_url) if careers_url else "(not given)"
+        safe_email = html.escape(requester_email) if requester_email else "(not given)"
+        safe_note = html.escape(note).replace("\n", "<br>") if note else "(none)"
+        payload = json.dumps({
+            "from": RESEND_FROM_EMAIL,
+            "to": [CONTACT_EMAIL],
+            "subject": f"Skip The Boards: company request — {company_name}",
+            "html": (
+                f"<p><strong>Company:</strong> {safe_name}</p>"
+                f"<p><strong>Careers URL:</strong> {safe_url}</p>"
+                f"<p><strong>Requester email:</strong> {safe_email}</p>"
+                f"<p><strong>Note:</strong> {safe_note}</p>"
+            ),
+        }).encode("utf-8")
+        _post_to_resend(payload)
+
+    return jsonify({"ok": True, "message": "Thanks -- I'll take a look and add it if I can verify a live board."})
+
+
+JOB_FLAG_REASONS = ("Link doesn't work", "Listing looks closed/filled", "Wrong info", "Other")
+MAX_JOB_FLAG_NOTE_LEN = 1000
+
+
+@app.route("/api/flag-job", methods=["POST"])
+@limiter.limit("20 per hour")
+def api_flag_job():
+    """Public "report a problem" button on job detail pages (see
+    render_job_page()). Same reasoning as /api/request-company for
+    storing in db.py's SQLite job cache rather than the Postgres accounts
+    db, and for snapshotting job_title/company as plain text rather than
+    joining against the live `jobs` row -- see create_job_flag()'s
+    docstring."""
+    data = request.get_json(silent=True) or {}
+    job_url = (data.get("job_url") or "").strip()
+    job_title = (data.get("job_title") or "").strip()
+    company = (data.get("company") or "").strip()
+    reason = (data.get("reason") or "").strip()
+    note = (data.get("note") or "").strip()
+    reporter_email = (data.get("reporter_email") or "").strip().lower()
+
+    if not job_url:
+        return jsonify({"ok": False, "message": "Missing job_url."}), 400
+    if reason not in JOB_FLAG_REASONS:
+        reason = "Other"  # same non-400 bucket-into-Other treatment as api_contact's reason field
+    if len(note) > MAX_JOB_FLAG_NOTE_LEN:
+        return jsonify({"ok": False, "message": f"That note is too long (max {MAX_JOB_FLAG_NOTE_LEN} characters)."}), 400
+    if reporter_email and not EMAIL_RE.match(reporter_email):
+        return jsonify({"ok": False, "message": "That doesn't look like a valid email address."}), 400
+
+    db.create_job_flag(job_url, job_title, company, reason, note, reporter_email)
+    return jsonify({"ok": True, "message": "Thanks for the heads up -- I'll take a look."})
+
+
+JOB_FLAG_STATUSES = ("pending", "resolved", "dismissed")
+
+
+@app.route("/api/admin/job-flags", methods=["GET"])
+@accounts_required
+@login_required
+@admin_required
+def api_admin_list_job_flags():
+    status = request.args.get("status") or None
+    if status and status not in JOB_FLAG_STATUSES:
+        return jsonify({"ok": False, "message": "Invalid status filter."}), 400
+    return jsonify({"ok": True, "flags": db.list_job_flags(status=status)})
+
+
+@app.route("/api/admin/job-flags/<int:flag_id>", methods=["PATCH"])
+@accounts_required
+@login_required
+@admin_required
+def api_admin_update_job_flag(flag_id):
+    data = request.get_json(silent=True) or {}
+    status = data.get("status")
+    if status not in JOB_FLAG_STATUSES:
+        return jsonify({"ok": False, "message": f"status must be one of {JOB_FLAG_STATUSES}"}), 400
+    updated = db.update_job_flag_status(flag_id, status)
+    if not updated:
+        return jsonify({"ok": False, "message": "Not found."}), 404
+    return jsonify({"ok": True})
+
+
+def _digest_unsub_token(email):
+    """A short HMAC of the email, keyed on this process's SECRET_KEY --
+    lets an unsubscribe link prove the clicker actually received that
+    specific email (it's in the link Resend delivered) without needing a
+    login or a separate token table like password resets use. Low
+    stakes -- worst case of a forged token is someone unsubscribing an
+    email they don't own from a marketing list, not an account takeover --
+    so an unkeyed-per-token HMAC (rather than a stored, revocable token)
+    is a reasonable, simpler tradeoff here specifically."""
+    return hmac.new(app.secret_key.encode() if isinstance(app.secret_key, str) else app.secret_key,
+                     email.strip().lower().encode(), hashlib.sha256).hexdigest()[:16]
+
+
+def _verify_digest_unsub_token(email, token):
+    expected = _digest_unsub_token(email)
+    return hmac.compare_digest(expected, (token or ""))
+
+
+@app.route("/api/digest/subscribe", methods=["POST"])
+@limiter.limit("10 per hour")
+def api_digest_subscribe():
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    if not EMAIL_RE.match(email):
+        return jsonify({"ok": False, "message": "That doesn't look like a valid email address."}), 400
+    db.subscribe_to_digest(email)
+    return jsonify({"ok": True, "message": "Subscribed -- you'll get the next weekly digest."})
+
+
+@app.route("/unsubscribe")
+def unsubscribe_page():
+    email = (request.args.get("email") or "").strip().lower()
+    token = request.args.get("token") or ""
+    if email and _verify_digest_unsub_token(email, token):
+        db.unsubscribe_from_digest(email)
+        message = "You're unsubscribed from the weekly digest. Sorry to see you go."
+    else:
+        message = "That unsubscribe link looks invalid or expired."
+    body = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Unsubscribe — Skip The Boards</title>
+<link rel="stylesheet" href="/style.css?v=21" />
+</head>
+<body>
+  <main class="content-page">
+    <h1>Unsubscribe</h1>
+    <p class="content-page-intro">{html.escape(message)}</p>
+    <p><a href="/">← Back to Skip The Boards</a></p>
+  </main>
+</body>
+</html>
+"""
+    return Response(body, mimetype="text/html")
 
 
 @app.route("/mcp", methods=["POST"])
@@ -952,6 +1414,35 @@ def api_admin_stats():
     return jsonify({"ok": True, "stats": db_users.get_user_stats(days=days)})
 
 
+COMPANY_REQUEST_STATUSES = ("pending", "added", "duplicate", "rejected")
+
+
+@app.route("/api/admin/company-requests", methods=["GET"])
+@accounts_required
+@login_required
+@admin_required
+def api_admin_list_company_requests():
+    status = request.args.get("status") or None
+    if status and status not in COMPANY_REQUEST_STATUSES:
+        return jsonify({"ok": False, "message": "Invalid status filter."}), 400
+    return jsonify({"ok": True, "requests": db.list_company_requests(status=status)})
+
+
+@app.route("/api/admin/company-requests/<int:request_id>", methods=["PATCH"])
+@accounts_required
+@login_required
+@admin_required
+def api_admin_update_company_request(request_id):
+    data = request.get_json(silent=True) or {}
+    status = data.get("status")
+    if status not in COMPANY_REQUEST_STATUSES:
+        return jsonify({"ok": False, "message": f"status must be one of {COMPANY_REQUEST_STATUSES}"}), 400
+    updated = db.update_company_request_status(request_id, status)
+    if not updated:
+        return jsonify({"ok": False, "message": "Not found."}), 404
+    return jsonify({"ok": True})
+
+
 # ---------------- accounts: saved searches ----------------
 
 @app.route("/api/saved-searches", methods=["GET"])
@@ -971,11 +1462,20 @@ def api_create_saved_search():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     params = data.get("params")
+    # Defaults to True (opted in) -- the frontend's save-search flow doesn't
+    # currently expose a way to uncheck this at save time, so every new
+    # search starts with alerts on and the user can turn them off afterward
+    # from the saved-searches list. Accepting it here anyway (rather than
+    # hardcoding True in the route) keeps the door open for a future
+    # "don't email me about this one" checkbox at save time without another
+    # backend change.
+    alerts_enabled = data.get("alerts_enabled", True)
     if not name:
         return jsonify({"ok": False, "message": "Give this search a name."}), 400
     if not isinstance(params, dict):
         return jsonify({"ok": False, "message": "Missing search parameters."}), 400
-    search = db_users.create_saved_search(session["user_id"], name, json.dumps(params))
+    search = db_users.create_saved_search(session["user_id"], name, json.dumps(params),
+                                           alerts_enabled=bool(alerts_enabled))
     search["params"] = json.loads(search.pop("params_json"))
     return jsonify({"ok": True, "search": search})
 
@@ -986,6 +1486,23 @@ def api_create_saved_search():
 def api_delete_saved_search(search_id):
     deleted = db_users.delete_saved_search(session["user_id"], search_id)
     if not deleted:
+        return jsonify({"ok": False, "message": "Not found."}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/saved-searches/<int:search_id>", methods=["PATCH"])
+@accounts_required
+@login_required
+def api_update_saved_search(search_id):
+    """Currently only toggles alerts_enabled -- the one setting per saved
+    search that's meant to be flipped after the fact without deleting and
+    re-creating it. Extend here if saved searches ever get other editable
+    fields (e.g. renaming)."""
+    data = request.get_json(silent=True) or {}
+    if "alerts_enabled" not in data:
+        return jsonify({"ok": False, "message": "Nothing to update."}), 400
+    updated = db_users.set_saved_search_alerts(session["user_id"], search_id, bool(data["alerts_enabled"]))
+    if not updated:
         return jsonify({"ok": False, "message": "Not found."}), 404
     return jsonify({"ok": True})
 
@@ -1107,6 +1624,11 @@ def contact_page():
     return send_from_directory(STATIC_DIR, "contact.html")
 
 
+@app.route("/request-company")
+def request_company_page():
+    return send_from_directory(STATIC_DIR, "request-company.html")
+
+
 @app.route("/about")
 def about_page():
     return send_from_directory(STATIC_DIR, "about.html")
@@ -1180,6 +1702,8 @@ def sitemap_static_xml():
         (f"{SITE_URL}/about", "monthly", "0.5"),
         (f"{SITE_URL}/faq", "monthly", "0.5"),
         (f"{SITE_URL}/contact", "monthly", "0.3"),
+        (f"{SITE_URL}/request-company", "monthly", "0.3"),
+        (f"{SITE_URL}/weekly-digest", "weekly", "0.6"),
     ]
     pages += [
         (f"{SITE_URL}/jobs/remote/{slug}", "daily", "0.7") for slug in REMOTE_HUB_GROUPS
@@ -1383,7 +1907,24 @@ def _breadcrumb_jsonld(items):
         "@type": "BreadcrumbList",
         "itemListElement": elements,
     }
-    return json.dumps(schema, ensure_ascii=False)
+    # .replace("</", "<\\/") -- a job/company name feeding into this (job
+    # detail pages pass the job title as a breadcrumb label) could contain
+    # the literal text "</script" and prematurely close the <script
+    # type="application/ld+json"> block this gets embedded in. Still valid
+    # JSON either way, "\/" is a standard escape for "/".
+    return json.dumps(schema, ensure_ascii=False).replace("</", "<\\/")
+
+
+def _js_str_literal(value):
+    """json.dumps() a string for safe embedding inside an inline <script>
+    block (not an HTML attribute, which is a different escaping context --
+    see esc()/html.escape() for that). Guards against a job title/URL that
+    happens to contain the literal text "</script" (data scraped from
+    third-party career pages is not otherwise sanitized against this)
+    prematurely closing the surrounding <script> tag -- json.dumps() alone
+    doesn't escape forward slashes, so "<\\/script>" is the actual fix,
+    not just defense in depth."""
+    return json.dumps(str(value or "")).replace("</", "<\\/")
 
 
 def render_job_page(job):
@@ -1500,7 +2041,15 @@ def render_job_page(job):
                 "unitText": "YEAR",
             },
         }
-    json_ld_script = json.dumps(json_ld, ensure_ascii=False)
+    # .replace("</", "<\\/") guards against a job title/company/blurb --
+    # scraped from third-party career pages, never sanitized against this
+    # -- containing the literal text "</script" and prematurely closing
+    # this <script type="application/ld+json"> block. Valid inside a JSON
+    # string either way ("\/" is a standard JSON escape for "/"), so this
+    # doesn't change what any JSON-LD consumer (e.g. Google) parses out of
+    # it. See _js_str_literal()'s docstring for the same fix applied to
+    # the job-flag button's inline script further down this function.
+    json_ld_script = json.dumps(json_ld, ensure_ascii=False).replace("</", "<\\/")
 
     company_hub_path = f"/jobs/company/{_slugify(company)}"
     breadcrumb_script = _breadcrumb_jsonld([
@@ -1535,9 +2084,9 @@ def render_job_page(job):
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=18" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=18" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=18" />
+<link rel="icon" href="/favicon.svg?v=21" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=21" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=21" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -1558,7 +2107,7 @@ def render_job_page(job):
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=18" />
+<link rel="stylesheet" href="/style.css?v=21" />
 </head>
 <body>
   <nav class="topnav">
@@ -1575,6 +2124,7 @@ def render_job_page(job):
           <a href="/about">About</a>
           <a href="/faq">FAQ</a>
           <a href="/contact">Contact</a>
+          <a href="/request-company">Request a company</a>
         </nav>
         <a class="brand-link" href="/">← Back to search</a>
       </div>
@@ -1597,6 +2147,19 @@ def render_job_page(job):
         happens on their site, not here. Posted{f" {esc(posted)}" if posted else ""}; Skip The Boards re-checks
         every company's board regularly and removes listings that disappear from the source.
       </p>
+      <div class="job-flag-block">
+        <button type="button" class="job-flag-toggle" id="job-flag-toggle">Report a problem with this listing</button>
+        <form id="job-flag-form" class="job-flag-form hidden">
+          <select id="job-flag-reason">
+            {"".join(f'<option value="{esc(r)}">{esc(r)}</option>' for r in JOB_FLAG_REASONS)}
+          </select>
+          <textarea id="job-flag-note" maxlength="1000" rows="2" placeholder="Optional details"></textarea>
+          <div class="job-flag-row">
+            <button type="submit" class="row-action-btn">Submit</button>
+            <span id="job-flag-status" class="job-flag-status"></span>
+          </div>
+        </form>
+      </div>
     </div>{more_jobs_html}
   </main>
 
@@ -1607,6 +2170,49 @@ def render_job_page(job):
       </p>
     </div>
   </footer>
+
+  <script>
+    (function() {{
+      var toggle = document.getElementById("job-flag-toggle");
+      var form = document.getElementById("job-flag-form");
+      var statusEl = document.getElementById("job-flag-status");
+      toggle.addEventListener("click", function() {{
+        form.classList.toggle("hidden");
+      }});
+      form.addEventListener("submit", function(e) {{
+        e.preventDefault();
+        var reason = document.getElementById("job-flag-reason").value;
+        var note = document.getElementById("job-flag-note").value.trim();
+        var submitBtn = form.querySelector("button[type=submit]");
+        submitBtn.disabled = true;
+        statusEl.textContent = "";
+        fetch("/api/flag-job", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{
+            job_url: {_js_str_literal(url)},
+            job_title: {_js_str_literal(title)},
+            company: {_js_str_literal(company)},
+            reason: reason,
+            note: note,
+          }}),
+        }})
+          .then(function(r) {{ return r.json(); }})
+          .then(function(data) {{
+            statusEl.textContent = data.message || "Thanks.";
+            if (data.ok) {{
+              form.querySelectorAll("select, textarea, button").forEach(function(el) {{ el.disabled = true; }});
+            }} else {{
+              submitBtn.disabled = false;
+            }}
+          }})
+          .catch(function() {{
+            statusEl.textContent = "Something went wrong. Try again.";
+            submitBtn.disabled = false;
+          }});
+      }});
+    }})();
+  </script>
 </body>
 </html>
 """
@@ -1646,7 +2252,7 @@ def job_page(segment):
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Role no longer available — Skip The Boards</title>
 <meta name="robots" content="noindex" />
-<link rel="stylesheet" href="/style.css?v=18" /></head>
+<link rel="stylesheet" href="/style.css?v=21" /></head>
 <body><main class="content-page"><h1>This role isn't available anymore</h1>
 <p class="content-page-intro">It's either been filled, taken down by the company, or the link's
 just wrong. <a href="/">Search current openings instead →</a></p></main></body></html>"""
@@ -1690,7 +2296,8 @@ def _job_list_item_html(job):
     """
 
 
-def render_hub_page(page_title, description, canonical_path, h1, intro_text, jobs, empty_message, noindex=False):
+def render_hub_page(page_title, description, canonical_path, h1, intro_text, jobs, empty_message,
+                     noindex=False, extra_intro_html=""):
     """Shared shell for the two kinds of listing/"hub" pages this site
     has -- /jobs/company/<slug> and /jobs/remote/<group> -- both are
     "here's a real, crawlable page for a whole category of jobs, each
@@ -1720,9 +2327,9 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=18" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=18" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=18" />
+<link rel="icon" href="/favicon.svg?v=21" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=21" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=21" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -1741,7 +2348,7 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=18" />
+<link rel="stylesheet" href="/style.css?v=21" />
 </head>
 <body>
   <nav class="topnav">
@@ -1758,6 +2365,7 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
           <a href="/about">About</a>
           <a href="/faq">FAQ</a>
           <a href="/contact">Contact</a>
+          <a href="/request-company">Request a company</a>
         </nav>
         <a class="brand-link" href="/">← Back to search</a>
       </div>
@@ -1767,6 +2375,7 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
   <main class="content-page hub-page">
     <h1>{esc(h1)}</h1>
     <p class="content-page-intro">{esc(intro_text)}</p>
+    {extra_intro_html}
     <div class="hub-job-list">
       {cards_html}
     </div>
@@ -1872,6 +2481,74 @@ def remote_hub_page(slug):
         page_title, description, f"/jobs/remote/{slug}",
         f"{label} jobs", description, jobs,
         f"No current {label.lower()} openings in this dataset.",
+    )
+    return Response(body, mimetype="text/html")
+
+
+DIGEST_LOCATION_GROUPS = [g for g, _label in REMOTE_HUB_GROUPS.values()]
+DIGEST_JOB_COUNT = 30
+
+
+def _fetch_digest_jobs():
+    """The last 7 days' remote postings, sorted salary-high-first --
+    db.py's "salary_high" sort already puts NULL salaries last (see
+    SORT_OPTIONS), so this naturally surfaces salary-confirmed listings
+    ahead of ones with no parsed number, without needing a hard filter
+    that would exclude real, relevant postings just because a number
+    couldn't be extracted. Shared by both the public page and the
+    scheduled email job so they're always showing the same list."""
+    jobs, _total = db.search_jobs(
+        location_groups=DIGEST_LOCATION_GROUPS, days=7, sort="salary_high",
+        page=1, per_page=DIGEST_JOB_COUNT,
+    )
+    return jobs
+
+
+@app.route("/weekly-digest")
+def weekly_digest_page():
+    jobs = _fetch_digest_jobs()
+    description = (
+        f"The {len(jobs)} highest-paying remote roles posted in the last 7 days across "
+        "Greenhouse, Lever, and Ashby career pages. Updated live, refreshed weekly by email."
+    )
+    subscribe_html = """
+      <div class="digest-subscribe" id="digest-subscribe">
+        <form id="digest-subscribe-form">
+          <input type="email" id="digest-email" placeholder="you@example.com" required />
+          <button type="submit" class="btn-primary">Email me this weekly</button>
+        </form>
+        <div class="digest-subscribe-status" id="digest-subscribe-status"></div>
+      </div>
+      <script>
+        document.getElementById("digest-subscribe-form").addEventListener("submit", function(e) {
+          e.preventDefault();
+          var email = document.getElementById("digest-email").value.trim();
+          var statusEl = document.getElementById("digest-subscribe-status");
+          var btn = e.target.querySelector("button[type=submit]");
+          btn.disabled = true;
+          fetch("/api/digest/subscribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: email }),
+          })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              statusEl.textContent = data.message || "";
+              if (!data.ok) { btn.disabled = false; }
+            })
+            .catch(function() {
+              statusEl.textContent = "Something went wrong. Try again.";
+              btn.disabled = false;
+            });
+        });
+      </script>
+    """
+    body = render_hub_page(
+        "This week's best remote jobs — Skip The Boards",
+        description, "/weekly-digest", "This week's best remote jobs",
+        description, jobs,
+        "No remote postings in the last 7 days matched this list -- check back soon.",
+        extra_intro_html=subscribe_html,
     )
     return Response(body, mimetype="text/html")
 

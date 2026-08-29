@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="favicon.svg?v=21" type="image/svg+xml" />
+<link rel="alternate icon" href="favicon.ico?v=21" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=21" />
+<title>Request a company — Skip The Boards</title>
+<meta name="description" content="Ask Skip The Boards to add a company's Greenhouse, Lever, or Ashby career page to the search." />
+<link rel="canonical" href="https://skiptheboards.com/request-company" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Skip The Boards" />
+<meta property="og:url" content="https://skiptheboards.com/request-company" />
+<meta property="og:title" content="Request a company — Skip The Boards" />
+<meta property="og:description" content="Ask Skip The Boards to add a company's Greenhouse, Lever, or Ashby career page to the search." />
+<meta property="og:image" content="https://skiptheboards.com/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Request a company — Skip The Boards" />
+<meta name="twitter:description" content="Ask Skip The Boards to add a company's Greenhouse, Lever, or Ashby career page to the search." />
+<meta name="twitter:image" content="https://skiptheboards.com/og-image.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=21" />
+</head>
+<body>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <div class="brand">
+        <a href="/" style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;">
+          <span class="brand-mark">◆</span>
+          <span class="brand-name">Skip The Boards</span>
+        </a>
+      </div>
+      <div class="topnav-right">
+        <nav class="nav-links">
+          <a href="/">Home</a>
+          <a href="/about">About</a>
+          <a href="/faq">FAQ</a>
+          <a href="/contact">Contact</a>
+          <a href="/request-company">Request a company</a>
+        </nav>
+        <a class="brand-link" href="/">← Back to search</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="content-page">
+    <h1>Request a company</h1>
+    <p class="content-page-intro">
+      Know a company whose career page isn't showing up here? If it's on Greenhouse, Lever, or Ashby,
+      send it over and I'll verify the board and add it. Only the company name is required.
+    </p>
+
+    <div id="request-company-page-body">Loading…</div>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p class="footer-byline">
+        <strong>Jared Edberg</strong> · <a href="https://www.linkedin.com/in/jared-edberg" target="_blank" rel="noopener">LinkedIn ↗</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    function init() {
+      const body = document.getElementById("request-company-page-body");
+      body.innerHTML = `
+        <form id="request-company-form" class="page-form">
+          <label for="rc-company-name">Company name</label>
+          <input type="text" id="rc-company-name" required maxlength="200" placeholder="e.g. Acme Inc." />
+          <label for="rc-careers-url">Careers page URL <span style="font-weight:400;color:var(--muted);">(optional, but speeds things up)</span></label>
+          <input type="url" id="rc-careers-url" maxlength="500" placeholder="https://jobs.example.com/..." />
+          <label for="rc-email">Your email <span style="font-weight:400;color:var(--muted);">(optional -- only if you want to know when it's added)</span></label>
+          <input type="email" id="rc-email" autocomplete="email" />
+          <label for="rc-note">Anything else? <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+          <textarea id="rc-note" maxlength="1000" rows="4" placeholder="Optional context -- e.g. which ATS it's on, if you know."></textarea>
+          <div class="auth-error" id="rc-error"></div>
+          <div class="auth-success hidden" id="rc-success"></div>
+          <button type="submit" class="btn-primary">Submit</button>
+        </form>
+      `;
+
+      document.getElementById("request-company-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const company_name = document.getElementById("rc-company-name").value.trim();
+        const careers_url = document.getElementById("rc-careers-url").value.trim();
+        const requester_email = document.getElementById("rc-email").value.trim();
+        const note = document.getElementById("rc-note").value.trim();
+        const errorEl = document.getElementById("rc-error");
+        const successEl = document.getElementById("rc-success");
+        const submitBtn = form.querySelector("button[type=submit]");
+        errorEl.textContent = "";
+        submitBtn.disabled = true;
+        try {
+          const res = await fetch("/api/request-company", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ company_name, careers_url, requester_email, note }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            errorEl.textContent = data.message || "Something went wrong. Try again.";
+            submitBtn.disabled = false;
+            return;
+          }
+          successEl.textContent = data.message || "Thanks -- request submitted.";
+          successEl.classList.remove("hidden");
+          form.querySelectorAll("input, textarea").forEach((el) => { el.disabled = true; });
+          submitBtn.textContent = "Submitted";
+        } catch (err) {
+          errorEl.textContent = "Something went wrong. Try again.";
+          submitBtn.disabled = false;
+        }
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>

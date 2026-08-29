@@ -1356,6 +1356,10 @@ async function openSavedSearchesModal() {
     list.innerHTML = data.searches.map((s) => `
       <div class="saved-search-row">
         <span class="saved-search-name">${escapeHtml(s.name)}</span>
+        <label class="saved-search-alert-toggle" title="Email me when new jobs match this search">
+          <input type="checkbox" data-alert-toggle="${s.id}" ${s.alerts_enabled ? "checked" : ""} />
+          Email alerts
+        </label>
         <button type="button" class="row-action-btn" data-run="${s.id}">Run</button>
         <button type="button" class="row-action-btn danger" data-delete="${s.id}">Delete</button>
       </div>
@@ -1369,6 +1373,18 @@ async function openSavedSearchesModal() {
       btn.addEventListener("click", async () => {
         await fetch(`/api/saved-searches/${btn.dataset.delete}`, { method: "DELETE" });
         openSavedSearchesModal(); // simplest correct redraw -- just refetch rather than hand-patch the DOM
+      });
+    });
+    list.querySelectorAll("[data-alert-toggle]").forEach((cb) => {
+      cb.addEventListener("change", async () => {
+        // No redraw needed here (unlike delete) -- the checkbox's own
+        // state already reflects the intended value, and re-fetching
+        // would just flash the list for no visible change.
+        await fetch(`/api/saved-searches/${cb.dataset.alertToggle}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ alerts_enabled: cb.checked }),
+        });
       });
     });
   } catch (e) {

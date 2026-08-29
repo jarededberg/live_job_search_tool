@@ -301,11 +301,41 @@ def try_ashby(company, slug):
     return results
 
 
-def search_company(name, slug):
+_PLATFORM_FNS = {"Greenhouse": try_greenhouse, "Lever": try_lever, "Ashby": try_ashby}
+
+
+def search_company(name, slug, cached_platform=None):
     """Try Greenhouse -> Lever -> Ashby (and slug variants) for one company.
     Returns (jobs, platform, status) where status is 'found_jobs' | 'found_no_match' | 'not_found'.
+
+    If `cached_platform` is given (a previously-confirmed platform for this
+    slug, from db.get_platform_cache()), that single platform is tried
+    first, with the same slug variants, and its result is trusted and
+    returned immediately -- both "found_jobs" and "found_no_match" (the
+    board resolves, it's just between postings right now) count as the
+    cache still being valid, so a company having zero current openings
+    doesn't wrongly trigger the full three-platform fallback. Only a
+    confirmed 404 on every variant of the cached platform falls through to
+    the full search below, which self-heals the cache if the company has
+    since migrated to a different ATS provider.
     """
     variants = list(dict.fromkeys([slug, slug.replace("-", ""), slug.replace("-", "_")]))
+
+    if cached_platform and cached_platform in _PLATFORM_FNS:
+        fn = _PLATFORM_FNS[cached_platform]
+        cache_confirmed = False
+        for variant in variants:
+            r = fn(name, variant)
+            if r is None:
+                continue
+            cache_confirmed = True
+            if r:
+                return r, cached_platform, "found_jobs"
+        if cache_confirmed:
+            return [], cached_platform, "found_no_match"
+        # cached platform no longer resolves at all -- fall through and
+        # re-discover from scratch below.
+
     platforms = [(try_greenhouse, "Greenhouse"), (try_lever, "Lever"), (try_ashby, "Ashby")]
     first_confirmed = None
     for variant in variants:
@@ -322,17 +352,36 @@ def search_company(name, slug):
     return [], "not_found", "not_found"
 
 
-def scrape_all(companies=None, max_workers=4, progress_cb=None, batch_cb=None, batch_size=100):
+def scrape_all(companies=None, max_workers=4, progress_cb=None, batch_cb=None, batch_size=100,
+               platform_cache=None, platform_cb=None):
     """Scrape every company in COMPANIES (or a provided subset). Thread-pooled
     for speed, but memory-bounded: jobs are buffered only up to `batch_size`
     at a time, then handed to `batch_cb(jobs)` (e.g. a DB upsert) and
     discarded, rather than accumulating ~100k job dicts for the entire
     ~10-minute scrape. If batch_cb is None, falls back to returning
     everything at once (used by tests / small ad-hoc scrapes).
+
+    `platform_cache`, if given, is a {slug: platform} dict (from
+    db.get_platform_cache()) of previously-confirmed ATS platforms. For any
+    slug present in it, search_company() tries only that platform first
+    instead of always trying Greenhouse -> Lever -> Ashby in order -- see
+    search_company()'s docstring for the fallback/self-heal behavior. This
+    is the main lever for cutting scrape time/API calls now that the
+    dataset is ~4,300+ companies: most of those calls used to be "try
+    Greenhouse, get a 404, try Lever, get a 404, finally succeed on Ashby"
+    for every single Ashby-hosted company, every single scrape cycle.
+
+    `platform_cb`, if given, is called as `platform_cb(slug, platform)` for
+    every company that resolves to a confirmed platform during this run
+    (whether via a cache hit or a fresh three-platform search), so the
+    caller can persist an up-to-date cache for next time (e.g. via
+    db.upsert_platform_cache()). Not called for companies that don't
+    resolve on any platform.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     companies = companies if companies is not None else COMPANIES
+    platform_cache = platform_cache or {}
     seen_slugs = set()
     clean = []
     for name, slug in companies:
@@ -359,7 +408,7 @@ def scrape_all(companies=None, max_workers=4, progress_cb=None, batch_cb=None, b
 
     def _one(item):
         name, slug = item
-        return name, slug, *search_company(name, slug)
+        return name, slug, *search_company(name, slug, cached_platform=platform_cache.get(slug))
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {ex.submit(_one, item): item for item in clean}
@@ -375,6 +424,8 @@ def scrape_all(companies=None, max_workers=4, progress_cb=None, batch_cb=None, b
             if status == "found_jobs":
                 found += 1
                 total_jobs += len(jobs)
+                if platform_cb:
+                    platform_cb(slug, platform)
                 if batch_cb:
                     buffer.extend(jobs)
                     if len(buffer) >= batch_size:
@@ -383,6 +434,8 @@ def scrape_all(companies=None, max_workers=4, progress_cb=None, batch_cb=None, b
                     all_jobs.extend(jobs)
             elif status == "found_no_match":
                 found_no_match += 1
+                if platform_cb:
+                    platform_cb(slug, platform)
             else:
                 not_found += 1
             if progress_cb:

@@ -592,7 +592,6 @@ COMPANIES = [
     ("Monday.com",              "mondaycom"),    # $12B, work OS / project mgmt (public)
     ("JFrog",                   "jfrog"),           # $3B, DevOps / software supply chain (public)
     ("Synthesia",               "synthesia"),       # $2.1B, AI video generation platform
-    ("Mistral AI",              "mistral"),      # $6B, open-weight LLM company (EU)
     ("Supabase",                "supabase"),        # $2B+, open-source Firebase alternative
     ("Hootsuite",               "hootsuite"),       # $800M, social media management
     ("Beehiiv",                 "beehiiv"),         # newsletter platform, fast growing
@@ -889,7 +888,6 @@ COMPANIES = [
     ("AdvancedMD",              "advancedmd"),      # practice management, AZ area
     ("Waystar",                 "waystar"),         # healthcare payments (public)
     ("Availity",                "availity"),        # $1B+, healthcare connectivity platform
-    ("Arcadia",                 "arcadia"),      # $600M, population health analytics
     ("PointClickCare",          "pointclickcare"),  # $4B, senior care EHR platform
     ("Netsmart",                "ntst"),        # $1.5B, behavioral health IT
     ("Press Ganey",             "pressganey"),      # $1.5B, patient experience analytics
@@ -991,7 +989,6 @@ COMPANIES = [
     ("HawkEye 360",             "hawkeye360"),      # $200M+, RF geospatial analytics from space
 
     # ══ EVTOL / AIR MOBILITY ══════════════════════════════════════════════════
-    ("Joby Aviation",           "jobyaviation"),    # $7B, air taxi eVTOL (public)
     ("Archer Aviation",         "archer"), # $2B+, Midnight eVTOL (public)
 
     # ══ ENERGY / INDUSTRIAL ═══════════════════════════════════════════════════
@@ -1062,7 +1059,6 @@ COMPANIES = [
     ("Hippo",                   "hippo"),           # $1.9B, homeowners insurance platform (public)
 
     # ══ CONSUMER FINTECH ══════════════════════════════════════════════════════
-    ("Greenlight",              "greenlight"), # $2.3B, financial app for families
 
     # ══ SOFTWARE REVIEW / MARKETPLACES ════════════════════════════════════════
     ("G2",                      "g2"),              # $1.1B, B2B software review marketplace
@@ -1156,14 +1152,12 @@ COMPANIES = [
     # ══ DATA / ANALYTICS PLATFORMS ════════════════════════════════════════════
     ("Confluent",               "confluent"),       # $9B, Kafka-based data streaming cloud
     ("Census",                  "getcensus"),       # $600M, reverse ETL & data activation
-    ("Monte Carlo",             "montecarlodata"),  # $1.6B, data observability platform
     ("Redpanda",                "redpanda"),    # $600M, streaming data platform
     ("Coalesce",                "coalesce"),        # $50M+, data transformation platform
     ("Metabase",                "metabase"),        # $500M, open-source BI & analytics
     ("Preset",                  "preset"),          # Apache Superset cloud platform (a16z)
 
     # ══ SECURITY / COMPLIANCE (additional) ════════════════════════════════════
-    ("Abnormal Security",       "abnormalsecurity"),        # $5B, AI-native email security platform
     ("Orca Security",           "orca"),            # $1.8B, agentless cloud security platform
     ("Semgrep",                 "semgrep"),         # $1B, static analysis & AppSec platform
     ("Secureframe",             "secureframe"),     # $500M, compliance automation
@@ -1199,7 +1193,6 @@ COMPANIES = [
 
     # ══ COLLABORATION / PRODUCTIVITY ══════════════════════════════════════════
     ("Miro",                    "miro"),            # $17.5B, collaborative whiteboard (public)
-    ("Front",                   "front"),        # $1.7B, collaborative customer comms
     ("Framer",                  "framer"),          # $500M, web design & publishing tool
 
     # ══ CUSTOMER ENGAGEMENT / CONTACT CENTER ══════════════════════════════════
@@ -1219,7 +1212,6 @@ COMPANIES = [
     ("Blueshift",               "blueshift"),       # $500M, AI-powered CDP & marketing
 
     # ══ PROCUREMENT / SPEND MANAGEMENT ════════════════════════════════════════
-    ("Zip",                     "zip"),           # $1.5B, intake-to-procure platform
     ("Vendr",                   "vendr"),           # $1B, SaaS purchasing platform
     ("Productiv",               "productiv"),       # $500M, SaaS management platform
     ("BetterCloud",             "bettercloud"),     # $500M, SaaS management platform
@@ -1300,7 +1292,6 @@ COMPANIES = [
 
     # ══ CX / VOICE OF CUSTOMER ════════════════════════════════════════════════
     ("InMoment",                "inmoment"),        # $1.8B, experience intelligence platform
-    ("Momentive",               "momentive"),       # $1.5B, SurveyMonkey parent (public)
     ("Alchemer",                "alchemer"),        # $500M, enterprise survey & feedback
 
     # ══ COMPETITIVE INTELLIGENCE ══════════════════════════════════════════════
@@ -1336,14 +1327,11 @@ COMPANIES = [
     ("NuScale Power",           "nuscalepower"),    # $1B+, small modular reactor (SMR) pioneer
     ("Commonwealth Fusion",     "commonwealthfusion"),             # $4B+, commercial nuclear fusion (SPARC)
     ("Altus Power",             "altuspower"),      # $2B, commercial & industrial solar (public)
-    ("Arcadia",                 "arcadia"),    # $200M+, energy data & community solar platform
 
     # ══ PROJECT MANAGEMENT / WORK OS ══════════════════════════════════════════
-    ("Monday.com",              "mondaycom"),          # $10B+, work management platform (public)
     ("Shortcut",                "shortcut"),        # $500M, project management for software teams
 
     # ══ CONSUMER HEALTH / TELEHEALTH ══════════════════════════════════════════
-    ("Hims & Hers",             "himshers"),            # $3B+, telehealth & wellness (public)
     ("Komodo Health",           "komodohealth"),    # $3.3B, healthcare intelligence platform
     ("Oscar Health",            "oscar"),           # $5B, tech-driven health insurance (public)
     ("Suki AI",                 "suki"),            # $200M+, AI voice assistant for clinicians (a16z)
@@ -1391,7 +1379,6 @@ COMPANIES = [
     ("Mural Health",            "muralhealth"),     # healthcare tech
     ("CampMinder",              "campminder"),      # camp management SaaS
     ("EnergyHub",               "energyhub"),       # distributed energy resources
-    ("Pilot",                   "pilotfiduciary"),         # bookkeeping/finance for startups
     ("StubHub",                 "stubhubinc"),      # ticket marketplace
     ("Elite Technology",        "elitetechnology"), # legal workflow software
     ("Commvault",               "commvault"),       # data protection / cloud backup
@@ -1402,7 +1389,6 @@ COMPANIES = [
     ("Findigs",                 "findigs"),         # tenant screening fintech
     ("Pulley",                  "pulley"),          # equity management for startups
     ("Evolution IQ",            "evolutioniq"),     # AI for insurance claims
-    ("Diligent",                "diligent"), # board & ESG governance
     ("Forge Global",            "forgeglobal"),     # private market investing
     ("SOCi",                    "soci"),            # local marketing platform
     ("Path Robotics",           "pathrobotics"),    # welding automation robotics
@@ -1421,7 +1407,6 @@ COMPANIES = [
     ("Yes Energy",              "yesenergy"),       # energy market data
     ("House Account",           "houseaccount"),    # restaurant fintech
     ("Baton",                   "baton"),           # business transfer marketplace
-    ("SpotOn",                  "spoton"),   # restaurant/retail POS
     ("SpotHopper",              "spothopper"),      # restaurant marketing SaaS
     ("Blank Street",            "blankstreet"),     # coffee shop chain tech
     ("Motive",                  "gomotive"),        # fleet management / ELD
@@ -1441,9 +1426,7 @@ COMPANIES = [
     ("Torc Robotics",           "torcrobotics"),    # autonomous trucking
     ("Kodiak Robotics",         "kodiak"),          # autonomous trucking
     ("Formic",                  "formic"),          # robotics-as-a-service
-    ("Customer.io",             "customerio"),      # marketing automation
     ("Wolt",                    "wolt"),            # food delivery (DoorDash sub)
-    ("Headway",                 "headway"),         # mental health marketplace
     ("GoFundMe",                "gofundme"),        # crowdfunding
     ("Versaterm",               "versaterm"),       # public safety software
     ("North Slope Technologies","northslope"),      # defense tech
@@ -1474,7 +1457,6 @@ COMPANIES = [
     ("EvenUp",                  "evenup"),          # AI legal demand packages
     ("Cape",                    "cape"),            # privacy-focused mobile carrier
     ("Popl",                    "popl"),            # digital business card / NFC
-    ("TRM Labs",                "trmlabs"),        # crypto compliance / blockchain intel
     # ── Additional companies from Company_List.xlsx ──────────────────────
     ("8minute Solar Energy",                    "8minute"),
     ("Palmetto",                    "palmettocleantech"),
@@ -1488,7 +1470,6 @@ COMPANIES = [
     ("AssemblyAI",                    "assemblyai"),
     ("Astranis",                    "astranis"),
     ("Chainguard",                    "chainguard"),
-    ("Glean",                    "glean"),
     ("Aura",                    "aura798"),
     ("Coast",                    "coast"),
     ("Knoetic",                    "knoetic"),
@@ -1600,7 +1581,6 @@ COMPANIES = [
     ("RocketReach",                    "rocketreach"),
     ("Subskribe",                    "subskribe"),
     ("Drivetrain",                    "drivetrain"),
-    ("Crayon",                    "crayon"),
     ("AfterShip",                    "aftership"),
     ("Flipdish",                    "flipdish"),
     ("Swapcard",                    "swapcard"),
@@ -1637,7 +1617,6 @@ COMPANIES = [
     ("Planet Labs",                    "planetlabs"),
     ("SensorTower",                    "sensortower"),
     ("HeyGen",                    "heygen"),
-    ("Amount",                    "amount"),
     ("Prove",                    "prove"),
     ("Invoca",                    "invoca"),
     ("MyFitnessPal",                    "myfitnesspal"),
@@ -1648,9 +1627,7 @@ COMPANIES = [
     ("Aya Healthcare",                    "ayahealthcare"),
     ("PDI Technologies",                    "pditechnologies"),
     ("Clearway Energy",                    "clearway"),
-    ("Aircall",                    "aircall"),
     ("Recharge Payments",                    "recharge"),
-    ("Amount",                    "amount"),
     ("Finix",                    "finix"),
     ("Spreedly",                    "spreedly"),
     ("Dwolla",                    "dwolla"),
@@ -1670,9 +1647,7 @@ COMPANIES = [
     ("UserGems",                    "usergems"),
     ("Performio",                    "performio"),
     ("Litmos",                    "litmos"),
-    ("LearnUpon",                    "learnupon"),
     ("Laika",                    "laika"),
-    ("Abnormal Security",                    "abnormalsecurity"),
     ("Jamf",                    "jamf"),
     ("Lookout",                    "lookout"),
     ("Cohere Health",                    "coherehealth"),
@@ -1684,16 +1659,12 @@ COMPANIES = [
     ("Ethos Life",                    "ethoslife"),
     ("Coterie",                    "coterieinsurance"),
     ("NetDocuments",                    "netdocuments"),
-    ("Fairmarkit",                    "fairmarkit"),
     ("Tealbook",                    "tealbook"),
     ("Flock Homes",                    "flockhomes"),
-    ("Blend Labs",                    "blend"),
     ("Doma",                    "doma"),
     ("Brandwatch",                    "brandwatch"),
     ("Talkwalker",                    "talkwalker"),
-    ("Traackr",                    "traackr"),
     ("Grin",                    "grin"),
-    ("Hive",                    "hive"),
     ("Snaplogic",                    "snaplogic"),
     ("Esri",                    "esri"),
     ("Underdog Fantasy",                    "underdogfantasy"),
@@ -1791,19 +1762,6 @@ COMPANIES = [
     ("Coefficient",                    "coefficient"),
     ("Altana AI",                    "altanaai"),
     ("Resilinc",                    "resilinc"),
-    ("Vonage",                    "vonage"),
-    ("Bandwidth",                    "bandwidth"),
-    ("Plivo",                    "plivo"),
-    ("Kixie",                    "kixie"),
-    ("Convoso",                    "convoso"),
-    ("Omnisend",                    "omnisend"),
-    ("VTEX",                    "vtex"),
-    ("Northbeam",                    "northbeam"),
-    ("Userflow",                    "userflow"),
-    ("Clarity AI",                    "clarityai"),
-    ("Roofr",                    "roofr"),
-    ("Hover",                    "hover"),
-    ("Scanifly",                    "scanifly"),
     ("Sophos",                    "sophos"),
     ("Morning Brew",                    "morningbrew"),
     ("Medium",                    "medium"),
@@ -1826,7 +1784,6 @@ COMPANIES = [
     ("Insperity",                    "insperity"),
     ("Anaplan",                    "anaplan"),
     ("OneStream",                    "onestreamsoftware"),
-    ("Honeycomb",                    "honeycombio"),
     ("Poshmark",                    "poshmark"),
     ("Grailed",                    "grailed"),
     ("Lessen",                    "lessen"),
@@ -1897,7 +1854,6 @@ COMPANIES = [
     ("CoinGecko",                    "coingecko"),
     ("CoinMarketCap",                    "coinmarketcap"),
     ("Wave Accounting",                    "waveapps"),
-    ("Articulate",                    "articulate"),
     ("Terrascope",                    "terrascope"),
     ("Hanover Insurance",                    "hanover"),
     ("Protective Life",                    "protective"),
@@ -1926,7 +1882,6 @@ COMPANIES = [
     ("Nucleus Security",                    "nucleus"),
     ("Balbix",                    "balbix"),
     ("Censys",                    "censys"),
-    ("Mesh Payments",                    "mesh"),
     ("Figment",                    "figment"),
     ("Immutable",                    "immutable"),
     ("Offchain Labs",                    "offchainlabs"),
@@ -1972,7 +1927,6 @@ COMPANIES = [
     ("Sensei LMS",                    "sensei"),
     ("McAfee Enterprise",                    "mcafee"),
     ("Lodgify",                    "lodgify"),
-    ("Peloton",                    "pelotoncycle"),
     ("Zwift",                    "zwift"),
     ("Disney",                    "disney"),
     ("Crunchyroll",                    "crunchyroll"),
@@ -2128,16 +2082,12 @@ COMPANIES = [
     ("Pursuit",                    "pursuit"),
     ("SEI",                    "seisandbox"),
     ("Teachers Pay Teachers",                    "teacherspayteachers"),
-    ("LTK",                    "ltk"),
     ("GoodNotes",                    "goodnotes"),
     ("Pathstream",                    "pathstream"),
     ("Course Hero",                    "coursehero"),
-    ("IXL Learning",                    "ixl"),
     ("DataCamp",                    "datacamp"),
-    ("Sourcegraph",                    "sourcegraph"),
     ("Equilibrium Energy",                    "equilibriumenergy"),
     ("Who Gives A Crap",                    "whogivesacrap"),
-    ("Stord",                    "stord"),
     ("The Weather Company",                    "theweathercompany"),
     ("Cypress.io",                    "cypressio"),
     ("Upbound",                    "upbound"),
@@ -2245,7 +2195,6 @@ COMPANIES = [
     ("Civitech",                    "civitech"),
     ("Planet Technologies",                    "planettechnologies"),
     ("Portcast",                    "portcast"),
-    ("Sprinto",                    "sprinto"),
     ("Copia Automation",                    "copia"),
     ("Analytic Partners",                    "analyticpartners"),
     ("Outsight",                    "outsight"),
@@ -2307,7 +2256,6 @@ COMPANIES = [
     ("Blitz App",                    "blitz"),
     ("Boston Red Sox",                    "redsox"),
     ("Fenway Sports Management",                    "fenwaysports"),
-    ("Arc'teryx",                    "arcteryx.com"),
     ("Hopper",                    "hopper"),
     ("TodayTix Group",                    "todaytixgroup"),
     ("LA28 Olympics",                    "la2028"),
@@ -2358,7 +2306,6 @@ COMPANIES = [
     ("Lindblad Expeditions",                    "lindblad-expeditions"),
     ("Vogo Travel",                    "vogo"),
     ("Destination Knot",                    "destinationknot"),
-    ("Vivid Seats",                    "vividseats"),
     ("Complex Networks",                    "complexmedia"),
     ("Pollen",                    "pollen"),
     ("Samsung Research America",                    "samsungresearchamerica"),
@@ -2482,7 +2429,6 @@ COMPANIES = [
     ("PolicyMe",                    "policyme"),
     ("ContinuumGlobal",                    "continuumglobal"),
     ("Leadership Connect",                    "leadershipconnect"),
-    ("Grafana Labs",                    "grafanalabs"),
     ("ITHAKA",                    "ithaka"),
     ("Trade Republic",                    "traderepublicbank"),
     ("Bowery Farming",                    "boweryfarming"),
@@ -2494,7 +2440,6 @@ COMPANIES = [
     ("Kinship",                    "kinship"),
     ("Tomofun Furbo",                    "tomofunfurbo"),
     ("Bliss Point Media",                    "blisspointmedia"),
-    ("Insider",                    "useinsider"),
     ("Cologix",                    "cologix"),
     ("ExtraHop Networks",                    "extrahopnetworks"),
     ("Droit",                    "droit"),
@@ -2549,7 +2494,6 @@ COMPANIES = [
     ("JetBridge",                    "JetBridge"),
     ("Modulate",                    "modulate"),
     ("CesiumAstro",                    "CesiumAstro"),
-    ("Hims & Hers",                    "himshers"),
     ("SonderMind",                    "sondermind"),
     ("Presence Learning",                    "presencelearning"),
     ("Teladoc Health",                    "teladoc"),
@@ -2589,7 +2533,6 @@ COMPANIES = [
     ("Cascade Climate",                    "cascade-climate"),
     ("HowGood",                    "HowGood"),
     ("rePurpose Global",                    "repurposeglobal"),
-    ("Arc'teryx",                    "arcteryx.com"),
     ("IDMWorks",                    "idmworks"),
     ("WatchGuard Technologies",                    "watchguard"),
     ("Reply",                    "reply"),
@@ -2628,8 +2571,6 @@ COMPANIES = [
     ("C3 AI",                    "c3iot"),
     ("Verana Health",                    "veranahealth"),
     ("Verantos",                    "verantos"),
-    ("Modernizing Medicine",                    "modernizingmedicine"),
-    ("Harness",                    "harness"),
     ("Binance",                    "binance"),
     ("Powered by Pioneer",                    "pioneer-services"),
     ("InfStones",                    "infstones"),
@@ -2689,7 +2630,6 @@ COMPANIES = [
     ("IDEO.org",                    "ideoorg"),
     ("Understood",                    "understood"),
     ("JustFund",                    "justfund"),
-    ("DISCO",                    "disco"),
     ("Paradigm Legal",                    "joinparadigm"),
     ("NLC Ventures",                    "nlcventures"),
     ("Talentwerx",                    "talentwerx.io"),
@@ -2701,7 +2641,6 @@ COMPANIES = [
     ("ShyftLabs",                    "shyftlabs"),
     ("Skillcloud HCM",                    "skillcloudhcm"),
     ("ANS",                    "ans"),
-    ("Intersect Power",                    "intersect"),
     ("Gate",                    "gate"),
     ("Weekday",                    "weekdayworks"),
     ("Jito Labs",                    "jito.wtf"),
@@ -2813,7 +2752,6 @@ COMPANIES = [
     ("Argo Group",                    "argo83"),
     ("Hippo Insurance",                    "hippo70"),
     ("Attune",                    "attune"),
-    ("Corvus Insurance",                    "corvusinsurance"),
     ("ImageX Media",                    "imagexmedia"),
     ("WebFX",                    "webfx"),
     ("UpKeep",                    "upkeep"),
@@ -2909,7 +2847,6 @@ COMPANIES = [
     ("Bestow",                    "bestow"),
     ("Billiontoone",                    "billiontoone"),
     ("Blumira",                    "blumira"),
-    ("Box",                    "box"),
     ("Breezeway",                    "breezeway"),
     ("Bridgebio",                    "bridgebio"),
     ("Capital Rx",                    "capitalrx"),
@@ -2925,7 +2862,6 @@ COMPANIES = [
     ("Cursor",                    "cursor"),
     ("Datagrail",                    "datagrail"),
     ("Datarails",                    "datarails"),
-    ("dbt Labs",                    "dbtlabs"),
     ("Docker",                    "docker"),
     ("Doximity",                    "doximity"),
     ("Dutchie",                    "thedutchie"),
@@ -2941,7 +2877,6 @@ COMPANIES = [
     ("Genscript",                    "genscript"),
     ("Getsquire",                    "getsquire"),
     ("GOAT Group",                    "goatgroup"),
-    ("Gong",                    "gong"),
     ("Govini",                    "govini"),
     ("Grant Street",                    "grantstreet"),
     ("Groupon",                    "groupon"),
@@ -2999,7 +2934,6 @@ COMPANIES = [
     ("Sardine",                    "sardine"),
     ("Seed",                    "seed"),
     ("Shift Technology",                    "shifttechnology"),
-    ("Signifyd",                    "signifyd"),
     ("Simplisafe",                    "simplisafe"),
     ("Sixfold",                    "sixfold"),
     ("Smaamerica",                    "smaamerica"),
@@ -3025,238 +2959,125 @@ COMPANIES = [
     ("Welbe Health",                    "welbehealth"),
     ("Wikimedia Foundation",                    "wikimedia"),
     ("YipitData",                    "yipitdata"),
-    ("Zip",                    "zip"),
 
     # ══ SOLAR / CLEAN ENERGY (ADDITIONS) ══════════════════════════════════════
     ("EnergyS age",             "energysage"),      # solar marketplace / comparison
     ("Enphase Energy",          "enphase"),         # public, solar inverters & storage
     ("Sunlight Financial",      "sunlightfinancial"), # solar loan financing (public)
     ("Dividend Finance",        "dividendfinance"), # home improvement / solar financing
-    ("GoodLeap",                "goodleap"),        # green home financing (formerly Loanpal)
     ("Spruce Finance",          "sprucefinance"),     # residential solar financing
-    ("Sunnova Energy",          "sunnova"),         # public, residential solar + storage
     ("Lightpath Energy",        "lightpathenergy"), # solar development
-    ("BrightNight",             "brightnight"),     # utility-scale solar & storage
     ("Dimension Energy",        "dimensionenergy"), # solar development
     ("Cypress Creek Renewables","cypresscreekrenewables"), # solar development
-    ("Pivot Energy",            "pivotenergy"),     # community solar developer
     ("Sol Systems",             "solsystems"),      # solar finance & development
-    ("8minute Solar Energy",    "8minute"),         # utility-scale solar developer
     ("Lightsource bp",          "lightsource"),   # utility-scale solar (BP sub)
     ("Origis Energy",           "origisenergy"),    # solar & storage developer
     ("Anza Renewable Energy",   "anza"),            # solar procurement marketplace
     ("Greenbacker Capital",     "greenbacker"),     # renewable energy investor/operator
     ("D.E. Shaw Renewable",     "desre"),           # renewable energy developer
     ("Amp Energy",              "amp"),       # global energy transition platform
-    ("Altus Power",             "altuspower"),      # commercial solar (public)
     ("Endur",                   "enerparc"),        # solar O&M
-    ("SunPower",                "sunpower"),        # public, residential solar
 
     # ══ CLIMATE TECH / CARBON ══════════════════════════════════════════════════
     ("Sweep",                   "sweep"),        # carbon accounting software
-    ("Watershed",               "watershed"),       # enterprise carbon management
     ("Greenly",                 "greenly"),         # SMB carbon accounting
     ("Patch",                   "patch"),           # carbon credit marketplace
     ("Cloverly",                "cloverly"),        # carbon API & marketplace
-    ("South Pole",              "southpole"),       # carbon project developer
     ("3Degrees",                "3degrees"),        # renewable energy & carbon
     ("Sustain Life",            "sustainlife"),     # carbon management platform
-    ("Terrascope",              "terrascope"),      # enterprise carbon platform
-    ("Rubicon Carbon",          "rubiconcarbon"),   # carbon markets
 
     # ══ REVENUE INTELLIGENCE / SALES TECH (ADDITIONS) ════════════════════════
     ("Aviso",                   "aviso"),           # AI revenue intelligence
-    ("People.ai",               "peopleai"),        # revenue operations AI
     ("Revenue.io",              "revenue-io"),      # real-time revenue guidance
     ("Scratchpad",              "scratchpad"),      # Salesforce productivity tool
     ("Dooly",                   "dooly"),           # revenue productivity platform
-    ("Mindtickle",              "mindtickle"),      # sales readiness platform
-    ("Highspot",                "highspot"),        # sales enablement platform
-    ("Showpad",                 "showpad"),         # sales enablement
-    ("Mediafly",                "mediafly"),        # revenue enablement
     ("Forma AI",                "forma"),        # AI sales compensation
     ("Spiff",                   "spiff"),           # sales commission software
-    ("CaptivateIQ",             "captivateiq"),     # already in list - skip if dupe
-    ("Performio",               "performio"),       # sales performance management
     ("QuotaPath",               "quotapath"),       # sales comp & quota management
-    ("Varicent",                "varicent"),        # incentive comp management
-    ("Anaplan",                 "anaplan"),         # connected planning platform
-    ("Pigment",                 "pigment"),         # business planning platform
-    ("Mosaic Tech",             "mosaic"),          # strategic finance platform
-    ("Planful",                 "planful"),         # financial planning platform
 
     # ══ B2B SAAS / PRODUCTIVITY (ADDITIONS) ═══════════════════════════════════
-    ("Coda",                    "coda"),            # doc / app platform
     ("Rewatch",                 "rewatch"),         # video knowledge base
-    ("Loom",                    "loom"),            # async video (Atlassian)
     ("Tango",                   "tango"),           # workflow documentation
-    ("Guru",                    "guru"),            # knowledge management
-    ("Tettra",                  "tettra"),          # team knowledge base
     ("Confluence / Atlassian",  "atlassian"),       # productivity suite
-    ("Asana",                   "asana"),           # work management (public)
-    ("Monday.com",              "mondaycom"),    # work OS (public)
-    ("ClickUp",                 "clickup"),         # project management
     ("Basecamp",                "basecamp"),        # project management
-    ("Productboard",            "productboard"),    # product management platform
-    ("Aha!",                    "aha"),             # product roadmap software
-    ("LaunchDarkly",            "launchdarkly"),    # feature flags & experimentation
-    ("Split.io",                "split"),           # feature flags
-    ("Optimizely",              "optimizely"),      # experimentation platform
-    ("Amplitude",               "amplitude"),       # product analytics (public)
-    ("Heap",                    "heap"),            # digital insights platform
-    ("Pendo",                   "pendo"),           # product analytics & guidance
-    ("Sprig",                   "sprig"),           # product research platform
-    ("Maze",                    "maze"),            # user research platform
-    ("UserTesting",             "usertesting"),     # customer experience platform
-    ("Typeform",                "typeform"),        # form & survey platform
 
     # ══ SUPPLY CHAIN / OPERATIONS TECH ════════════════════════════════════════
-    ("Relex Solutions",         "relex"),           # supply chain planning
-    ("o9 Solutions",            "o9solutions"),     # enterprise planning platform
     ("Kinaxis",                 "kinaxis"),         # supply chain management
-    ("Coupa Software",          "coupa"),           # business spend management
     ("Verusen",                 "verusen"),         # supply chain intelligence AI
     ("Anvyl",                   "anvyl"),           # supply chain collaboration
-    ("Loop Returns",            "loopreturns"),            # returns management platform
-    ("Route",                   "route"),           # package protection & tracking
     ("Ware",                    "ware2"),           # warehouse drone inventory
-    ("Stord",                   "stord"),           # cloud supply chain
 
     # ══ FINTECH / LENDING (ADDITIONS) ════════════════════════════════════════
     ("Blend",                   "blend"),           # mortgage & banking software (public)
     ("Better.com",              "better"),          # digital mortgage
-    ("Roofstock",               "roofstock"),       # single-family rental investing
-    ("Fundrise",                "fundrise"),        # real estate investing platform
     ("Nav Technologies",        "nav"),             # SMB financial health platform
     ("Fundbox",                 "fundbox"),         # SMB credit & payments
-    ("Clearco",                 "clearco"),         # revenue-based financing
     ("Pipe",                    "pipe"),            # recurring revenue financing
     ("Arc Technologies",        "arc"),             # startup banking
-    ("Jeeves",                  "jeeves"),          # global spend management
-    ("Parafin",                 "parafin"),         # embedded business financing
-    ("Capchase",                "capchase"),        # SaaS revenue financing
     ("Lighter Capital",         "lightercapital"),  # revenue-based financing
     ("Drip Capital",            "dripcapital"),     # trade finance
     ("Nerdwallet",              "nerdwallet"),      # personal finance marketplace (public)
-    ("SoFi",                    "sofi"),            # personal finance / banking (public)
     ("LendingClub",             "lendingclub"),     # marketplace lending (public)
 
     # ══ HR / PEOPLE TECH (ADDITIONS) ══════════════════════════════════════════
-    ("HiBob",                   "hibob"),           # modern HR platform
-    ("Oyster HR",               "oysterhr"),        # global employment platform
-    ("Justworks",               "justworks"),       # HR & payroll platform
-    ("Lattice",                 "lattice"),         # already likely in list
-    ("Leapsome",                "leapsome"),        # people enablement platform
-    ("15Five",                  "15five"),          # performance management
-    ("Betterworks",             "betterworks"),     # OKR & performance platform
     ("Engagedly",               "engagedly"),       # performance management
     ("Workramp",                "workramp"),        # LMS & enablement platform
-    ("Docebo",                  "docebo"),          # learning management system
     ("Absorb LMS",              "absorblms"),          # learning management
     ("Cornerstone",             "cornerstoneondemand"), # talent management (public)
-    ("Phenom",                  "phenom"),          # talent experience platform
     ("Eightfold AI",            "eightfold"),       # talent intelligence platform
-    ("Beamery",                 "beamery"),         # talent operating system
     ("Greenhouse",              "greenhouse"),      # recruiting software (Greenhouse themselves)
 
     # ══ DIGITAL HEALTH (ADDITIONS) ════════════════════════════════════════════
-    ("Modern Health",           "modernhealth"),    # mental health platform
-    ("Lyra Health",             "lyrahealth"),      # mental health benefits
-    ("Alma",                    "helloalma"),       # mental health network
-    ("Headway",                 "headway"),         # mental health access
     ("Brightline",              "brightlinehealth"), # pediatric mental health
-    ("Garner Health",           "garnerhealth"),    # health benefits optimization
-    ("Transcarent",             "transcarent"),     # health & care navigation
     ("Rightway",                "rightway"),        # healthcare navigation
     ("Nomi Health",             "nomihealth"),      # direct healthcare
     ("Calibrate",               "calibrate"),       # metabolic health
     ("Found Health",            "found"),           # weight management
     ("Oshi Health",             "oshihealth"),      # GI care
-    ("Sword Health",            "swordhealth"),     # digital MSK care
-    ("Vida Health",             "vida"),            # chronic condition management
     ("Novu",                    "novu"),            # notification infrastructure
 
     # ══ MARKETPLACE / PLATFORM (ADDITIONS) ════════════════════════════════════
-    ("Handshake",               "joinhandshake"),       # early talent hiring platform
-    ("Jobber",                  "jobber"),          # home service management
-    ("ServiceTitan",            "servicetitan"),    # trades business software
-    ("Thumbtack",               "thumbtack"),       # local services marketplace
     ("Fiverr",                  "fiverr"),          # freelance marketplace (public)
-    ("Upwork",                  "upwork"),          # freelance platform (public)
-    ("Toptal",                  "toptal"),          # elite freelance network
     ("Contra",                  "contra"),          # independent work platform
     ("Wrapbook",                "wrapbook"),        # entertainment payroll
 
     # ══ AI / ML (ADDITIONS) ═══════════════════════════════════════════════════
-    ("Weights & Biases",        "wandb"),           # MLOps platform
     ("Runway",                  "runwayml"),        # generative AI for video
-    ("Adept AI",                "adept"),           # AI agent platform
-    ("Writer",                  "writer"),          # enterprise generative AI
     ("Jasper AI",               "jasper"),          # AI content platform
     ("Harvey AI",               "harvey"),          # legal AI platform
     ("Otter.ai",                "otter"),           # AI meeting transcription
     ("Fireflies.ai",            "fireflies"),       # AI meeting assistant
-    ("Tome",                    "tome"),            # AI storytelling platform
     ("Gamma",                   "gamma"),       # AI presentation tool
     ("Kore.ai",                 "koreai"),          # enterprise AI platform
     ("Ada Support",             "ada"),             # AI customer service
-    ("Moveworks",               "moveworks"),       # AI employee support
-    ("Aisera",                  "aisera"),          # AI service management
     ("Lexi",                    "lexion"),          # AI contract management
     ("Paxton AI",               "paxtonai"),        # legal AI
 
     # ══ SECURITY / COMPLIANCE (ADDITIONS) ════════════════════════════════════
     ("Wiz",                     "wiz-inc"),         # cloud security (public)
-    ("Orca Security",           "orcasecurity"),    # cloud security
-    ("Drata",                   "drata"),           # compliance automation
-    ("Vanta",                   "vanta"),           # trust management platform
-    ("Secureframe",             "secureframe"),     # compliance automation
-    ("Thoropass",               "thoropass"),       # compliance platform
     ("Anecdotes",               "anecdotes"),       # compliance data platform
     ("Tugboat Logic",           "tugboatlogic"),    # security assurance
-    ("HackerOne",               "hackerone"),       # bug bounty & security testing
-    ("Bugcrowd",                "bugcrowd"),        # crowdsourced security
 
     # ══ REAL ESTATE / PROPTECH (ADDITIONS) ═══════════════════════════════════
     ("Redfin",                  "redfin"),          # real estate brokerage (public)
-    ("VTS",                     "vts"),             # commercial real estate platform
-    ("Buildertrend",            "buildertrend"),    # construction management
     ("HouseCanary",             "housecanary"),     # real estate analytics
-    ("Cherre",                  "cherre"),          # real estate data platform
     ("Arrived Homes",           "arrived"),         # fractional real estate
-    ("Cadre",                   "cadre"),           # commercial real estate investing
 
     # ══ ADDITIONAL HIGH-VALUE GROWTH COMPANIES ════════════════════════════════
-    ("Talkdesk",                "talkdesk"),        # cloud contact center
-    ("Dialpad",                 "dialpad"),         # AI-powered communications
-    ("Genesys",                 "genesys"),         # customer experience platform
-    ("Totango",                 "totango"),         # customer success platform
     ("Catalyst Software",       "catalyst"),        # customer success platform
-    ("Vitally",                 "vitally"),         # customer success platform
-    ("Planhat",                 "planhat"),         # customer success platform
     ("Matik",                   "matik"),           # automated data presentations
     ("Looker",                  "looker"),          # BI platform (Google sub)
-    ("Sigma Computing",         "sigmacomputing"),  # cloud BI platform
-    ("Preset",                  "preset"),          # Apache Superset cloud platform
-    ("Metabase",                "metabase"),        # BI & analytics
     ("Mode Analytics",          "modeanalytics"),            # collaborative analytics
     ("Thoughtspot",             "thoughtspot"),     # AI-powered analytics
-    ("Domo",                    "domo"),            # business intelligence (public)
     ("MicroStrategy",           "microstrategy"),   # analytics & Bitcoin (public)
     ("Zoho",                    "zoho"),            # business software suite
-    ("Freshworks",              "freshworks"),      # CRM & customer service (public)
-    ("Zendesk",                 "zendesk"),         # customer service software (private)
-    ("Intercom",                "intercom"),        # customer messaging platform
-    ("Drift",                   "drift"),           # B2B conversational marketing
     ("Postal",                  "postal"),          # direct mail & gifting platform
     ("Sendoso",                 "sendoso"),         # sending platform
-    ("Reachdesk",               "reachdesk"),       # gifting & direct mail
 
     # ══ PHOENIX / ARIZONA AREA ════════════════════════════════════════════════
     ("WebPT",                   "webpt"),           # physical therapy SaaS (Phoenix)
     ("DriveTime",               "drivetime"),       # used auto dealer (Phoenix)
     ("Nikola Corporation",      "nikolamotor"),     # EV/hydrogen trucks (Phoenix)
-    ("Verra Mobility",          "verramobility"),   # tolling & fleet tech (Mesa AZ)
     ("InComm Payments",         "incomm"),          # gift card & payments (Phoenix)
     ("Benchmark Electronics",   "benchmark"),       # electronics mfg (Scottsdale)
     ("Global Traffic Tech",     "gtt"),             # traffic systems (Phoenix)
@@ -3265,8 +3086,6 @@ COMPANIES = [
     # ══ PRICING / REVENUE MANAGEMENT SOFTWARE ════════════════════════════════
     ("Pricefx",                 "pricefx"),         # AI-powered pricing software
     ("Zilliant",                "zilliant"),        # B2B pricing & revenue growth
-    ("Vendavo",                 "vendavo"),         # B2B pricing & margin optimization
-    ("PROS Holdings",           "pros"),            # pricing & revenue mgmt (public)
     ("Competera",               "competera"),       # retail pricing intelligence
     ("Revionics",               "revionics"),       # retail pricing optimization
     ("Wiser Solutions",         "wiser"),           # retail intelligence & pricing
@@ -3282,51 +3101,33 @@ COMPANIES = [
 
     # ══ ABM / DEMAND GENERATION ══════════════════════════════════════════════
     ("RollWorks",               "rollworks"),       # ABM platform (NextRoll)
-    ("Metadata.io",             "metadataio"),        # B2B paid media automation
-    ("Madison Logic",           "madisonlogic"),    # ABM platform
     ("Anteriad",                "anteriad"),        # B2B marketing data
     ("True Influence",          "trueinfluence"),   # intent-based demand gen
     ("Integrate",               "integrate"),       # demand acceleration platform
 
     # ══ CUSTOMER DATA PLATFORMS ══════════════════════════════════════════════
     ("Tealium",                 "tealium"),         # real-time CDP
-    ("mParticle",               "mparticle"),       # customer data infrastructure
     ("Simon Data",              "simondata"),       # customer data platform
-    ("ActionIQ",                "actioniq"),        # enterprise CDP
     ("Lytics",                  "lytics"),          # customer data platform
-    ("BlueConic",               "blueconic"),       # growth marketing CDP
     ("Treasure Data",           "treasuredata"),    # enterprise CDP (ARM)
 
     # ══ USER RESEARCH / PRODUCT DISCOVERY ════════════════════════════════════
     ("Dovetail",                "dovetailapp"),        # user research platform
-    ("Dscout",                  "dscout"),          # in-context research platform
     ("UserZoom",                "userzoom"),        # UX insights platform
-    ("Hotjar",                  "hotjar"),          # website heatmaps & feedback
-    ("Contentsquare",           "contentsquare"),   # digital experience analytics
-    ("Glassbox",                "glassbox"),        # digital customer experience
 
     # ══ FIELD SERVICE / WORKFORCE MANAGEMENT ═════════════════════════════════
     ("ServiceMax",              "servicemax"),      # field service mgmt (Salesforce)
     ("FieldNation",             "fieldnation"),     # field service marketplace
-    ("Skedulo",                 "skedulo"),         # deskless workforce platform
     ("Workwave",                "workwave"),        # field service software
-    ("Zuper",                   "zuper"),           # field service management
     ("ServiceTrade",            "servicetrade"),    # commercial field service
 
     # ══ CREATOR / LEARNING PLATFORMS ══════════════════════════════════════════
-    ("Patreon",                 "patreon"),         # creator membership platform
-    ("Kajabi",                  "kajabi"),          # all-in-one creator platform
     ("Teachable",               "teachable"),       # online course platform
-    ("Thinkific",               "thinkific"),       # online learning platform (public)
     ("Podia",                   "podia"),           # creator platform
     ("Maven",                   "maven"),           # cohort-based learning
-    ("Beehiiv",                 "beehiiv"),         # newsletter platform
 
     # ══ DEV TOOLS / NO-CODE (GROWTH-STAGE) ═══════════════════════════════════
-    ("Postman",                 "postman"),         # API platform
     ("ReadMe",                  "readme"),          # developer docs platform
-    ("Webflow",                 "webflow"),         # visual web development
-    ("Retool",                  "retool"),          # internal tools platform
     ("Bubble",                  "bubble"),          # no-code web app builder
     ("Glide",                   "glide"),           # no-code apps
     ("Softr",                   "softr"),           # no-code web apps
@@ -3334,49 +3135,29 @@ COMPANIES = [
 
     # ══ COMMUNITY / EVENTS PLATFORMS ═════════════════════════════════════════
     ("Bevy",                    "bevy"),            # virtual community events
-    ("Circle",                  "circle"),          # community platform
-    ("Mighty Networks",         "mightynetworks"),  # community platform
-    ("Higher Logic",            "higherlogic"),     # community engagement
     ("Vanilla Forums",          "vanilla"),         # community platform
-    ("Common Room",             "commonroom"),      # community intelligence
     ("Orbit",                   "orbit"),           # community growth platform
 
     # ══ REVENUE CYCLE / BILLING ═══════════════════════════════════════════════
-    ("Waystar",                 "waystar"),         # healthcare revenue cycle (public)
     ("Greenway Health",         "greenwayhealth"),  # healthcare IT
-    ("AdvancedMD",              "advancedmd"),      # medical practice management
     ("Kareo",                   "kareo"),           # medical billing (now Tebra)
-    ("Tebra",                   "tebra"),           # healthcare practice tech
 
     # ══ ADDITIONAL SERIES B/C+ COMPANIES ═════════════════════════════════════
-    ("Gem",                     "gem"),             # talent acquisition platform
-    ("SeekOut",                 "seekout"),         # talent intelligence platform
-    ("Paradox",                 "paradox"),         # conversational AI for recruiting
-    ("Findem",                  "findem"),          # talent data platform
     ("Fetcher",                 "fetcher"),         # automated recruiting platform
     ("Humanly",                 "humanly"),         # AI recruiting & HR
     ("Augment",                 "augment"),         # AI coding assistant
     ("Cognition",               "cognition-labs"),  # AI coding (Devin)
     ("Magic Dev",               "magic"),           # AI coding platform
-    ("Vimeo",                   "vimeo"),           # video platform (public)
-    ("Calendly",                "calendly"),        # scheduling platform
-    ("Clockwise",               "clockwise"),       # calendar optimization
     ("Reclaim.ai",              "reclaimai"),       # smart calendar scheduling
     ("Consensus",               "consensus"),       # video demo automation
     ("Reprise",                 "reprise"),         # demo creation platform
     ("Navattic",                "navattic"),        # interactive demo platform
     ("Demostack",               "demostack"),       # demo environment platform
     ("Storylane",               "storylane"),       # product demo software
-    ("Allego",                  "allego"),          # sales learning & enablement
     ("Brainshark",              "brainshark"),      # sales readiness platform
     ("Lessonly",                "lessonly"),        # sales enablement (Seismic)
-    ("Spekit",                  "spekit"),          # in-app learning platform
     ("TechSmith",               "techsmith"),       # screen capture & video tools
     ("Airbase",                 "airbase"),         # spend management (Paylocity)
-    ("Emburse",                 "emburse"),         # expense management platform
-    ("Expensify",               "expensify"),       # expense reports (public)
-    ("Spendesk",                "spendesk"),        # spend management (European)
-    ("Payhawk",                 "payhawk"),         # spend management (European)
 
     # ══ QUANT / TRADING FIRMS (elite comp, hire strategy & ops) ═══════════════
     ("Citadel",                 "citadel"),         # $60B+ hedge fund, top comp
@@ -3423,56 +3204,29 @@ COMPANIES = [
     ("L.E.K. Consulting",       "lek"),             # strategy consulting
     ("Kearney",                 "kearney"),         # global strategy consulting
     ("Oliver Wyman",            "oliverwyman"),     # management consulting
-    ("Teneo",                   "teneo"),           # CEO advisory firm
     ("FTI Consulting",          "fticonsulting"),   # business advisory (public)
     ("Alvarez & Marsal",        "alvarezandmarsal"), # performance improvement
 
     # ══ ADDITIONAL HIGH-PAYING FINTECH / PAYMENTS ════════════════════════════
     ("Checkout.com",            "checkoutcom"),        # $40B payments unicorn
-    ("Marqeta",                 "marqeta"),         # modern card issuing (public)
-    ("Adyen",                   "adyen"),           # global payments platform
     ("Bolt Financial",          "bolt"),            # checkout platform
     ("Taskus",                  "taskus"),          # digital services (public)
     ("Acrisure",                "acrisure"),        # $23B insurtech / fintech
     ("Jerry",                   "jerry"),           # car insurance AI startup
-    ("Pie Insurance",           "pieinsurance"),   # SMB workers comp
     ("Coalition",               "coalitioninc"),    # cyber insurance
 
     # ══ MORE HIGH-PAYING AI / ML INFRASTRUCTURE ══════════════════════════════
-    ("SambaNova Systems",       "sambanova"),       # AI chip & systems startup
-    ("Graphcore",               "graphcore"),       # AI processor company
     ("Untether AI",             "untether"),        # AI inference chip startup
-    ("Tenstorrent",             "tenstorrent"),     # AI chip (Jim Keller)
-    ("ElevenLabs",              "elevenlabs"),      # AI voice platform
-    ("Synthesia",               "synthesia"),       # AI video generation
-    ("HeyGen",                  "heygen"),          # AI avatar video platform
-    ("Ideogram",                "ideogram"),        # AI image generation
-    ("Luma AI",                 "lumaai"),        # AI 3D & video generation
-    ("Pika Labs",               "pika"),            # AI video generation
-    ("Perplexity AI",           "perplexityai"),      # AI search engine
 
     # ══ ADDITIONAL ENTERPRISE / VERTICAL SAAS ════════════════════════════════
-    ("Sprinklr",                "sprinklr"),        # unified CXM platform (public)
-    ("Medallia",                "medallia"),        # experience management
-    ("Qualtrics",               "qualtrics"),       # XM platform (private)
-    ("RealPage",                "realpage"),        # real estate software (Thoma Bravo)
-    ("Buildium",                "buildium"),        # property mgmt software
-    ("AppFolio",                "appfolio"),        # property mgmt software (public)
     ("Yardi Systems",           "yardi"),           # property mgmt software
     ("MRI Software",            "mrisoftware"),     # real estate software
-    ("Entrata",                 "entrata"),         # property mgmt platform
     ("Knock CRM",               "knock"),           # multifamily CRM
-    ("Lessen",                  "lessen"),          # property operations
-    ("Measurabl",               "measurabl"),       # ESG data for real estate
 
     # ══ CYBERSECURITY / OBSERVABILITY (high-pay, missing from prior adds) ═══════
     ("Dynatrace",               "dynatrace"),       # $12B public APM & observability
     ("Proofpoint",              "proofpoint"),      # large private email security (Thoma Bravo)
     ("Secureworks",             "secureworks"),     # public MSSP (Dell Technologies)
-    ("Exabeam",                 "exabeam"),         # SIEM (merged w/ LogRhythm)
-    ("Cybereason",              "cybereason"),      # endpoint detection & response
-    ("Lookout",                 "lookout"),         # cloud security, mobile threat
-    ("Netskope",                "netskope"),        # cloud security platform
 
     # ══ CDP / DATA ACTIVATION ════════════════════════════════════════════════════
     ("RudderStack",             "rudderstack"),     # open-source CDP, Series C
@@ -3487,7 +3241,6 @@ COMPANIES = [
     ("Metronome",               "metronome"),       # usage-based billing for SaaS
     ("Alkami Technology",       "alkami"),          # digital banking platform (NASDAQ)
     ("Q2 Holdings",             "q2ebanking"),              # digital banking software (NYSE)
-    ("Blend",                   "blend"),           # digital lending platform (NYSE)
 
     # ══ TRAVEL TECH ══════════════════════════════════════════════════════════════
     ("Spotnana",                "spotnana"),        # modern travel infrastructure
@@ -3499,29 +3252,12 @@ COMPANIES = [
 
     # ══ AI-NATIVE CUSTOMER SUPPORT ════════════════════════════════════════════════
     ("Forethought",             "forethought"),     # AI for customer support (Series C)
-    ("Assembled",               "assembled"),       # support workforce management
-    ("Kustomer",                "kustomer"),        # CRM for customer service (Meta)
 
     # ══ MORE HIGH-GROWTH B2B SAAS ════════════════════════════════════════════════
-    ("Glean",                   "glean"),           # enterprise AI search (unicorn)
-    ("Coda",                    "coda"),            # collaborative doc platform
-    ("Loom",                    "loom"),            # async video (Atlassian)
-    ("Miro",                    "miro"),            # visual collaboration (unicorn)
-    ("Productboard",            "productboard"),    # product management platform
-    ("Aha!",                    "aha"),             # product roadmap software
-    ("Totango",                 "totango"),         # customer success platform
-    ("Catalyst",                "catalyst"),        # customer success platform
-    ("Vitally",                 "vitally"),         # customer success platform
-    ("Planhat",                 "planhat"),         # customer success platform
 
     # ══ DEVELOPER TOOLS / PLATFORMS ══════════════════════════════════════════════
-    ("Retool",                  "retool"),          # internal tool builder
     ("Appsmith",                "appsmith"),        # open-source low-code platform
-    ("Supabase",                "supabase"),        # open-source Firebase alternative
-    ("PlanetScale",             "planetscale"),     # MySQL-compatible database
-    ("Neon",                    "neon"),            # serverless Postgres
     ("CockroachDB",             "cockroachlabs"),     # distributed SQL database
-    ("Temporal",                "temporal"),        # workflow orchestration platform
     ("Pulumi",                  "pulumi"),          # infrastructure as code
     ("Spacelift",               "spacelift"),       # IaC management platform
     ("Env0",                    "env0"),            # cloud deployment automation
@@ -3529,42 +3265,30 @@ COMPANIES = [
     # ══ ADTECH / DIGITAL MARKETING (public companies, high comp) ════════════════
     ("Magnite",                 "magnite"),         # largest independent ad-tech SSP (NASDAQ)
     ("ON24",                    "on24"),            # virtual events & webinar platform (NYSE)
-    ("LiveRamp",                "liveramp"),        # data connectivity platform (NYSE)
-    ("Zeta Global",             "zetaglobal"),      # data-driven marketing cloud (NYSE)
-    ("Viant Technology",        "viant"),           # omnichannel DSP (NASDAQ)
     ("Taboola",                 "taboola"),         # content discovery/native ads (NASDAQ)
     ("Outbrain",                "outbrain"),        # content recommendation (NASDAQ)
 
     # ══ GRC / AUDIT / COMPLIANCE ════════════════════════════════════════════════
     ("AuditBoard",              "auditboard"),      # audit & risk management ($3B valuation)
-    ("Diligent",                "diligent"),    # governance platform (private)
-    ("LogicGate",               "logicgate"),       # risk management, Series C
     ("Onspring",                "onspring"),        # process automation & GRC
     ("Riskonnect",              "riskonnect"),      # integrated risk management
 
     # ══ TAX / REVENUE COMPLIANCE ════════════════════════════════════════════════
     ("Avalara",                 "avalara"),         # tax compliance software (Vista, ~$8B)
     ("Vertex Inc",              "vertexinc"),       # tax technology platform
-    ("TaxBit",                  "taxbit"),          # digital asset tax software
     ("Thomson Reuters Tax",     "thomsonreuters"),  # tax & accounting tech
 
     # ══ DATA SECURITY / GOVERNANCE ══════════════════════════════════════════════
     ("Varonis",                 "varonis"),         # data security platform (NASDAQ, $4B)
-    ("Immuta",                  "immuta"),          # data access control (Series D)
     ("Privacera",               "privacera"),       # data governance & privacy
-    ("BigID",                   "bigid"),           # data intelligence & privacy
 
     # ══ SUPPLY CHAIN TECH ════════════════════════════════════════════════════════
     ("E2open",                  "e2open"),          # supply chain platform (NYSE)
-    ("Logility",                "logility"),        # supply chain planning
-    ("Coupa Software",          "coupa"),           # business spend management
     ("Jaggaer",                 "jaggaer"),         # procurement software
 
     # ══ HR TECH (EUROPEAN UNICORNS WITH GLOBAL PRESENCE) ════════════════════════
     ("Personio",                "personio"),        # all-in-one HR platform ($8.5B unicorn)
-    ("HiBob",                   "hibob"),           # modern HRIS platform
     ("Factorial",               "factorial"),       # HR software for SMBs
-    ("Humaans",                 "humaans"),         # people management platform
 
     # ══ CONVERSATIONAL AI / ENTERPRISE AI AGENTS ════════════════════════════════
     ("Cognigy",                 "cognigy"),         # conversational AI platform (unicorn)
@@ -3578,14 +3302,8 @@ COMPANIES = [
     ("Select Star",             "selectstar"),      # automated data catalog
 
     # ══ VECTOR DATABASES / LLM INFRASTRUCTURE ════════════════════════════════════
-    ("Pinecone",                "pinecone"),        # vector database (unicorn)
-    ("Weaviate",                "weaviate"),        # open-source vector search
-    ("Zilliz",                  "zilliz"),          # vector database infrastructure
-    ("LangChain",               "langchain"),       # LLM app development framework
     ("LlamaIndex",              "llamaindex"),      # LLM data framework company
     ("Langfuse",                "langfuse"),        # LLM observability & analytics
-    ("Arize AI",                "arizeai"),           # ML observability (Series B)
-    ("Weights & Biases",        "wandb"),           # ML experiment tracking (already checked)
 
     # ══ NETWORK / INFRASTRUCTURE OBSERVABILITY ════════════════════════════════════
     ("Kentik",                  "kentik"),          # network intelligence (Series D)
@@ -3593,28 +3311,18 @@ COMPANIES = [
     ("Catchpoint",              "catchpoint"),      # digital experience monitoring
 
     # ══ RPA / INTELLIGENT AUTOMATION ════════════════════════════════════════════
-    ("Automation Anywhere",     "automationanywhere"), # RPA platform ($6.8B valuation)
-    ("Celonis",                 "celonis"),         # process mining ($13B unicorn)
-    ("Nintex",                  "nintex"),          # workflow automation (Vista)
 
     # ══ HEALTHCARE DATA & ANALYTICS ════════════════════════════════════════════
     ("Definitive Healthcare",   "definitivehc"),    # healthcare commercial intelligence (NASDAQ)
-    ("Health Catalyst",         "healthcatalyst"),  # health data platform (NASDAQ)
     ("Innovaccer",              "innovaccer"),      # health data network (unicorn)
-    ("Arcadia",                 "arcadia"),   # population health platform
-    ("Inovalon",                "inovalon"),        # healthcare data analytics (public)
 
     # ══ LOCALIZATION / TRANSLATION TECH ════════════════════════════════════════
     ("Lokalise",                "lokalise"),        # localization platform (Series B)
     ("Crowdin",                 "crowdin"),         # cloud-based localization
     ("Phrase",                  "phrase"),          # localization platform (acquired by Memsource)
-    ("Smartling",               "smartling"),       # translation management (Series D)
     ("Unbabel",                 "unbabel"),         # AI-powered translation (Series C)
 
     # ══ UX RESEARCH PLATFORMS ════════════════════════════════════════════════════
-    ("UserTesting",             "usertesting"),     # human insight platform (public→private)
-    ("Maze",                    "maze"),            # rapid user testing (Series B)
-    ("Dscout",                  "dscout"),          # remote user research
     ("User Interviews",         "userinterviews"),  # research participant recruitment
 
     # ══ INCIDENT MANAGEMENT ════════════════════════════════════════════════════
@@ -3624,55 +3332,31 @@ COMPANIES = [
 
     # ══ FINTECH: LENDING / ALTERNATIVE FINANCE ════════════════════════════════
     ("Upstart",                 "upstart"),         # AI lending platform (NASDAQ, $1.5B)
-    ("Pipe",                    "pipe"), # revenue-based financing (unicorn)
-    ("Clearco",                 "clearco"),         # e-commerce growth capital (Series C)
-    ("Parafin",                 "parafin"),         # embedded business lending (Series C)
-    ("Capchase",                "capchase"),        # SaaS non-dilutive financing (Series B)
 
     # ══ DIGITAL HEALTH / TELEHEALTH ════════════════════════════════════════════
-    ("Hims & Hers",             "himshers"),            # DTC telehealth platform (NYSE)
-    ("Ro",                      "ro"),              # direct-to-patient health (unicorn)
-    ("Headway",                 "headway"),         # mental health network (unicorn, $1B+)
-    ("Thirty Madison",          "thirtymadison"),   # DTC condition care (unicorn)
     ("Progyny",                 "progyny"),         # fertility benefits (NASDAQ, $2B)
-    ("Carrot Fertility",        "carrotfertility"),          # global fertility benefits (unicorn)
-    ("Brightline",              "brightlinehealth"), # pediatric behavioral health
-    ("Alma",                    "helloalma"),       # mental health provider platform (Series D)
 
     # ══ CONSTRUCTION / FIELD SERVICE TECH ═════════════════════════════════════
     ("Egnyte",                  "egnyte"),          # content platform for AEC (unicorn, $1B)
-    ("Motive",                  "gomotive"),        # fleet management (unicorn, $2.85B)
     ("BuildOps",                "buildops"),        # commercial field service mgmt (Series B)
-    ("Fieldwire",               "fieldwire"),       # construction project mgmt (Hilti)
     ("BuiltFirst",              "builtfirst"),      # construction data platform
 
     # ══ COMMERCIAL REAL ESTATE TECH ════════════════════════════════════════════
     ("Crexi",                   "crexi"),           # CRE marketplace (Series C+, $1B+)
-    ("CoStar Group",            "costar"),     # CRE data & analytics (NASDAQ, $30B)
-    ("VTS",                     "vts"),             # CRE leasing & asset mgmt
-    ("Buildout",                "buildout"),        # CRE marketing platform
-    ("HouseCanary",             "housecanary"),     # residential real estate analytics
 
     # ══ HEALTHCARE REVENUE CYCLE / PAYMENTS ════════════════════════════════════
-    ("Waystar",                 "waystar"),         # healthcare payments (NYSE IPO 2024)
     ("Cotiviti",                "cotiviti"),        # healthcare analytics (Veritas Capital)
     ("Edifecs",                 "edifecs"),         # healthcare interoperability
-    ("Availity",                "availity"),        # healthcare IT network
 
     # ══ TALENT / HIRING TECH ═══════════════════════════════════════════════════
     ("HireVue",                 "hirevue"),         # video interviewing (~$500M, private)
     ("Harver",                  "harver"),          # volume hiring automation (Series B)
     ("TestGorilla",             "testgorilla"),     # pre-employment testing (Series A)
     ("Codility",                "codility"),        # developer assessment (Series B)
-    ("Karat",                   "karat"),           # technical interview platform (Series C)
     ("BrightHire",              "brighthire"),      # interview intelligence (Series B)
 
     # ══ INSURANCE TECH (VERTICAL) ══════════════════════════════════════════════
     ("Vouch Insurance",         "vouch"),           # business insurance for startups (Series C)
-    ("Newfront",                "newfront"),        # modern insurance brokerage ($2.2B unicorn)
-    ("Embroker",                "embroker"),        # digital business insurance (Series C)
-    ("Corvus Insurance",        "corvusinsurance"),          # smart commercial insurance (Series D)
-    ("Openly",                  "openly"),          # premium home insurance (Openly/Homepoint)
 
     # ══ LEGAL AI / CONTRACT INTELLIGENCE ═══════════════════════════════════════
     ("Luminance",               "luminance"),       # legal AI for contracts (Series B, $150M)
@@ -3683,23 +3367,14 @@ COMPANIES = [
     ("ContractPodAi",           "contractpodai"),   # legal AI platform (Series C)
 
     # ══ DATA INFRASTRUCTURE (ANALYTICS DATABASES) ══════════════════════════════
-    ("ClickHouse",              "clickhouse"),      # OLAP database ($2B valuation)
-    ("Starburst",               "starburst"),       # data lake analytics ($3.4B, Series D)
-    ("SingleStore",             "singlestore"),     # real-time analytics DB ($1.2B)
-    ("Dremio",                  "dremio"),          # data lakehouse platform (Series E)
-    ("Imply",                   "imply"),           # analytics on Apache Druid (Series C)
     ("CockroachLabs",           "cockroachdb"),     # distributed SQL (Series E, $5B)
 
     # ══ OPEN-SOURCE BUSINESSES ══════════════════════════════════════════════════
     ("Redis Inc",               "redis"),           # in-memory data platform (unicorn)
     ("Couchbase",               "couchbase"),       # NoSQL database platform (NASDAQ)
     ("Percona",                 "percona"),         # open-source DB services (private)
-    ("Astronomer",              "astronomer"),      # Apache Airflow platform (Series C)
-    ("Grafana Labs",            "grafanalabs"),         # observability & monitoring ($6B)
 
     # ══ CPaaS / REAL-TIME COMMUNICATIONS ═══════════════════════════════════════
-    ("Bandwidth",               "bandwidth"),       # cloud communications (NASDAQ, $1B+)
-    ("Telnyx",                  "telnyx"),          # cloud communications (Series B)
     ("Agora",                   "agora"),           # video/audio SDK (NASDAQ)
     ("LiveKit",                 "livekit"),         # open-source WebRTC (Series A, YC)
     ("Daily",                   "daily-co"),        # programmable video (Series B)
@@ -3709,43 +3384,27 @@ COMPANIES = [
 
     # ══ APPLICATION SECURITY ═══════════════════════════════════════════════════
     ("Salt Security",           "salt-security"),   # API security ($620M raised, Series D)
-    ("Traceable AI",            "traceableai"),       # API security (Series B)
     ("DataDome",                "datadome"),        # bot protection (Series C, $130M)
     ("Human Security",          "humansecurity"),   # bot & fraud protection (Series D)
-    ("Arkose Labs",             "arkoselabs"),      # account security platform (Series C)
-    ("Cybereason",              "cybereason"),      # endpoint detection (Series F, $900M)
 
     # ══ DEVOPS / PLATFORM ENGINEERING ══════════════════════════════════════════
     ("OpsLevel",                "opslevel"),        # internal developer portal (Series B)
     ("Port",                    "getport"),         # developer portal platform (Series A)
-    ("Cortex",                  "cortex"),          # engineering intelligence (Series B)
-    ("Doppler",                 "doppler"),         # secrets management (Series A/B)
     ("Infisical",               "infisical"),       # open-source secrets mgmt (YC, Series A)
     ("Teleport",                "goteleport"),      # infrastructure access (Series C, $800M)
-    ("Tailscale",               "tailscale"),       # secure network access (Series B, $1B)
     ("Twingate",                "twingate"),        # zero trust access (Series B)
 
     # ══ DATA & ANALYTICS PLATFORMS ═══════════════════════════════════════════════
     ("Alteryx",                 "alteryx"),         # data analytics platform ($4.4B, Clearlake)
-    ("DataRobot",               "datarobot"),       # automated ML platform ($6.3B, Series G)
     ("DataIku",                 "dataiku"),         # data science platform ($3.7B, Series F)
-    ("H2O.ai",                  "h2oai"),           # AutoML platform ($1.6B, Series E)
     ("Anaconda",                "anaconda"),        # data science platform (Series A)
 
     # ══ CROSS-BORDER PAYMENTS / GLOBAL FINTECH ═══════════════════════════════════
     ("Remitly",                 "remitly"),         # cross-border payments (NASDAQ, $2B)
-    ("Airwallex",               "airwallex"),       # global payments infrastructure ($5.5B)
-    ("Revolut",                 "revolut"),         # neobank ($45B valuation)
     ("Wise",                    "wise"),            # international money transfer (LSE)
-    ("Nium",                    "nium"),            # payments infrastructure ($1.4B unicorn)
-    ("Flutterwave",             "flutterwave"),     # African fintech ($3B unicorn)
-    ("Xendit",                  "xendit"),          # SEA payments ($1.5B unicorn)
     ("Rapyd",                   "rapyd"),           # fintech-as-a-service ($15B unicorn)
     ("Mangopay",                "mangopay"),        # embedded payments for marketplaces
-    ("dLocal",                  "dlocal"),          # emerging markets payments (NASDAQ)
-    ("Payoneer",                "payoneer"),        # global payment platform (NASDAQ)
     ("Primer",                  "primer"),          # payments orchestration (Series B)
-    ("Spreedly",                "spreedly"),        # payment orchestration network
     ("Moov Financial",          "moov"),            # fintech infrastructure (Series B)
 
     # ══ AP AUTOMATION / FINANCE OPS ═══════════════════════════════════════════════
@@ -3757,13 +3416,10 @@ COMPANIES = [
     # ══ DIGITAL BANKING / LENDING ══════════════════════════════════════════════
     ("nCino",                   "ncino"),           # banking CRM (NASDAQ, $3B+)
     ("Finastra",                "finastra"),        # financial technology (~$10B private)
-    ("Pagaya",                  "pagaya"),          # AI lending network (NASDAQ)
     ("Andela",                  "andela"),          # global tech talent (NASDAQ)
 
     # ══ EMPLOYEE COMMUNICATIONS / DIGITAL WORKPLACE ═══════════════════════════
     ("Poppulo",                 "poppulo"),         # employee communications platform
-    ("Staffbase",               "staffbase"),       # employee comms ($1.1B, Series D)
-    ("Simpplr",                 "simpplr"),         # modern intranet (Series D)
     ("Firstup",                 "firstup"),         # digital employee experience
     ("Workvivo",                "workvivo"),        # employee engagement (Zoom)
     ("Blink",                   "blink"),       # frontline worker comms (Series B)
@@ -3782,38 +3438,24 @@ COMPANIES = [
 
     # ══ CONTACT CENTER / CX TECH ══════════════════════════════════════════════
     ("LiveVox",                 "livevox"),         # cloud contact center (public)
-    ("Five9",                   "five9"),           # cloud contact center (NASDAQ, $3B)
-    ("UJET",                    "ujet"),            # CX platform (Series C)
     ("Dixa",                    "dixa"),            # customer service platform (Series C)
-    ("Front",                   "front"),        # customer comms hub ($1.7B unicorn)
     ("Balto",                   "balto"),           # real-time call guidance (Series B)
-    ("Cresta",                  "cresta"),          # AI for contact centers (Series C)
 
     # ══ TECH SKILLS / LEARNING ════════════════════════════════════════════════
     ("Pluralsight",             "pluralsight"),     # tech skills platform (Vista Equity)
-    ("Udacity",                 "udacity"),         # tech nanodegree platform
-    ("WorkRamp",                "workramp"),        # LMS & enablement (Series C)
-    ("Docebo",                  "docebo"),          # enterprise LMS (NASDAQ)
-    ("Degreed",                 "degreed"),         # learning experience platform (Series E)
 
     # ══ MANUFACTURING / PLM SAAS ══════════════════════════════════════════════
     ("Revalize",                "revalize"),        # CPQ for manufacturing (PE-backed)
     ("Syncron",                 "syncron"),         # after-market pricing & service mgmt
-    ("Tulip",                   "tulip"),           # factory floor apps ($150M raised)
-    ("Propel Software",         "propelsoftware"),  # PLM/QMS for hardware (Series C)
-    ("Sight Machine",           "sightmachine"),    # manufacturing AI (Series C)
     ("Paperless Parts",         "paperlessparts"),  # quoting for job shops (Series C)
     ("Katana",                  "katana"),       # manufacturing ERP (Series B)
     ("Duro",                    "durolabs"),        # PLM for hardware companies (YC)
 
     # ══ GIFTING / DIRECT MAIL / INCENTIVES ═══════════════════════════════════
-    ("Sendoso",                 "sendoso"),         # sending platform ($100M raised)
-    ("Postal",                  "postal"),          # offline engagement platform
     ("Tremendous",              "tremendous"),      # rewards & incentives (bootstrapped)
     ("Alyce",                   "alyce"),           # AI gifting (Terminus portfolio)
 
     # ══ WEBSITE BUILDERS (LARGE PUBLIC) ══════════════════════════════════════
-    ("Squarespace",             "squarespace"),     # website builder (NYSE, $7B)
     ("Wix",                     "wix"),             # web development platform (NASDAQ)
 
     # ══ PREDICTIVE ANALYTICS / GTM INTELLIGENCE ═══════════════════════════════
@@ -3826,17 +3468,13 @@ COMPANIES = [
     ("Duck Creek",              "duckcreek"),       # P&C insurance platform (public/private)
     ("Insurity",                "insurity"),        # insurance software (PE-backed)
     ("Sapiens",                 "sapiens"),         # insurance software (NASDAQ Israel)
-    ("Majesco",                 "majesco"),         # cloud insurance platform
     ("Snapsheet",               "snapsheet"),       # insurance claims AI (Series C)
     ("Tractable",               "tractable"),       # AI for auto & property claims ($1B unicorn)
     ("Shift Technology",        "shift-technology"), # insurance AI (Series D)
 
     # ══ MDR / MANAGED SECURITY ════════════════════════════════════════════════
-    ("Arctic Wolf",             "arcticwolf"),      # MDR cybersecurity ($4.5B unicorn)
     ("Deepwatch",               "deepwatch"),       # managed security (Series C, $180M)
-    ("Expel",                   "expel"),           # security operations (Series D)
     ("Adlumin",                 "adlumin"),         # security operations for SME
-    ("Huntress",                "huntress"),        # MDR for SMBs (Series D, $145M)
     ("Blackpoint Cyber",        "blackpointcyber"), # MDR (Series B)
 
     # ══ IDENTITY VERIFICATION / KYC ═══════════════════════════════════════════
@@ -3844,12 +3482,9 @@ COMPANIES = [
     ("Onfido",                  "onfido"),          # identity verification (Entrust)
     ("Au10tix",                 "au10tix"),         # identity verification (Israeli)
     ("Acuant",                  "acuant"),          # identity verification (HID)
-    ("Incode",                  "incode"),          # biometric identity ($220M raised)
 
     # ══ AUTO DEALER / AUTOMOTIVE SaaS ═════════════════════════════════════════
     ("CDK Global",              "cdkglobal"),       # dealer management system ($8.3B, Brookfield)
-    ("Tekion",                  "tekion"),          # cloud DMS for dealers ($3.5B unicorn)
-    ("Dealerware",              "dealerware"),      # fleet & loaner management
     ("Roadster",                "roadster"),        # online car buying (CDK)
     ("Lotame",                  "lotame"),          # data collaboration platform
 
@@ -3858,20 +3493,15 @@ COMPANIES = [
     ("Duetto",                  "duetto"),          # hotel revenue management (Series C)
     ("SiteMinder",              "siteminder"),      # hotel channel manager (ASX public)
     ("RateGain",                "rategain"),        # travel & hospitality tech (NSE India)
-    ("Revinate",                "revinate"),        # hotel CRM & marketing (Series E)
-    ("Cloudbeds",               "cloudbeds"),       # hospitality management (Series D)
-    ("Apaleo",                  "apaleo"),          # open hotel platform (Series A)
 
     # ══ NONPROFIT / SOCIAL GOOD SaaS ════════════════════════════════════════
     ("Blackbaud",               "blackbaud"),       # nonprofit CRM & software (NASDAQ, $3.5B)
     ("Bonterra",                "bonterra"),        # social good platform ($1B+, PE-backed)
-    ("Bloomerang",              "bloomerang"),      # donor management (Series B)
     ("NeonCRM",                 "neoncrm"),         # nonprofit CRM
     ("Virtuous",                "virtuous"),     # responsive fundraising CRM (Series B)
     ("Network for Good",        "network"),  # nonprofit fundraising
 
     # ══ FITNESS / WELLNESS SaaS ════════════════════════════════════════════════
-    ("Mindbody",                "mindbody"),        # wellness business software ($1.9B)
     ("Glofox",                  "glofox"),          # fitness studio management (ABC Fitness)
     ("ABC Fitness",             "abc"),      # fitness software (private equity)
     ("Hapana",                  "hapana"),          # fitness business platform (Series A)
@@ -3880,7 +3510,6 @@ COMPANIES = [
     # ══ EVENTS / VIRTUAL EXPERIENCES ══════════════════════════════════════════
     ("Hubilo",                  "hubilo"),          # virtual events platform ($125M raised)
     ("Whova",                   "whova"),           # event management (~$100M ARR)
-    ("Swapcard",                "swapcard"),        # event networking & engagement
     ("Airmeet",                 "airmeet"),         # virtual events (Series B)
 
     # ══ AEC / CONSTRUCTION SOFTWARE ═══════════════════════════════════════════
@@ -3889,10 +3518,8 @@ COMPANIES = [
     ("Kahua",                   "kahua"),           # construction program mgmt
 
     # ══ INTEGRATION / WORKFLOW AUTOMATION ═════════════════════════════════════
-    ("Make",                    "make"),            # no-code automation (4M users, $100M ARR)
     ("n8n",                     "n8n"),             # open-source workflow automation (Series B)
     ("Jitterbit",               "jitterbit"),       # API integration platform (private)
-    ("Boomi",                   "boomi"),           # cloud integration (Francisco Partners)
     ("Firebolt",                "firebolt"),        # cloud data warehouse (Series C, $100M+)
 
     # ══ FULFILLMENT / SHIPPING TECH ═══════════════════════════════════════════
@@ -3917,9 +3544,7 @@ COMPANIES = [
     ("Vena Solutions",          "venasolutions"),   # FP&A for mid-market ($300M raised)
     ("Prophix",                 "prophix"),         # FP&A platform (Hg Capital PE)
     ("Jirav",                   "jirav"),           # financial planning SaaS (Series B)
-    ("Datarails",               "datarails"),       # FP&A for Excel users (Series B, $50M)
     ("Solver",                  "solverglobal"),    # cloud FP&A (PE-backed)
-    ("Mosaic Tech",             "mosaic"),          # strategic finance platform (Series B)
 
     # ══ CONTRACT LIFECYCLE MANAGEMENT ═════════════════════════════════════════
     ("Sirion",                  "sirionlabs"),      # enterprise CLM (Series C, $100M)
@@ -3939,8 +3564,6 @@ COMPANIES = [
     ("Intellum",                "intellum"),        # customer education platform
     ("Thought Industries",      "thoughtindustries"), # customer training platform ($100M+)
     ("Northpass",               "northpass"),       # customer education (Gainsight)
-    ("Skilljar",                "skilljar"),        # customer training platform (Series B)
-    ("Appcues",                 "appcues"),         # user onboarding & adoption (Series B)
     ("Chameleon",               "chameleon"),    # in-app guidance (Series A)
     ("UserGuiding",             "userguiding"),     # no-code user onboarding
 
@@ -3948,12 +3571,10 @@ COMPANIES = [
     ("M1 Finance",              "m1finance"),       # investing & banking app ($750M val)
     ("Stash",                   "stash"),           # micro-investing app ($900M val)
     ("Tastytrade",              "tastytrade"),      # options trading platform (IG Group)
-    ("Public.com",              "public"),          # social investing platform (Series D)
     ("Alpaca",                  "alpaca"),          # API-first brokerage (Series B)
 
     # ══ MARKETPLACE / GIG ECONOMY PLATFORMS ═══════════════════════════════════
     ("Rover",                   "rover"),           # pet care marketplace (NYSE, $1.3B)
-    ("Thumbtack",               "thumbtack"),       # home services marketplace (unicorn)
     ("Porch Group",             "porchgroup"),      # home services platform (NASDAQ)
     ("GoPuff",                  "gopuff"),          # instant delivery (unicorn, $1.5B)
     ("Taskrabbit",              "taskrabbit"),      # gig services (IKEA)
@@ -3961,25 +3582,18 @@ COMPANIES = [
     # ══ INFRASTRUCTURE / CLOUD HARDWARE ═══════════════════════════════════════
     ("Nutanix",                 "nutanix"),         # HCI & cloud (NASDAQ, $20B)
     ("Pure Storage",            "purestorage"),     # flash storage (NYSE, $16B)
-    ("Fastly",                  "fastly"),          # edge cloud platform (NYSE)
     ("Arista Networks",         "aristanwk"),          # cloud networking (NYSE, $70B)
 
     # ══ SECURITY ANALYTICS / SIEM ══════════════════════════════════════════════
-    ("Securonix",               "securonix"),       # next-gen SIEM (Warburg Pincus)
     ("Devo",                    "devo"),            # cloud-native SIEM (Series D, $250M)
     ("LogPoint",                "logpoint"),        # SIEM & SOAR (European)
-    ("Sumo Logic",              "sumologic"),       # log management & analytics (NASDAQ)
 
     # ══ WEARABLES / HEALTH TECH ═══════════════════════════════════════════════
-    ("Oura",                    "ouraring"),        # smart ring health tracker ($5.2B val)
     ("Eight Sleep",             "eightsleep"),      # smart mattress & sleep tech ($500M)
     ("Whoop",                   "whoop"),           # fitness wearable subscription ($3.6B)
     ("Withings",                "withings"),        # connected health devices
 
     # ══ PR / COMMUNICATIONS INTELLIGENCE ══════════════════════════════════════
-    ("Meltwater",               "meltwater"),       # media intelligence (Oslo Stock Exchange)
-    ("Cision",                  "cision"),          # PR software (Platinum Equity)
-    ("Muck Rack",               "muckrack"),        # PR platform (profitable, private)
     ("Onclusive",               "onclusive"),       # PR analytics (PE-backed)
     ("Agility PR",              "agilitypr"),       # PR software & distribution
 
@@ -3998,14 +3612,7 @@ COMPANIES = [
     ("Solidus Labs",            "soliduslabs"),     # crypto market surveillance
 
     # ══ MORE B2B SAAS (OVERLOOKED UNICORNS) ═══════════════════════════════════
-    ("Podium",                  "podium"),          # messaging for local business ($3B val)
-    ("Birdeye",                 "birdeye"),         # reputation & CX platform (unicorn)
-    ("Yext",                    "yext"),            # digital presence management (NYSE)
-    ("Bazaarvoice",             "bazaarvoice"),     # ratings & reviews platform (Synacor)
     ("PowerReviews",            "powerreviews"),    # product reviews platform
-    ("Trustpilot",              "trustpilot"),      # review platform (LSE public)
-    ("G2",                      "g2"),              # software review marketplace ($1.1B)
-    ("TrustRadius",             "trustradius"),     # B2B software reviews (private)
 
     # ══ CPQ / DIGITAL SALES ROOMS
     ("DealHub", "dealhub"),
@@ -4063,7 +3670,6 @@ COMPANIES = [
     ("Magellan AI", "magellan-ai"),
 
     # ══ GEOSPATIAL / MAPPING & INSPECTION TECH
-    ("Mapbox", "mapbox"),
     ("SafetyCulture", "safetyculture"),
 
     # ══ ML OBSERVABILITY / AI QUALITY (GH confirmed)
@@ -4071,22 +3677,14 @@ COMPANIES = [
     ("WhyLabs", "whylabs"),               # ML observability, GH
     ("TruEra", "truera"),                 # AI quality, GH
     ("Fiddler AI", "fiddler"),            # Model performance, GH
-    ("Arize AI", "arizeai"),                # ML observability, GH
 
     # ══ TALENT INTELLIGENCE / RECRUITING AI (GH/Lever confirmed)
     ("Eightfold AI", "eightfoldai"),      # Talent intelligence, $2.1B, GH
-    ("Beamery", "beamery"),               # Talent CRM, Lever confirmed
-    ("SeekOut", "seekout"),               # Talent intelligence, GH
-    ("Findem", "findem"),                 # Talent sourcing AI, GH
 
     # ══ SALES ENABLEMENT / READINESS (GH confirmed)
-    ("Mindtickle", "mindtickle"),         # Sales readiness, GH
-    ("Spekit", "spekit"),                 # Sales enablement, GH
     ("Bigtincan", "bigtincan"),           # Sales enablement, GH (ASX public)
 
     # ══ COMMUNITY-LED GROWTH / GTM
-    ("Common Room", "commonroom"),        # Community-led GTM, GH
-    ("Orbit", "orbit"),                   # Community growth, GH
 
     # ══ SMB BANKING / NEOBANK (GH confirmed)
     ("BlueVine", "bluevine"),             # SMB banking, GH
@@ -4095,7 +3693,6 @@ COMPANIES = [
 
     # ══ EXPERIMENTATION / FEATURE FLAGS (GH/Ashby)
     ("Eppo", "eppo"),                     # Experimentation platform, GH/Ashby
-    ("Statsig", "statsig"),               # Feature flags & analytics, GH
     ("GrowthBook", "growthbook"),         # Open-source A/B, GH
     ("DevCycle", "devcycle"),             # Feature flags, GH
 
@@ -4105,14 +3702,12 @@ COMPANIES = [
 
     # ══ PLATFORM ENGINEERING / DEVELOPER PORTALS
     ("Humanitec", "humanitec"),           # Platform engineering, GH/Lever
-    ("Cortex", "cortex"),                 # Developer portal, GH -- if not already in
 
     # ══ DATA QUALITY / PIPELINE OBSERVABILITY
     ("Anomalo", "anomalo"),               # Data quality, GH
 
     # ══ DEVELOPER SECURITY / APPSEC
     ("Apiiro", "apiiro"),                 # Code risk platform, GH
-    ("Semgrep", "semgrep"),               # Code scanning -- double check
 
     # ══ ADDITIONAL FINTECH
     ("Albert", "albert"),                 # Fintech app, GH
@@ -4146,7 +3741,6 @@ COMPANIES = [
 
     # ══ CRYPTO COMPLIANCE / FINANCIAL CRIME INTELLIGENCE
     ("Elliptic", "elliptic"),             # Crypto risk, Lever/GH
-    ("ComplyAdvantage", "complyadvantage"), # AML/KYC data, GH
     ("Unit21", "unit21"),                 # Risk & AML platform, GH
     ("Hawk AI", "hawk"),               # AML AI, GH
 
@@ -4181,7 +3775,6 @@ COMPANIES = [
 
     # ══ EMBEDDED BANKING / BANKING-AS-A-SERVICE
     ("Increase", "increase"),             # Banking API, Ashby
-    ("Unit", "unit"),                     # Embedded banking, GH/Ashby
     ("Atomic Financial", "atomic"),       # Payroll connectivity, GH
     ("Argyle", "argyle"),                 # Employment data API, GH
 
@@ -4192,7 +3785,6 @@ COMPANIES = [
     # ══ HEALTHCARE AI / CLINICAL DOCUMENTATION
     ("Nabla", "nabla"),                   # AI for clinicians, GH
     ("DeepScribe", "deepscribe"),         # AI medical scribe, GH
-    ("Abridge", "abridge"),               # Clinical conversation AI, GH
 
     # ══ SALES OPS / REVENUE TOOLS (ADDITIONAL)
     ("Ebsta", "ebsta"),                   # Revenue intelligence, GH/Lever
@@ -4215,7 +3807,6 @@ COMPANIES = [
     ("Swimm", "swimm"),                   # Code documentation, $27M, GH
     ("Mintlify", "mintlify"),             # Developer docs, Series A, GH/Ashby
     ("GitBook", "gitbook"),               # Documentation platform, GH
-    ("ReadMe", "readme"),                 # Developer hub, Series B, GH
     ("Stoplight", "stoplight"),           # API design/docs platform, GH
     ("Redocly", "redocly"),               # API documentation, GH/Lever
 
@@ -4229,7 +3820,6 @@ COMPANIES = [
     ("Socotra", "socotra"),               # Insurance platform, Series B, GH
 
     # ══ WORKFORCE SCHEDULING (HOURLY / SHIFT)
-    ("Deputy", "deputy"),                 # Shift scheduling platform, GH
     ("Quinyx", "quinyx"),                 # Workforce management, GH
     ("Humanity", "humanity"),             # Schedule management, GH
 
@@ -4238,7 +3828,6 @@ COMPANIES = [
     ("Payrails", "payrails"),             # Enterprise payments, GH/Lever
 
     # ══ MORTGAGE / REAL ESTATE CLOSING TECH
-    ("Snapdocs", "snapdocs"),             # Digital mortgage closing, GH
     ("Spruce", "spruce"),                 # Title/closing platform, GH
     ("Maxwell Financial", "maxwell"),   # Mortgage platform, GH
 
@@ -4440,8 +4029,6 @@ COMPANIES = [
     ("Insight Global", "insightglobal"),  # Staffing/talent, GH
 
     # ══ PROPERTY MANAGEMENT SAAS
-    ("AppFolio", "appfolio"),             # Property mgmt, NASDAQ, GH
-    ("Buildium", "buildium"),             # Property mgmt (RealPage), GH
     ("DoorLoop", "doorloop"),             # Modern property mgmt, GH
     ("Hemlane", "hemlane"),               # Property mgmt platform, GH
     ("HqO", "hqo"),                       # Tenant experience, GH
@@ -4549,7 +4136,6 @@ COMPANIES = [
     # ══ CUSTOMER IDENTITY (CIAM)
     ("Frontegg", "frontegg"),             # Customer identity, GH
     ("Clerk", "clerk"),                   # Auth for devs, Ashby/GH
-    ("Magic", "magic"),                   # Passwordless auth, GH
 
     # ══ BENEFITS TECHNOLOGY
     ("Businessolver", "businessolver"),   # Benefits admin, GH
@@ -4573,131 +4159,43 @@ COMPANIES = [
     ("Veem", "veem"),                     # B2B global payments, GH
 
     # ══ ESG / SUSTAINABILITY REPORTING (ADDITIONAL)
-    ("Measurabl", "measurabl"),           # ESG data platform, GH
     ("Sinai Technologies", "sinai"),      # ESG analytics, GH
 
 
     # ══ Major Ashby Users — large/well-funded, PM/Strategy/Ops roles ═════════
-    ("Ramp",                    "ramp"),            # $8B, corporate spend management, Ashby
-    ("Rippling",                "rippling"),        # $13B, HR/payroll/IT platform, Ashby
-    ("Brex",                    "brex"),            # $12B, corporate cards & spend, Ashby
-    ("Linear",                  "linear"),          # project management tool, Ashby
-    ("Retool",                  "retool"),          # low-code internal tools, Ashby
-    ("Vercel",                  "vercel"),          # frontend cloud platform, Ashby
-    ("Hex",                     "hex"),             # collaborative data notebooks, Ashby
-    ("Watershed",               "watershed"),       # carbon accounting platform, Ashby
-    ("Drata",                   "drata"),           # compliance automation, Ashby
-    ("Temporal",                "temporal"),        # workflow orchestration, Ashby
-    ("Cohere",                  "cohere"),          # enterprise AI platform, Ashby
-    ("Coda",                    "coda"),            # all-in-one doc/spreadsheet, Ashby
-    ("Persona",                 "persona"),         # identity verification, Ashby
-    ("Mercury",                 "mercury"),         # banking for startups, Ashby
-    ("Sardine",                 "sardine"),         # fraud & compliance, Ashby
-    ("Merge",                   "merge"),           # unified API platform, Ashby
-    ("Replit",                  "replit"),          # collaborative coding, Ashby
-    ("Baseten",                 "baseten"),         # ML model serving, Ashby
-    ("Modal",                   "modal"),           # serverless cloud compute, Ashby
     ("Causal",                  "causal"),          # financial planning tool, Ashby
-    ("Vanta",                   "vanta"),           # security & compliance, Ashby
-    ("Glean",                   "glean"),       # enterprise AI search, Ashby
-    ("Pilot",                   "pilotfiduciary"),           # accounting for startups, Ashby
     ("Puzzle",                  "puzzle"),          # accounting software, Ashby
     ("Orb",                     "orb"),             # usage-based billing, Ashby
-    ("Metronome",               "metronome"),       # usage-based billing, Ashby
     ("Lago",                    "lago"),            # open-source billing, Ashby
-    ("Maxio",                   "maxio"),           # SaaS financial ops, Ashby
-    ("Zuora",                   "zuora"),           # subscription mgmt, Ashby
     ("PropelAuth",              "propelauth"),      # auth platform, Ashby
-    ("Supabase",                "supabase"),        # open-source Firebase, Ashby
-    ("PlanetScale",             "planetscale"),     # serverless MySQL, Ashby
-    ("Neon",                    "neon"),            # serverless Postgres, Ashby
     ("Turso",                   "turso"),           # edge database, Ashby
     ("Axiom",                   "axiom"),           # log management, Ashby
     ("Highlight",               "highlight"),       # session replay/monitoring, Ashby
-    ("Posthog",                 "posthog"),         # product analytics, Ashby
     ("June",                    "june"),            # product analytics, Ashby
     ("Koala",                   "koala"),        # PLG signal tracking, Ashby
     ("Common Room",             "common-room"),     # community intelligence, Ashby
-    ("Synctera",                "synctera"),        # banking as a service, Ashby
-    ("Lithic",                  "lithic"),          # card issuing API, Ashby
-    ("Slope",                   "slope"),           # B2B BNPL, Ashby
-    ("Capchase",                "capchase"),        # revenue-based financing, Ashby
-    ("Pipe",                    "pipe"),            # capital for SaaS, Ashby
     ("Folio",                   "folio"),           # trade finance, Ashby
     ("Numeral",                 "numeral"),         # sales tax automation, Ashby
     ("Anrok",                   "anrok"),           # global sales tax, Ashby
     ("Kana",                    "kana"),            # revenue intelligence, Ashby
-    ("Clari",                   "clari"),           # revenue platform, Ashby
 
     # ══ RevOps / GTM / Sales Engagement SaaS ══════════════════════════════════
-    ("Outreach",                "outreach"),        # sales engagement platform
-    ("Salesloft",               "salesloft"),       # sales engagement / revenue orchestration
-    ("Highspot",                "highspot"),        # sales enablement
-    ("Mindtickle",              "mindtickle"),      # sales readiness / revenue enablement
-    ("6sense",                  "6sense"),          # ABM / revenue AI
     ("Apollo.io",               "apollo-io"),        # sales intelligence / engagement
     # ZoomInfo → moved to Workday (large public company)
-    ("Bombora",                 "bombora"),         # B2B intent data
-    ("People.ai",               "peopleai"),       # revenue intelligence / AI sales analytics
-    ("Crayon",                  "crayon"),          # competitive intelligence
-    ("Klue",                    "klue"),            # competitive intelligence
-    ("Spekit",                  "spekit"),          # sales enablement (Denver CO)
-    ("Allego",                  "allego"),          # sales enablement / learning
-    ("Bigtincan",               "bigtincan"),       # sales enablement
-    ("Mediafly",                "mediafly"),        # sales enablement
-    ("Showpad",                 "showpad"),         # sales enablement (Belgian/US)
-    ("Revenue.io",              "revenue-io"),      # revenue intelligence / coaching
-    ("Chorus.ai",               "chorus"),          # conversation intelligence (ZoomInfo acq)
-    ("Jiminny",                 "jiminny"),         # conversation intelligence
-    ("Nooks",                   "nooks"),           # AI sales development platform
-    ("Orum",                    "orum"),            # AI parallel dialing
     ("Luru",                    "luru"),            # RevOps automation
 
     # ══ Customer Success / Experience Platforms ════════════════════════════════
-    ("Totango",                 "totango"),         # CS platform
-    ("Catalyst",                "catalyst"), # CS platform
-    ("Vitally",                 "vitally"),         # CS platform (Ashby)
-    ("Intercom",                "intercom"),        # customer messaging
     # Zendesk, Freshworks, Medallia → moved to Workday (large enterprise)
-    ("InMoment",                "inmoment"),        # customer experience
-    ("Birdeye",                 "birdeye"),         # reputation / CX (Scottsdale AZ!)
-    ("Podium",                  "podium"),          # customer communication (Lehi UT)
     # Sprinklr → moved to Workday
-    ("Contentsquare",           "contentsquare"),   # digital experience analytics
-    ("Heap",                    "heap"),            # product analytics
-    ("Pendo",                   "pendo"),           # product analytics / digital adoption
 
     # ══ Product / Data Analytics Platforms ════════════════════════════════════
-    ("Amplitude",               "amplitude"),       # product analytics
-    ("Mixpanel",                "mixpanel"),        # product analytics
-    ("ThoughtSpot",             "thoughtspot"),     # AI analytics
     # Alteryx → moved to Workday (PE-acquired, 1400+ employees)
-    ("Domo",                    "domo"),            # BI platform (American Fork UT)
-    ("Sigma Computing",         "sigmacomputing"),  # cloud analytics
-    ("Sisense",                 "sisense"),         # analytics platform
-    ("Fivetran",                "fivetran"),        # data pipeline / ELT
-    ("dbt Labs",                "dbtlabs"),         # data transformation
-    ("Airbyte",                 "airbyte"),         # open-source data integration
-    ("Monte Carlo",             "montecarlodata"),      # data observability
-    ("Alation",                 "alation"),         # data intelligence / governance
-    ("Collibra",                "collibra"),        # data governance
-    ("Atlan",                   "atlan"),           # data workspace
-    ("Anomalo",                 "anomalo"),         # data quality
 
     # ══ Solar / Clean Energy (Jared's industry) ════════════════════════════════
     # Note: First Solar, Enphase → moved to Workday (large public companies)
-    ("Array Technologies",      "array"), # solar trackers (NM)
-    ("Shoals Technologies",     "shoalstechnologies"),          # solar BOS
-    ("SunPower",                "sunpower"),        # residential/commercial solar
-    ("Sunnova Energy",          "sunnova"),         # residential solar
-    ("Ameresco",                "ameresco"),        # energy efficiency / renewables
-    ("Clearway Energy",         "clearway"),        # renewable developer
     ("Invenergy",               "invenergy"),       # renewable developer
     ("EDF Renewables",          "edf-renewables"),  # renewable developer
-    ("BrightNight",             "brightnight"),     # renewable developer
-    ("Longroad Energy",         "longroad"),        # renewable developer
     ("sPower",                  "spower"),          # renewable developer (AES)
-    ("Arevon Energy",           "arevon"),          # renewable developer (AZ HQ)
     ("AES Corporation",         "aes"),             # global power / clean energy
     ("Arctech Solar",           "arctech"),         # solar trackers
     ("Primoris Services",       "primoris"),        # solar EPC contractor
@@ -4706,355 +4204,146 @@ COMPANIES = [
     ("Volt Power",              "voltpower"),       # grid services
     ("Nuvve",                   "nuvve"),           # V2G / EV energy management
     ("Swell Energy",            "swell-energy"),    # VPP / distributed energy
-    ("Palmetto",                "palmetto"),        # residential solar tech platform
     ("SunBug Solar",            "sunbug"),          # commercial solar
     ("Dimension Energy",        "dimension-energy"), # commercial solar developer
     ("CEP Energy",              "cep-energy"),      # renewable energy developer
 
     # ══ Phoenix / Arizona Area (GH/Lever/Ashby users) ════════════════════════════
     # Note: GoDaddy, ON Semi, Microchip, Avnet, Insight, Gen Digital → moved to Workday
-    ("Carvana",                 "carvana"),         # online car sales, HQ Tempe AZ
     ("Axon Enterprise",         "axon"),            # public safety tech, HQ Scottsdale AZ
     ("Edgio",                   "edgio"),           # CDN/streaming, HQ Scottsdale AZ
     ("Corelogic",               "corelogic"),       # property data, HQ Scottsdale AZ
-    ("Verra Mobility",          "verramobility"),   # smart transportation, HQ Mesa AZ
     ("Iridium",                 "iridium"),         # satellite comms, HQ Tempe AZ
-    ("Limeade",                 "limeade"),         # employee wellbeing (remote-first)
     ("Yelp",                    "yelp"),            # local reviews, remote-friendly
 
     # ══ Fintech / Payments / Finance Tech ══════════════════════════════════════
-    ("Plaid",                   "plaid"),           # fintech infrastructure
-    ("Marqeta",                 "marqeta"),         # card issuing platform
-    ("Affirm",                  "affirm"),          # BNPL / financial services
-    ("Chime",                   "chime"),           # neobank
-    ("SoFi",                    "sofi"),            # personal finance / banking
-    ("Expensify",               "expensify"),       # expense management
     ("HighRadius",              "highradius"),      # AR automation / treasury
-    ("Avalara",                 "avalara"),         # tax compliance
-    ("Recurly",                 "recurly"),         # subscription billing
-    ("Paddle",                  "paddle"),          # merchant of record / billing
-    ("Zuora",                   "zuora"),           # subscription management
-    ("Maxio",                   "maxio"),           # subscription billing & analytics
     ("BILL",                    "billcom"),         # financial operations for SMBs
-    ("Coupa Software",          "coupa"),           # business spend management
-    ("Ivalua",                  "ivalua"),          # procurement
-    ("Jaggaer",                 "jaggaer"),         # procurement
-    ("Nuvei",                   "nuvei"),           # payment technology
-    ("Adyen",                   "adyen"),           # global payments
-    ("Checkout.com",            "checkoutcom"),        # payments infrastructure
-    ("Nium",                    "nium"),            # global payments / embedded finance
-    ("Payoneer",                "payoneer"),        # global payments
-    ("Rapyd",                   "rapyd"),           # fintech-as-a-service
-    ("Kyriba",                  "kyriba"),          # treasury management
-    ("Versapay",                "versapay"),        # AR automation
 
     # ══ Enterprise SaaS (missing from prior batches) ══════════════════════════
-    ("Veeva Systems",           "veeva"),           # life sciences CRM / cloud
-    ("Workato",                 "workato"),         # enterprise automation / iPaaS
-    ("Celonis",                 "celonis"),         # process mining / execution management
     # UiPath, Automation Anywhere, Informatica → moved to Workday (large enterprises)
-    ("Certinia",                "certinia"),        # professional services automation (was FinancialForce)
-    ("ServiceMax",              "servicemax"),      # field service management
     ("IFS",                     "ifsworld"),             # ERP for service/manufacturing
     ("Epicor",                  "epicor"),          # ERP for manufacturing/distribution
-    ("Acumatica",               "acumatica"),       # cloud ERP
     ("Sage Intacct",            "sage"),    # cloud accounting / ERP
-    ("Yext",                    "yext"),            # digital knowledge management
-    ("Salsify",                 "salsify"),         # product experience management
     ("Akeneo",                  "akeneo"),          # PIM / product data
-    ("Klaviyo",                 "klaviyo"),         # email / SMS marketing (huge RevOps team)
-    ("Braze",                   "braze"),           # customer engagement platform
-    ("Iterable",                "iterable"),        # cross-channel marketing automation
-    ("Attentive",               "attentive"),       # SMS marketing
-    ("Sendbird",                "sendbird"),        # messaging API
-    ("Olo",                     "olo"),             # restaurant technology
-    ("SpotOn",                  "spoton"),          # restaurant / SMB payments + software
-    ("Wrike",                   "wrike"),           # project management
-    ("Smartsheet",              "smartsheet"),      # work management platform
 
     # ══ Management Consulting (GH/Lever users) ═════════════════════════════════
     ("Oliver Wyman",            "oliver-wyman"),    # management consulting
-    ("Kearney",                 "kearney"),         # management consulting
     ("L.E.K. Consulting",       "lek-consulting"),  # strategy consulting
-    ("FTI Consulting",          "fticonsulting"),   # consulting / advisory
-    ("Alvarez & Marsal",        "alvarezandmarsal"), # management consulting
     ("Booz Allen Hamilton",     "bah"), # government / defense consulting
     ("ICF International",       "icfinternational"),             # consulting & technology services
-    ("Point B",                 "pointb"),          # management consulting
     ("Chartis Group",           "chartis"),         # healthcare advisory
     ("Prophet",                 "prophet"),         # brand & growth consulting
 
     # ══ HR Tech / People Platforms ════════════════════════════════════════════
-    ("Lattice",                 "lattice"),         # people management platform
-    ("15Five",                  "15five"),          # performance management
-    ("Betterworks",             "betterworks"),     # OKR / performance
-    ("Culture Amp",             "cultureamp"),      # employee experience
-    ("Leapsome",                "leapsome"),        # people enablement platform
-    ("HiBob",                   "hibob"),           # HR platform
-    ("Personio",                "personio"),        # HR platform (European)
-    ("Justworks",               "justworks"),       # PEO / HR
-    ("Gusto",                   "gusto"),           # HR / payroll for SMBs
 
     # ══ InsurTech ══════════════════════════════════════════════════════════════
     ("Hippo Insurance",         "hippo"),           # home insurance tech, public
     ("Branch Insurance",        "branch"),          # bundled auto/home insurance
-    ("Pie Insurance",           "pieinsurance"),             # small business workers comp
-    ("Coalition",               "coalition"),       # cyber insurance / security
     ("At-Bay",                  "at-bay"),          # cyber insurance
-    ("Openly",                  "openly"),          # homeowners insurance platform
-    ("Corvus Insurance",        "corvusinsurance"),          # smart commercial insurance
-    ("Next Insurance",          "nextinsurance"),  # SMB insurance platform
-    ("Socotra",                 "socotra"),         # insurance platform SaaS
-    ("Applied Systems",         "appliedsystems"),  # insurance software (large)
-    ("Duck Creek Technologies", "duckcreek"),       # insurance SaaS
 
     # ══ Legal Tech / Contract Lifecycle Management ══════════════════════════════
-    ("LinkSquares",             "linksquares"),     # contract analytics
-    ("ContractPodAi",           "contractpodai"),   # CLM platform
-    ("Juro",                    "juro"),            # contract platform
-    ("Icertis",                 "icertis"),         # CLM (enterprise, large)
-    ("Filevine",                "filevine"),        # legal operations
 
     # ══ Supply Chain / Logistics Tech ══════════════════════════════════════════
-    ("project44",               "project44"),       # supply chain visibility
-    ("FourKites",               "fourkites"),       # real-time supply chain tracking
-    ("Motive",                  "motive"),          # fleet management (fmr KeepTruckin)
-    ("Stord",                   "stord"),           # cloud supply chain / fulfillment
-    ("Flexe",                   "flexe"),           # on-demand warehousing
-    ("Loop Returns",            "loopreturns"),            # ecommerce returns platform
-    ("o9 Solutions",            "o9solutions"),     # AI supply chain planning
     ("Nulogy",                  "nulogy"),          # supply chain collaboration
-    ("Shippo",                  "shippo"),          # multi-carrier shipping API
-    ("EasyPost",                "easypost"),        # shipping API
 
     # ══ Commission Management / Sales Performance ═══════════════════════════════
-    ("CaptivateIQ",             "captivateiq"),     # sales commission management
-    ("Performio",               "performio"),       # incentive compensation
-    ("Varicent",                "varicent"),        # revenue performance management
     ("Forma.ai",                "forma-ai"),        # AI-powered commission management
     ("Ambition",                "ambition"),        # sales performance coaching
 
     # ══ Climate / Carbon Tech ══════════════════════════════════════════════════
-    ("Pachama",                 "pachama"),         # carbon credits / forestry
-    ("Xpansiv",                 "xpansiv"),         # carbon & environmental commodity market
-    ("South Pole",              "southpole"),       # global carbon project developer
-    ("Sweep",                   "sweep"),           # carbon management platform
-    ("Greenly",                 "greenly"),         # carbon accounting for businesses
     ("Rubicon Carbon",          "rubicon-carbon"),  # institutional carbon market
     ("ClimateAI",               "climateai"),       # climate risk intelligence
 
     # ══ EV / Autonomous Vehicles ═══════════════════════════════════════════════
     ("Waymo",                   "waymo"),           # autonomous vehicles (Alphabet)
     ("May Mobility",            "may-mobility"),    # autonomous shuttle
-    ("Nuro",                    "nuro"),            # autonomous delivery
-    ("Zoox",                    "zoox"),            # autonomous robotaxi (Amazon)
-    ("Motional",                "motional"),        # autonomous driving (Hyundai/Aptiv)
     ("Lucid Motors",            "lucid"),           # luxury EV manufacturer
-    ("ChargePoint",             "chargepoint"),     # EV charging network (public)
-    ("EVgo",                    "evgo"),            # EV fast charging (public)
     ("Blink Charging",          "blinkcharging"),   # EV charging
     ("Wallbox",                 "wallbox"),         # EV charging hardware/software
 
     # ══ Digital Health / Healthcare Tech ══════════════════════════════════════
-    ("Lyra Health",             "lyrahealth"),      # mental health benefits
-    ("Modern Health",           "modernhealth"),    # mental health platform
-    ("Sword Health",            "swordhealth"),     # digital physical therapy
-    ("Brightline",              "brightline"),      # pediatric mental health
-    ("Transcarent",             "transcarent"),     # transparent healthcare navigation
-    ("Quantum Health",          "quantum"),   # healthcare navigation
-    ("Collective Health",       "collectivehealth"),# self-insured health benefits
-    ("Oscar Health",            "oscar"),           # tech-driven health insurance
-    ("Doximity",                "doximity"),        # digital health network for physicians
-    ("Nomi Health",             "nomihealth"),      # direct primary care
-    ("Included Health",         "includedhealth"),  # virtual care + advocacy
-    ("Evolent Health",          "evolenthealth"),   # value-based care (public)
-    ("Privia Health",           "priviahealth"),          # physician management (public)
 
     # ══ Mortgage / Real Estate Tech ════════════════════════════════════════════
-    ("Better.com",              "better"),          # digital mortgage
-    ("Blend",                   "blend"),           # banking and mortgage software
-    ("Roofstock",               "roofstock"),       # single-family rental investing
-    ("VTS",                     "vts"),             # commercial real estate leasing
-    ("Orchard",                 "orchard"),         # home buying platform
-    ("Knock",                   "knock"),       # real estate CRM
 
     # ══ Additional Cybersecurity ════════════════════════════════════════════════
     ("Orca Security",           "orca-security"),   # cloud security posture
-    ("Abnormal Security",       "abnormalsecurity"),# AI email security
-    ("Illumio",                 "illumio"),         # zero trust segmentation
-    ("Sysdig",                  "sysdig"),          # cloud-native security
-    ("Tanium",                  "tanium"),          # endpoint management & security
     ("Trellix",                 "trellix"),         # XDR / security operations
-    ("Secureworks",             "secureworks"),     # threat intelligence (public)
-    ("Exabeam",                 "exabeam"),         # security analytics
     ("LogRhythm",               "logrhythm"),       # SIEM platform
 
     # ══ PE / Growth Equity Firms (operating partner / value creation roles) ════
-    ("Vista Equity Partners",   "vistaequity"), # software-focused PE
-    ("Francisco Partners",      "franciscopartners"),   # tech-focused PE
-    ("Insight Partners",        "insightpartners"),     # growth equity
-    ("General Atlantic",        "generalatlantic"),     # growth equity
-    ("Warburg Pincus",          "warburgpincus"),       # growth equity
     ("TPG Capital",             "tpg"),                 # PE/growth (Fort Worth TX)
-    ("Thoma Bravo",             "thomabravo"),          # software PE
     ("Battery Ventures",        "battery"),             # VC/growth equity
-    ("Accel",                   "accel"),               # VC (Palo Alto)
 
     # ══ Observability / Developer Tools ════════════════════════════════════════
-    ("Dynatrace",               "dynatrace"),       # observability platform (public)
-    ("Grafana Labs",            "grafanalabs"),    # open-source observability
-    ("Sumo Logic",              "sumologic"),       # cloud SIEM / log management
-    ("Elastic",                 "elastic"),         # search and observability
-    ("LaunchDarkly",            "launchdarkly"),    # feature flags / experimentation
-    ("Split.io",                "split"),           # feature experimentation
-    ("Harness",                 "harness"),         # software delivery platform
-    ("CircleCI",                "circleci"),        # CI/CD platform
     ("Temporal",                "temporal-technologies"), # workflow orchestration
 
     # ══ Additional B2B SaaS / Collaboration ════════════════════════════════════
-    ("Mural",                   "mural"),           # visual collaboration
-    ("Dovetail",                "dovetailapp"),     # user research platform
-    ("UserTesting",             "usertesting"),     # customer experience testing
     ("Customer.io",             "customer-io"),     # behavioral messaging
-    ("Vimeo",                   "vimeo"),           # video hosting / communication
-    ("Guru",                    "guru"),            # knowledge management
     ("Bloomfire",               "bloomfire"),       # knowledge engagement platform
     ("Saleshood",               "saleshood"),       # sales enablement platform
-    ("Chorus.ai",               "chorus"),          # conversation intelligence (recheck)
 
     # ══ B2B FinTech / SMB Banking ══════════════════════════════════════════════
-    ("Rho",                     "rho"),             # business banking / spend management
     ("Bluevine",                "bluevine"),        # SMB banking and lending
-    ("Fundbox",                 "fundbox"),         # SMB working capital
-    ("Capchase",                "capchase"),        # revenue-based financing
-    ("Pipe",                    "pipe"),            # revenue financing platform
-    ("Clearco",                 "clearco"),         # ecommerce revenue financing
     ("Lendio",                  "lendio"),          # SMB loan marketplace
     ("Nav",                     "nav"),             # business credit platform
     ("Relay",                   "relay"),           # business banking
-    ("Parafin",                 "parafin"),         # embedded SMB lending (Shopify partner)
     ("Settle",                  "settle"),          # inventory financing for brands
     ("Wayflyer",                "wayflyer"),        # ecommerce growth financing
     ("Arc",                     "arcfinancial"),    # tech company banking
-    ("Stripe",                  "stripe"),          # payments (if not already covered)
     ("Braintree",               "braintree"),       # payments (PayPal)
-    ("Dwolla",                  "dwolla"),          # ACH payments API
-    ("Treasury Prime",          "treasuryprime"),   # banking-as-a-service
 
     # ══ Revenue / GTM Operations (additional tools) ════════════════════════════
-    ("Crossbeam",               "crossbeam"),       # partner ecosystem / co-selling
-    ("PartnerStack",            "partnerstack"),    # partner management platform
-    ("Allbound",                "allbound"),        # channel partner management
-    ("Impartner",               "impartner"),       # partner relationship management
     ("Salesvue",                "salesvue"),        # sales cadence / acceleration
     ("Gong.io",                 "gong-io"),         # revenue intelligence (slug variant)
     ("Chorus",                  "chorusai"),        # revenue intelligence
     ("Copilot AI",              "copilot"),         # sales AI assistant
-    ("Warmly",                  "warmly"),          # signal-based sales
-    ("Common Room",             "commonroom"),      # community-led growth
-    ("Orbit",                   "orbit"),           # community-led growth
     ("Pocus",                   "pocus"),           # product-led sales
 
     # ══ API / Automation / Integration Platforms ═══════════════════════════════
-    ("Postman",                 "postman"),         # API platform
-    ("Kong",                    "kong"),            # API gateway / service mesh
-    ("Boomi",                   "boomi"),           # iPaaS / integration (Dell/Francisco)
-    ("Tray.io",                 "trayio"),            # enterprise automation
     ("Cyclr",                   "cyclr"),           # embedded integration
     ("Apideck",                 "apideck"),         # unified APIs
-    ("Merge",                   "merge"),           # unified API platform
 
     # ══ Analytics / BI Tools (more) ════════════════════════════════════════════
     ("Hex Technologies",        "hex"),             # collaborative data notebook
     ("Lightdash",               "lightdash"),       # open-source BI
-    ("Preset",                  "preset"),          # managed Apache Superset
-    ("Mode Analytics",          "modeanalytics"),            # collaborative analytics
     ("Klipfolio",               "klipfolio"),       # business dashboards
-    ("Metabase",                "metabase"),        # BI for startups
-    ("G2",                      "g2"),              # software review / market data
-    ("TrustRadius",             "trustradius"),     # B2B tech reviews
-    ("Semrush",                 "semrush"),         # online visibility platform (public)
-    ("SimilarWeb",              "similarweb"),      # digital intelligence (public)
-    ("Sprout Social",           "sproutsocial"),    # social media management (public)
 
     # ══ Real Estate / PropTech (more) ══════════════════════════════════════════
-    ("Compass",                 "compass"),         # real estate brokerage tech (public)
     ("Side",                    "side"),            # real estate brokerage platform
-    ("Pacaso",                  "pacaso"),          # co-ownership vacation homes
-    ("Arrived Homes",           "arrived"),         # fractional single-family RE
-    ("Fundrise",                "fundrise"),        # RE crowdfunding
     ("CrowdStreet",             "crowdstreet"),     # commercial RE investing
-    ("AppFolio",                "appfolio"),        # property management (public)
-    ("Buildium",                "buildium"),        # property management (RealPage)
     ("Yardi",                   "yardi"),           # property management (private, large)
     ("Homie",                   "homie"),           # flat-fee real estate (Utah/AZ!)
 
     # ══ EdTech / Learning ══════════════════════════════════════════════════════
-    ("Coursera",                "coursera"),        # online learning (public)
-    ("Udemy",                   "udemy"),           # online courses (public)
-    ("Duolingo",                "duolingo"),        # language learning (public)
-    ("Instructure",             "instructure"),     # Canvas LMS (PE-backed)
     ("PowerSchool",             "powerschool"),     # K-12 software (public)
-    ("Handshake",               "joinhandshake"),   # campus recruiting platform
     ("Age of Learning",         "ageoflearning"),   # ABCmouse (private)
-    ("Newsela",                 "newsela"),         # instructional content
-    ("IXL Learning",            "ixl"),             # K-12 adaptive learning
     ("Panorama Education",      "panoramaeducation"),# student success analytics
-    ("Docebo",                  "docebo"),          # LMS (public)
-    ("Absorb LMS",              "absorblms"),       # learning management
 
     # ══ Gaming / Interactive Entertainment ═════════════════════════════════════
-    ("Epic Games",              "epicgames"),       # Fortnite / Unreal Engine (private)
-    ("Riot Games",              "riotgames"),       # League of Legends (Tencent)
-    ("Jam City",                "jamcity"),         # mobile gaming
-    ("Scopely",                 "scopely"),         # mobile gaming (Savvy Games Group)
-    ("Kabam",                   "kabam"),           # mobile gaming
     ("Zynga",                   "zynga"),           # mobile / social games (Take-Two)
-    ("Playtika",                "playtika"),        # mobile games (public)
     ("PlayStudios",             "playstudios"),     # mobile games / loyalty (public)
-    ("Niantic",                 "niantic"),         # Pokemon Go / AR games
 
     # ══ Manufacturing / Industrial Tech ════════════════════════════════════════
-    ("Tulip",                   "tulip"), # manufacturing tech platform
-    ("Sight Machine",           "sightmachine"),    # manufacturing analytics / AI
     ("Plex Systems",            "plex"),            # smart manufacturing ERP
-    ("Arena Solutions",         "arena"),  # cloud PLM / QMS
-    ("Propel Software",         "propelsoftware"),  # PLM for hardware companies
     ("Parsec",                  "parsec"),          # manufacturing execution system
 
     # ══ Battery / Grid / Advanced Energy ═══════════════════════════════════════
-    ("Redwood Materials",       "redwoodmaterials"), # battery recycling / materials (NV)
     ("QuantumScape",            "quantumscape"),    # solid-state batteries (public)
     ("Energy Vault",            "energyvault"),     # gravity energy storage (public)
-    ("Commonwealth Fusion",     "commonwealthfusion"),             # fusion energy (Cambridge MA)
-    ("Helion Energy",           "helion"),          # fusion energy (Redmond WA)
     ("Fervo Energy",            "fervoenergy"),     # next-gen geothermal
     ("Dandelion Energy",        "dandelion"),       # home geothermal heat pumps
-    ("Arcadia",                 "arcadia"),    # clean energy / community solar
-    ("Nexamp",                  "nexamp"),          # community solar platform
     ("Solstice",                "solstice"),        # community solar
     ("Generate Capital",        "generate"), # sustainable infrastructure finance
     ("Palmetto Clean Tech",     "palmetto"),        # residential solar platform
 
     # ══ Media / Creator Economy ════════════════════════════════════════════════
-    ("Patreon",                 "patreon"),         # creator membership platform
-    ("Kajabi",                  "kajabi"),          # creator business platform
-    ("Teachable",               "teachable"),       # online course platform
-    ("Thinkific",               "thinkific"),       # online learning platform (public)
     ("Fandom",                  "fandom"),          # entertainment community platform
     ("Plex",                    "plexinc"),         # streaming / media server
-    ("SoundCloud",              "soundcloudde"),      # music streaming
 
     # ══ SMB / Small Business Platforms ════════════════════════════════════════
     ("Homebase",                "homebase"),        # scheduling for hourly workers
-    ("Deputy",                  "deputy"),          # workforce management (AU/US)
-    ("When I Work",             "wheniwork"),       # employee scheduling
-    ("Skedulo",                 "skedulo"),         # mobile workforce management
-    ("Staffbase",               "staffbase"),       # employee communications
     ("Beekeeper",               "beekeeper"),       # frontline worker comms
-    ("Simpplr",                 "simpplr"),         # employee intranet
-    ("Firstup",                 "firstup"),         # intelligent communication platform
-    ("Workvivo",                "workvivo"),        # employee experience (Zoom acq)
 
     # ══ AI Tools / Creative & Dev Platforms (Ashby-confirmed) ═════════════════
     ("Deepnote",                "deepnote"),        # collaborative data notebook platform, GTM/sales roles
@@ -5100,30 +4389,14 @@ COMPANIES = [
 
     # ══ New Ashby-confirmed batch (July 2026, session 3) ════════════════════════
     ("MotherDuck",             "motherduck"),      # serverless cloud DuckDB analytics; AE, BDR, Customer Engineer (remote)
-    ("Zip",                    "zip"),             # procurement/purchasing SaaS; Senior/Principal PM, Commercial AE, BDR (HIGHLY RELEVANT - has PM)
-    ("Juro",                   "juro"),            # contract lifecycle management; AE, Implementation Manager, CSM
     ("Compa",                  "compa"),           # compensation intelligence/benchmarking; Enterprise AE, CSM, Comp Analyst
-    ("Prefect",                "prefect"),         # data orchestration/workflow automation; AE Technical Sales (remote)
-    ("Common Room",            "commonroom"),      # GTM intelligence/community analytics; Senior/Staff PM, Commercial AE, AM (HIGHLY RELEVANT - has PM)
-    ("Parafin",                "parafin"),         # embedded capital platform for SMBs; AE Platform Partnerships, Partner Marketing Lead
 
     # ══ New Ashby-confirmed batch (July 2026, session 3b) ═══════════════════════
-    ("Mutiny",                 "mutiny"),          # B2B website personalization/GTM; Finance & BizOps Lead, Growth PM, AE (HIGHLY RELEVANT)
     ("Qualified",              "qualified"),       # AI pipeline gen for sales; Commercial AE, Enterprise AE (remote)
-    ("Orb",                    "orb"),             # usage-based billing/pricing; Enterprise AE Remote, Sales Director Remote
-    ("Atlan",                  "atlan"),           # data catalog/governance for enterprise AI; Strategic CSM (remote)
-    ("Procurify",              "procurify"),       # procurement/spend management SaaS; Product Strategy & Operations Lead, AE (HIGHLY RELEVANT)
-    ("Merge",                  "merge"),           # unified API integrations platform; Technical Program Manager, Commercial AE
 
     # ══ New Ashby-confirmed batch (July 2026, session 3c) ═══════════════════════
-    ("Chili Piper",            "chilipiper"),      # GTM demand conversion SaaS; Senior PM Remote, Strategic AE Remote (HIGHLY RELEVANT - has PM)
     ("LeanData",               "leandata"),        # RevOps lead routing/orchestration; Digital CSM, Mid-Market CSM
     ("Aurora Solar",           "aurorasolar"),     # solar design/sales software; Director of Strategic Projects, Senior AM (VERY RELEVANT - solar + strategy)
-    ("Jobber",                 "jobber"),          # field service mgmt platform; Senior PM Payments Growth, Senior Manager Revenue Technology, AE (HIGHLY RELEVANT - PM role)
-    ("Paddle",                 "paddle"),          # billing/monetization platform; Senior AE, Strategic AE
-    ("Planhat",                "planhat"),         # customer success/RevOps platform; Manager Deployment Strategy & Growth, AE, BDR
-    ("Writer",                 "writer"),          # enterprise AI writing platform; Product Analyst, Enterprise AI Adoption Lead (East)
-    ("Sprig",                  "sprig"),           # product insights/user research; Enterprise AE
 
     # ══ New companies from platform discovery (July 2026) ════════════════════
     ("Lucid",  "lucid"),
@@ -5143,7 +4416,6 @@ COMPANIES = [
     ("Turquoise Health",        "turquoise-health"),# Ashby — note: existing "turquoisehealth" entry above is a dead slug
     ("Homebound",               "homebound"),       # Ashby, rebuild/construction tech
     ("Ignite Reading",          "ignite-reading"),  # Ashby, ed-tech tutoring
-    ("Wealthsimple",            "wealthsimple"),    # Ashby, fintech (Canada)
     ("Crux",                    "cruxclimate"),     # Ashby, Crux Climate — tax credit marketplace
     ("DDN",                     "ddn"),             # Ashby, data storage infrastructure
     ("Scribd",                  "scribdinc"),       # Ashby
@@ -5157,7 +4429,6 @@ COMPANIES = [
     ("Taskray",                 "taskray"),         # Ashby, onboarding/PS software
     ("Arehy",                   "archy"),           # Ashby, dental practice platform
     ("Harmonic Security",       "harmonic"),        # Ashby
-    ("Mapbox",                  "mapbox"),          # Ashby — duplicate of existing entry, harmless
     ("Check",                   "check-technologies"), # Ashby, payroll infrastructure
 
     ("ezCater",                 "ezcater"),         # Lever (not Greenhouse)
@@ -5175,14 +4446,11 @@ COMPANIES = [
     ("Scout AI",                "scoutai"),         # Greenhouse
     ("Pindrop",                 "pindropsecurity"), # Greenhouse
     ("Apptegy",                 "apptegy"),         # Greenhouse
-    ("Phaidra",                 "phaidra"),         # Greenhouse — duplicate of existing entry, harmless
-    ("Seesaw",                  "seesaw"),          # Greenhouse — duplicate of existing entry, harmless
     ("Syllo",                   "tlatechinc"),      # Greenhouse, legal entity name TLATech Inc
     ("Fingerprint",             "fingerprint"),     # Greenhouse
     ("Acadia",                  "acadiapharmaceuticals"), # Greenhouse, Acadia Pharmaceuticals (distinct from existing "Acadia Healthcare" entry)
 
     ("Parallel Domain",         "paralleldomain"),  # Lever
-    ("Arcadia",                 "arcadia"),         # Lever — duplicate of existing entries, harmless
     ("Headlight",               "headlight.health"),# Lever
     ("Istari Digital",          "istaridigital.ai"),# Lever
 

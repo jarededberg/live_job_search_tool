@@ -399,6 +399,23 @@ code {
 .row-action-btn:hover { border-color: var(--accent); color: var(--accent); }
 .row-action-btn.danger:hover { border-color: #b3261e; color: #b3261e; }
 
+.saved-search-alert-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.saved-search-alert-toggle input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 /* Clear search overrides the generic .row-action-btn look -- a thin
    1px-border/muted-text chip read as decorative rather than clickable to
    a real user testing the page (same complaint the resume dropzone had
@@ -1808,6 +1825,72 @@ footer {
   text-decoration: none;
 }
 .job-detail-back-link:hover { color: var(--accent); }
+
+.digest-subscribe {
+  margin: 14px 0 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-soft, #f7f5f0);
+}
+.digest-subscribe form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.digest-subscribe input[type="email"] {
+  flex: 1;
+  min-width: 200px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.digest-subscribe-status {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.job-flag-block {
+  margin-top: 10px;
+}
+.job-flag-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 0.76rem;
+  color: var(--muted-light);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.job-flag-toggle:hover { color: var(--accent); }
+.job-flag-form.hidden { display: none; }
+.job-flag-form {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 360px;
+}
+.job-flag-form select, .job-flag-form textarea {
+  font-family: inherit;
+  font-size: 0.82rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.job-flag-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.job-flag-status {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
 
 .job-detail-fineprint {
   font-size: 0.78rem;

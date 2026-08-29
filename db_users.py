@@ -100,6 +100,28 @@ def init_db():
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_saved_searches_user ON saved_searches(user_id)")
+            # Email alerts: alerts_enabled defaults to TRUE so a newly-saved
+            # search starts opted in (matches the "email me new matches"
+            # framing shown at save time) rather than requiring a second
+            # action to turn alerts on. last_checked_at tracks how far the
+            # alert job has already scanned for THIS search specifically —
+            # named "checked" rather than "alerted" on purpose, since it
+            # advances every run regardless of whether any new jobs (and
+            # therefore an email) actually turned up that time; using it to
+            # mean "last emailed" would make a quiet search with zero new
+            # matches for a while look never-checked and dump every
+            # historical match into the next email whenever one finally
+            # appears.
+            cur.execute("ALTER TABLE saved_searches ADD COLUMN IF NOT EXISTS alerts_enabled BOOLEAN NOT NULL DEFAULT TRUE")
+            cur.execute("ALTER TABLE saved_searches ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS alert_runs (
+                    id SERIAL PRIMARY KEY,
+                    ran_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    searches_checked INTEGER,
+                    emails_sent INTEGER
+                )
+            """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS applied_jobs (
                     id SERIAL PRIMARY KEY,
@@ -276,20 +298,21 @@ def list_saved_searches(user_id):
     with conn_ctx() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, name, params_json, created_at FROM saved_searches "
-                "WHERE user_id = %s ORDER BY created_at DESC",
+                "SELECT id, name, params_json, created_at, alerts_enabled, last_checked_at "
+                "FROM saved_searches WHERE user_id = %s ORDER BY created_at DESC",
                 (user_id,),
             )
             return [dict(r) for r in cur.fetchall()]
 
 
-def create_saved_search(user_id, name, params_json):
+def create_saved_search(user_id, name, params_json, alerts_enabled=True):
     with conn_ctx() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "INSERT INTO saved_searches (user_id, name, params_json) VALUES (%s, %s, %s) "
-                "RETURNING id, name, params_json, created_at",
-                (user_id, name, params_json),
+                "INSERT INTO saved_searches (user_id, name, params_json, alerts_enabled) "
+                "VALUES (%s, %s, %s, %s) "
+                "RETURNING id, name, params_json, created_at, alerts_enabled, last_checked_at",
+                (user_id, name, params_json, alerts_enabled),
             )
             return dict(cur.fetchone())
 
@@ -305,6 +328,59 @@ def delete_saved_search(user_id, search_id):
                 (search_id, user_id),
             )
             return cur.rowcount > 0
+
+
+def set_saved_search_alerts(user_id, search_id, enabled):
+    """Returns True if a row was actually updated -- scoped to user_id,
+    same guessable-id protection as delete_saved_search."""
+    with conn_ctx() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE saved_searches SET alerts_enabled = %s WHERE id = %s AND user_id = %s",
+                (enabled, search_id, user_id),
+            )
+            return cur.rowcount > 0
+
+
+def list_searches_for_alerts():
+    """Every saved search with alerts turned on, joined to its owner's
+    email -- the full set the alert job needs to check on each run.
+    Ordered by id purely for deterministic test output; the alert job
+    processes all of them regardless of order."""
+    with conn_ctx() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT s.id, s.user_id, s.name, s.params_json, s.created_at, s.last_checked_at, "
+                "u.email FROM saved_searches s JOIN users u ON u.id = s.user_id "
+                "WHERE s.alerts_enabled = TRUE ORDER BY s.id"
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+
+def mark_search_checked(search_id, checked_at):
+    with conn_ctx() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE saved_searches SET last_checked_at = %s WHERE id = %s",
+                (checked_at, search_id),
+            )
+
+
+def record_alert_run(ran_at, searches_checked, emails_sent):
+    with conn_ctx() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO alert_runs (ran_at, searches_checked, emails_sent) VALUES (%s, %s, %s)",
+                (ran_at, searches_checked, emails_sent),
+            )
+
+
+def last_alert_run():
+    with conn_ctx() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM alert_runs ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+            return dict(row) if row else None
 
 
 # ---------------- applied jobs ----------------

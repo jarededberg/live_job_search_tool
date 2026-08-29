@@ -881,6 +881,31 @@ fields — distinct from the plain `.modal-title` look the saved-searches and
 applied-jobs modals use, since this is the one modal most first-time
 visitors actually form an impression of the site from.
 
+### Saved-search email alerts
+
+Each saved search has an "Email alerts" checkbox (on by default) in the
+saved-searches list. Once a day (a separate, much less frequent
+APScheduler job than the scrape itself — see `start_scheduler()` — so a
+search doesn't get re-emailed every scrape cycle), `run_saved_search_alerts_job()`
+in `app.py` re-runs every alerts-enabled search's saved filters through
+`db.search_jobs()` and sends a digest email (via the same Resend path as
+the contact form) of whatever's newly matched since that search was last
+checked.
+
+"Newly matched" is judged by `first_seen` — when Skip The Boards itself
+first scraped the posting — not the ATS's own `posted` date, which is
+sometimes backdated, missing, or just not a reliable "is this actually
+new" signal. `saved_searches.last_checked_at` tracks how far each search
+has already been scanned; it advances on every run regardless of whether
+anything new turned up (a quiet search with no matches for a while
+shouldn't dump its entire history into the next email whenever one
+finally appears).
+
+Toggle state lives on the saved search itself (`PATCH
+/api/saved-searches/<id>` with `{"alerts_enabled": bool}`) rather than as
+a single global per-user preference, so a user can get alerts for one
+search and not another.
+
 ### Why this is a separate database from the job cache
 
 `db.py`'s SQLite `jobs.db` is disposable by design — if it's ever lost,
@@ -1367,6 +1392,102 @@ being absent, since a gap in the array reads as "no data" to Chart.js
 is adjustable (30/60/90/365 days) via a `?days=` query param on the same
 endpoint, clamped server-side to 7–365 to keep the query bounded.
 
+## Request a company
+
+`/request-company` (`static/request-company.html`) is a public, structured
+alternative to the contact form's existing "Add my company's job board"
+option — same underlying use case, but with dedicated fields (company
+name required; careers URL, requester email, and a note all optional)
+instead of free text, so a batch of these can be verified and added much
+faster than parsing prose out of a contact-form inbox.
+
+Submissions go to `db.py`'s SQLite job cache (`company_requests` table),
+not the Postgres accounts database — this has to work for anonymous
+visitors on a deployment with no `DATABASE_URL` configured at all, same
+reasoning as the job cache itself needing no account. `POST
+/api/request-company` is rate-limited (`10 per hour`, via the same
+Flask-Limiter instance as everything else) and, if Resend is configured,
+also fires a best-effort notification email to `CONTACT_EMAIL` so a
+submission doesn't sit unseen until the admin page happens to get
+checked.
+
+Review happens on `/admin` (added alongside the existing signup stats —
+`GET /api/admin/company-requests`, filterable by status, and `PATCH
+/api/admin/company-requests/<id>` to mark one `added`/`duplicate`/
+`rejected`), gated by the same `@accounts_required @login_required
+@admin_required` stack as the rest of the admin dashboard.
+
+## Flag a broken listing
+
+Every job detail page (`render_job_page()`) has a small "Report a problem
+with this listing" link that reveals an inline form (reason dropdown +
+optional note) and posts to `POST /api/flag-job`. Same
+`db.py`-SQLite/no-accounts-required pattern as company requests, its own
+`job_flags` table, and its own review section on `/admin` (`GET`/`PATCH
+/api/admin/job-flags`) with a status filter and resolve/dismiss buttons.
+
+Snapshots `job_title`/`company` as plain text at report time rather than
+joining against the live `jobs` row — a flagged "this looks closed"
+listing is exactly the kind of row likely to get pruned by
+`prune_stale()` before anyone reviews the flag, so the report needs to
+stand on its own once that happens.
+
+**Security note (found and fixed while building this):** job data comes
+from third-party career pages and was never sanitized against containing
+the literal text `</script` — a job title with that text embedded in it
+would prematurely close whichever `<script>` block it landed in
+(discovered here while embedding the job's title/URL into the new
+report-a-problem button's inline script, but it turned out to affect the
+pre-existing JobPosting/BreadcrumbList JSON-LD blocks too, which embed
+the same fields). Fixed by replacing `</` with `<\/` wherever one of
+these fields gets embedded inside a `<script>` block (`_js_str_literal()`
+and the two JSON-LD builders) — still valid JSON/JS either way, since
+`\/` is a standard escape for `/`, but the literal ASCII sequence
+`</script` genuinely closes a script element regardless of what's inside
+the string it's embedded in, backslash-JSON-escaping or not. Verified
+with a real HTML parser (not just string matching, which reads the
+adversarial text as a "mismatch" even once escaping is correct) that a
+job titled `Engineer</script><script>alert(1)</script>` renders as
+exactly the intended number of real `<script>` elements, with the
+injected tag staying inert text.
+
+## Weekly digest (best remote roles)
+
+`/weekly-digest` (`weekly_digest_page()` + `render_hub_page()`'s new
+`extra_intro_html` param, in `app.py`) is a real, always-current,
+crawlable page: the last 7 days' remote postings (across all 5
+`REMOTE_HUB_GROUPS`) sorted salary-high-first via `db.search_jobs()`'s
+existing `"salary_high"` sort, which already puts unconfirmed-salary
+listings last rather than needing a separate filter that would hide real
+postings just because a number couldn't be parsed. `_fetch_digest_jobs()`
+is the one shared query both the page and the scheduled email use, so
+they never drift out of sync with each other.
+
+Email signup is single-opt-in (`POST /api/digest/subscribe`, its own
+`digest_subscribers` SQLite table — same no-account-required reasoning as
+company_requests/job_flags) and re-subscribing an already-active or
+previously-unsubscribed email is a harmless no-op rather than an error.
+`run_weekly_digest_job()` runs once a week (a third APScheduler job
+alongside the scrape and the saved-search alerts — see
+`_compute_next_digest_time()`, same "schedule off the last recorded run,
+not on every deploy" pattern as the other two), sending the same list to
+every active subscriber with a working unsubscribe link.
+
+Unsubscribe (`/unsubscribe?email=...&token=...`) is authenticated by an
+HMAC of the email keyed on `SECRET_KEY` (`_digest_unsub_token()`) rather
+than a stored, revocable token table like password resets use — a
+forged link's worst case is someone unsubscribing an email address they
+don't own from a marketing list, not an account takeover, so the simpler
+stateless approach is a reasonable tradeoff specifically here.
+
+**Not fully CAN-SPAM compliant out of the box**: US law technically
+requires a physical mailing address in every commercial email. This
+implementation includes a working one-click unsubscribe (the actual
+legally-load-bearing part) but no address — add one to the email
+template in `run_weekly_digest_job()` before treating this as fully
+compliant if the subscriber list ever grows past "a few people who
+opted in personally."
+
 ## FAQ / About
 
 Both static content, no backend involved beyond the page routes
@@ -1834,6 +1955,50 @@ add new pages; they get more out of the ones that already exist.
   than guessing -- a wrong country claim is worse for a listing's
   credibility with Google than an absent optional one, same principle
   `db.py`'s salary/YOE filters already apply to missing data elsewhere.
+
+## Scraper platform cache + scrape health alerts
+
+`companies_data.py`'s `COMPANIES` list has no ATS-type field -- every
+entry is just `(name, slug)`, and `scraper.py` used to try Greenhouse,
+then Lever, then Ashby, in that order, for every single company on every
+single scrape cycle. With the dataset at 3,600+ companies, that meant
+most companies (anything not on Greenhouse) were burning two guaranteed
+404s before ever reaching the platform they actually resolve on.
+
+`db.py`'s `platform_cache` table now remembers which platform each slug
+last resolved on. `scrape_all()` accepts an optional `platform_cache`
+dict and a `platform_cb` callback; `app.py`'s `run_scrape_job()` loads
+the cache via `db.get_platform_cache()` before scraping, passes it in,
+and persists whatever resolves via `db.upsert_platform_cache()` after.
+On a cache hit, `scraper.py`'s `search_company()` tries only that one
+platform; both "found jobs" and "found no jobs right now" count as the
+cache still being valid, so a company between job postings doesn't
+wrongly trigger a full three-platform fallback. Only a confirmed 404 on
+every slug variant of the cached platform falls through to the full
+search, which self-heals the cache automatically if a company migrates
+to a different ATS. The cache starts empty on a fresh database and fills
+in gradually, one scrape cycle at a time -- no one-time migration of the
+existing company list was needed or attempted.
+
+Separately, `companies_data.py` had accumulated 732 exact duplicate
+`(name, slug)` entries across many earlier addition batches (harmless at
+runtime -- `scrape_all()` already deduplicates by slug before scraping --
+but dead weight in the file). Removed via a one-time AST-based pass that
+only dropped later occurrences of an *exact* name+slug match, verified
+by re-parsing the file and confirming zero duplicates remain and the
+total company count only shrank by the removed count (3,627 companies
+now, down from 4,359 lines but the same actual unique boards).
+
+`app.py`'s `_check_scrape_health()` runs after every scrape and emails
+`CONTACT_EMAIL` via Resend (same pattern as the contact form) if the
+current run's `companies_not_found` count is both a meaningfully large
+number and a real jump over the recent-run average -- catches a bad
+`companies_data.py` edit or a scraper regression same-day instead of it
+silently degrading search results until someone notices. Deliberately
+conservative (needs at least 5 prior runs of history, plus both a ratio
+and an absolute-count threshold) so it doesn't fire during normal
+day-to-day fluctuation or right after a fresh deploy with no baseline
+yet.
 
 ## MCP server
 

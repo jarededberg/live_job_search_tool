@@ -146,6 +146,96 @@ def init_db():
                 jobs_in_db_after INTEGER
             )
         """)
+        run_cols = {row["name"] for row in conn.execute("PRAGMA table_info(scrape_runs)").fetchall()}
+        if "companies_not_found" not in run_cols:
+            conn.execute("ALTER TABLE scrape_runs ADD COLUMN companies_not_found INTEGER")
+        if "companies_found_no_openings" not in run_cols:
+            conn.execute("ALTER TABLE scrape_runs ADD COLUMN companies_found_no_openings INTEGER")
+
+        # platform_cache: remembers which ATS (Greenhouse/Lever/Ashby) each
+        # slug last resolved on, so scrape_all() can try that platform first
+        # on the next run instead of always trying all three in order for
+        # every one of ~4,300 companies. Self-healing: if a cached platform
+        # ever stops resolving (company migrated ATS providers), scraper.py
+        # falls back to the full three-platform search and this table just
+        # gets overwritten with whatever it finds instead. Not part of the
+        # original CREATE TABLE since this ships after companies_data.py
+        # already has thousands of real entries with no recorded platform;
+        # it starts empty and fills in gradually, one scrape cycle at a time.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS platform_cache (
+                slug TEXT PRIMARY KEY,
+                platform TEXT NOT NULL,
+                updated_at TEXT
+            )
+        """)
+
+        # company_requests: the public "Request a company" form. Lives in
+        # this SQLite db (not the Postgres accounts db) on purpose -- this
+        # needs to work for anonymous visitors on a deployment with no
+        # accounts/DATABASE_URL configured at all, same reasoning as the
+        # job cache itself being the "no account needed" default. Low
+        # volume, not sensitive, no real need for the durability Postgres
+        # gives the accounts data.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS company_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_name TEXT NOT NULL,
+                careers_url TEXT DEFAULT '',
+                requester_email TEXT DEFAULT '',
+                note TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_company_requests_status ON company_requests(status)")
+
+        # job_flags: the "report a problem with this listing" button on
+        # job detail pages. Same reasoning as company_requests for living
+        # here rather than the Postgres accounts db (has to work with no
+        # account/DATABASE_URL at all) -- and same reasoning for storing
+        # job_url/job_title/company as plain text snapshots rather than a
+        # foreign key into `jobs`: a flagged listing (e.g. "this is
+        # closed") is exactly the kind of row likely to get pruned by
+        # prune_stale() before anyone reviews the flag, so the report
+        # needs to stand on its own rather than going dead the moment the
+        # underlying job row disappears.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS job_flags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_url TEXT NOT NULL,
+                job_title TEXT DEFAULT '',
+                company TEXT DEFAULT '',
+                reason TEXT NOT NULL,
+                note TEXT DEFAULT '',
+                reporter_email TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_job_flags_status ON job_flags(status)")
+
+        # digest_subscribers: single-opt-in email list for the weekly
+        # "best remote roles" digest (/weekly-digest). Lives here (SQLite,
+        # no account needed) rather than the Postgres accounts db for the
+        # same reason as company_requests/job_flags -- this is meant to be
+        # a zero-friction "just give an email" signup, not gated behind
+        # creating a full account.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS digest_subscribers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                unsubscribed_at TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS digest_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ran_at TEXT NOT NULL,
+                subscribers_emailed INTEGER
+            )
+        """)
         conn.commit()
 
 
@@ -201,9 +291,11 @@ def record_run(started_at, finished_at, status, stats, jobs_in_db_after):
     with conn_ctx() as conn:
         conn.execute(
             "INSERT INTO scrape_runs (started_at, finished_at, status, companies_scanned, "
-            "companies_with_jobs, jobs_scraped, jobs_in_db_after) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "companies_with_jobs, jobs_scraped, jobs_in_db_after, companies_not_found, "
+            "companies_found_no_openings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (started_at, finished_at, status, stats.get("companies_scanned", 0),
-             stats.get("companies_with_jobs", 0), stats.get("jobs_scraped", 0), jobs_in_db_after),
+             stats.get("companies_with_jobs", 0), stats.get("jobs_scraped", 0), jobs_in_db_after,
+             stats.get("companies_not_found", 0), stats.get("companies_found_no_openings", 0)),
         )
         conn.commit()
 
@@ -214,9 +306,173 @@ def last_run():
         return dict(row) if row else None
 
 
+def recent_runs(limit=10):
+    """Most recent scrape runs, newest first -- used for the health check
+    (comparing the latest run's companies_not_found against recent history
+    to flag a spike) and for showing an admin a quick trend at a glance."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT * FROM scrape_runs ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def total_jobs():
     with conn_ctx() as conn:
         return conn.execute("SELECT COUNT(*) AS c FROM jobs").fetchone()["c"]
+
+
+def get_platform_cache():
+    """Returns {slug: platform} for every company whose resolving ATS
+    platform is already known from a previous scrape. Empty on a fresh
+    database -- scraper.py falls back to trying all three platforms for
+    any slug missing from this dict, so an empty/partial cache is always
+    safe, just slower until it fills in."""
+    with conn_ctx() as conn:
+        rows = conn.execute("SELECT slug, platform FROM platform_cache").fetchall()
+        return {r["slug"]: r["platform"] for r in rows}
+
+
+def upsert_platform_cache(mapping):
+    """mapping: {slug: platform}. Bulk upsert, called once at the end of a
+    scrape with every slug that resolved during that run (whether from a
+    cache hit or a fresh three-platform search)."""
+    if not mapping:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    with _lock, conn_ctx() as conn:
+        conn.executemany(
+            "INSERT INTO platform_cache (slug, platform, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(slug) DO UPDATE SET platform=excluded.platform, updated_at=excluded.updated_at",
+            [(slug, platform, now) for slug, platform in mapping.items()],
+        )
+        conn.commit()
+
+
+def create_company_request(company_name, careers_url="", requester_email="", note=""):
+    now = datetime.now(timezone.utc).isoformat()
+    with _lock, conn_ctx() as conn:
+        cur = conn.execute(
+            "INSERT INTO company_requests (company_name, careers_url, requester_email, note, "
+            "status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
+            (company_name, careers_url, requester_email, note, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def list_company_requests(status=None, limit=200):
+    """All submitted company requests, newest first. Filtered to a single
+    status (e.g. 'pending') if given, otherwise everything -- powers the
+    admin dashboard's review list."""
+    with conn_ctx() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM company_requests WHERE status = ? ORDER BY id DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM company_requests ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_company_request_status(request_id, status):
+    """Returns True if a row was actually updated. `status` isn't
+    validated against a fixed set here -- app.py's route does that, same
+    division of responsibility as APPLICATION_STATUSES in db_users.py."""
+    with _lock, conn_ctx() as conn:
+        cur = conn.execute(
+            "UPDATE company_requests SET status = ? WHERE id = ?", (status, request_id)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def create_job_flag(job_url, job_title, company, reason, note="", reporter_email=""):
+    now = datetime.now(timezone.utc).isoformat()
+    with _lock, conn_ctx() as conn:
+        cur = conn.execute(
+            "INSERT INTO job_flags (job_url, job_title, company, reason, note, reporter_email, "
+            "status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
+            (job_url, job_title, company, reason, note, reporter_email, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def list_job_flags(status=None, limit=200):
+    with conn_ctx() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM job_flags WHERE status = ? ORDER BY id DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM job_flags ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_job_flag_status(flag_id, status):
+    with _lock, conn_ctx() as conn:
+        cur = conn.execute(
+            "UPDATE job_flags SET status = ? WHERE id = ?", (status, flag_id)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def subscribe_to_digest(email):
+    """Idempotent: re-subscribing an already-active email is a silent
+    no-op (UNIQUE(email) with INSERT OR IGNORE), and re-subscribing a
+    previously-unsubscribed email clears unsubscribed_at rather than
+    erroring, so clicking an old "subscribe" link/bookmark twice or
+    resubscribing after opting out both just work."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _lock, conn_ctx() as conn:
+        conn.execute(
+            "INSERT INTO digest_subscribers (email, created_at) VALUES (?, ?) "
+            "ON CONFLICT(email) DO UPDATE SET unsubscribed_at = NULL",
+            (email, now),
+        )
+        conn.commit()
+
+
+def unsubscribe_from_digest(email):
+    now = datetime.now(timezone.utc).isoformat()
+    with _lock, conn_ctx() as conn:
+        cur = conn.execute(
+            "UPDATE digest_subscribers SET unsubscribed_at = ? WHERE email = ? AND unsubscribed_at IS NULL",
+            (now, email),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def list_active_digest_subscribers():
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT email FROM digest_subscribers WHERE unsubscribed_at IS NULL"
+        ).fetchall()
+        return [r["email"] for r in rows]
+
+
+def record_digest_run(ran_at, subscribers_emailed):
+    with conn_ctx() as conn:
+        conn.execute(
+            "INSERT INTO digest_runs (ran_at, subscribers_emailed) VALUES (?, ?)",
+            (ran_at, subscribers_emailed),
+        )
+        conn.commit()
+
+
+def last_digest_run():
+    with conn_ctx() as conn:
+        row = conn.execute("SELECT * FROM digest_runs ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
 
 
 SORT_OPTIONS = {
