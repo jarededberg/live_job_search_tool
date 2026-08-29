@@ -1548,6 +1548,65 @@ was also switched from an absolute locale timestamp to the same relative
 phrasing, for the same reason a relative time reads as more immediately
 trustworthy than a raw date the visitor has to do subtraction on.
 
+## Incident: salary stats caused two full-site outages
+
+Shortly after the salary insight pages shipped, the entire site (not just
+`/salary`) started returning Cloudflare 524s (origin timeout) to every
+visitor. Root cause: `db.salary_stats_by_role()`/`salary_stats_by_company()`/
+`salary_stats_for_company()`/`jobs_for_role()` each ran a full,
+unindexed scan over the whole `jobs` table (plus a `classify_role()`
+regex pass per row for the role-based ones) -- and ran it fresh on
+**every single HTTP request**, not once. Against the tiny fake datasets
+used while building the feature this was instant, so it was never
+caught before shipping. Against the real ~100k-row production table, a
+single one of these requests was slow enough to tie up the app's worker
+process, and every other request queued up behind it until Cloudflare
+gave up on the whole site. The single worst offender was
+`company_hub_page()`'s "see salary data" cross-link, which ran this
+same expensive scan on every `/jobs/company/<slug>` view -- likely the
+most-visited page type on the entire site.
+
+**First fix attempt (had a bug of its own):** an in-memory cache
+computed all of it once and served every request from the cache. But
+that first version also warmed the cache with a background thread
+started unconditionally at module-import time -- meaning every single
+gunicorn worker boot paid the full expensive scan before it could serve
+anything. Deployed on its own, this is suspected to have caused a
+**second** outage (this time surfacing as Cloudflare 502s, not 524s --
+consistent with gunicorn's own worker timeout killing a hung worker
+mid-boot rather than a slow request just queuing up). Rolling back
+past this fix and redeploying the salary pages completely uncached
+(no cache at all) confirmed the underlying unindexed-scan bug was
+still present and could crash the site under real traffic on its own,
+independent of the background-thread bug.
+
+**Actual fix:** the same in-memory cache (`app.py`'s `_salary_cache` +
+`_refresh_salary_cache_if_stale()`, `_SALARY_CACHE_TTL = 20 minutes`),
+but refreshed **lazily** -- only on whichever request happens to find
+it stale, never by a background thread at startup. Double-checked
+locking means at most one request per refresh cycle pays the
+recomputation cost, even under concurrent traffic; every other request
+racing against a stale cache just waits briefly and reads the
+now-fresh result instead of independently recomputing it.
+`db.salary_confirmed_jobs_by_role()` computes every role's job listing
+in ONE table scan instead of the 22 separate scans `jobs_for_role()`
+would otherwise need per refresh. Verified against a 150,000-row
+synthetic dataset (comfortably larger than production): module import
+(what every worker boot pays) takes well under a second with no cache
+warm-up at all; the first request to hit a stale cache pays about 1.3
+seconds to refresh; every subsequent cached request responds in well
+under 100ms; and 20 simultaneous requests racing against a
+deliberately-stale cache all succeeded, with the underlying expensive
+computation actually running exactly once (not once per request), all
+finishing in under 3 seconds total.
+
+**Lesson for future rounds:** any new aggregate/rollup computation over
+the full `jobs` table needs to be tested against a dataset sized like
+production (tens of thousands of rows) AND under concurrent load, not
+just correctness against a handful of fake rows in isolation -- and any
+"warm the cache" optimization needs to be tested for what it costs
+every worker at boot time, not just what it saves on the first request.
+
 ## FAQ / About
 
 Both static content, no backend involved beyond the page routes
