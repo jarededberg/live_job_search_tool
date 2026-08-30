@@ -238,6 +238,36 @@ def init_db():
             )
         """)
 
+        # mcp_saved_searches: the MCP server's save_search/create_job_alert
+        # tools (see mcp_server.py) -- an email-based equivalent of
+        # db_users.py's saved_searches+alerts_enabled for callers with no
+        # login at all (an AI agent acting on someone's behalf over MCP
+        # has no session cookie to attach a real account to). Lives here
+        # in the no-account SQLite db for the same reason company_requests/
+        # job_flags/digest_subscribers do -- discrete filter columns
+        # rather than one JSON blob (unlike db_users.saved_searches' own
+        # params_json) since every filter an MCP tool call can express
+        # maps onto one of db.search_jobs()'s own keyword arguments
+        # one-to-one, with no legacy singular/plural shape to stay
+        # backward-compatible with the way the browser UI's params blob
+        # does.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS mcp_saved_searches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                query TEXT NOT NULL DEFAULT '',
+                location TEXT NOT NULL DEFAULT '',
+                location_group TEXT NOT NULL DEFAULT '',
+                department TEXT NOT NULL DEFAULT '',
+                commitment TEXT NOT NULL DEFAULT '',
+                alerts_enabled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                last_checked_at TEXT
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mcp_saved_searches_email ON mcp_saved_searches(email)")
+
         conn.commit()
 
 
@@ -475,6 +505,82 @@ def last_digest_run():
     with conn_ctx() as conn:
         row = conn.execute("SELECT * FROM digest_runs ORDER BY id DESC LIMIT 1").fetchone()
         return dict(row) if row else None
+
+
+def create_mcp_saved_search(email, name="", query="", location="", location_group="",
+                             department="", commitment="", alerts_enabled=False):
+    """Creates one row for mcp_server.py's save_search/create_job_alert
+    tools. `alerts_enabled` is the only difference between the two tools
+    at the storage layer -- save_search inserts with it False (a pure
+    bookmark), create_job_alert inserts with it True (also gets picked up
+    by the scheduled alert job, see app.py's run_mcp_search_alerts_job()).
+    Returns the new row's id."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _lock, conn_ctx() as conn:
+        cur = conn.execute(
+            "INSERT INTO mcp_saved_searches (email, name, query, location, location_group, "
+            "department, commitment, alerts_enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (email, name, query, location, location_group, department, commitment,
+             1 if alerts_enabled else 0, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def list_mcp_saved_searches_for_email(email):
+    """Every saved search/alert belonging to one email, newest first --
+    powers the list_my_searches MCP tool. Ownership here is just "knows
+    the email" (no password, no login) -- same trust model as the
+    unsubscribe-by-email-plus-token links elsewhere on this site, but
+    even lighter since there's no destructive action gated behind it
+    (worst case someone who doesn't own the address turns email alerts
+    on/off for a search that's about as sensitive as a Google Alert)."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT * FROM mcp_saved_searches WHERE email = ? ORDER BY id DESC", (email,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_mcp_saved_search(search_id):
+    with conn_ctx() as conn:
+        row = conn.execute("SELECT * FROM mcp_saved_searches WHERE id = ?", (search_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def set_mcp_search_alerts(search_id, email, enabled):
+    """Flips alerts_enabled for one row, scoped to `email` matching what's
+    on file for that id -- powers cancel_job_alert (and could re-enable
+    one later). Returns True only if a row was actually found AND owned
+    by that email, so a wrong/mistyped email can't silently no-op look
+    like success to the caller."""
+    with _lock, conn_ctx() as conn:
+        cur = conn.execute(
+            "UPDATE mcp_saved_searches SET alerts_enabled = ? WHERE id = ? AND email = ?",
+            (1 if enabled else 0, search_id, email),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def list_mcp_searches_for_alerts():
+    """Every row with alerts_enabled -- the MCP-alert equivalent of
+    db_users.list_searches_for_alerts(), consumed by app.py's
+    run_mcp_search_alerts_job()."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT * FROM mcp_saved_searches WHERE alerts_enabled = 1"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def mark_mcp_search_checked(search_id, checked_at):
+    with conn_ctx() as conn:
+        conn.execute(
+            "UPDATE mcp_saved_searches SET last_checked_at = ? WHERE id = ?",
+            (checked_at.isoformat() if hasattr(checked_at, "isoformat") else checked_at, search_id),
+        )
+        conn.commit()
 
 
 SORT_OPTIONS = {

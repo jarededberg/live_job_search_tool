@@ -50,6 +50,15 @@ VALID_LOCATION_GROUPS = {
     "remote_us", "remote_canada", "remote_uk", "remote_europe", "remote_anywhere",
 }
 
+# Loose but sufficient email check for save_search/create_job_alert/
+# list_my_searches/cancel_job_alert -- this is a "just an email address,
+# no login" trust model (same as the site's own digest-subscription and
+# company-request forms), not an account, so there's no verification
+# step to gate on; this just catches obvious typos/garbage before it
+# reaches the db.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MAX_SEARCH_NAME_LEN = 80
+
 
 def _slugify(text):
     """Same rule as app.py's _slugify() (kept in sync by hand, not
@@ -216,6 +225,109 @@ TOOLS = [
             "additionalProperties": False,
         },
     },
+    {
+        "name": "save_search",
+        "description": (
+            "Bookmark a search (the same filters search_jobs accepts) against an "
+            "email address, so it can be looked up again later with "
+            "list_my_searches. A pure bookmark -- does not send any email on its "
+            "own. Use create_job_alert instead if the person wants to be notified "
+            "when new matching jobs appear."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "description": "Email address to save this search under. Required -- there's no login, so this is the only handle for looking it up again.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": f"A short label for this search, up to {MAX_SEARCH_NAME_LEN} characters, e.g. 'Remote PM roles'.",
+                },
+                "query": {"type": "string", "description": "Same boolean title search as search_jobs."},
+                "location": {"type": "string", "description": "Same free-text location substring as search_jobs."},
+                "location_group": {
+                    "type": "string",
+                    "enum": sorted(VALID_LOCATION_GROUPS),
+                    "description": "Same canonical remote-region filter as search_jobs.",
+                },
+                "department": {"type": "string", "description": "Same department substring as search_jobs."},
+                "commitment": {"type": "string", "description": "Same employment-type exact match as search_jobs."},
+            },
+            "required": ["email"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "create_job_alert",
+        "description": (
+            "Same as save_search, but also turns on a once-a-day email digest of "
+            "newly-appeared matches for this search. Refuses to create an alert "
+            "with no filter set at all (query/location/location_group/department/"
+            "commitment all empty), since that would otherwise email every single "
+            "new job scraped anywhere, every day."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "description": "Email address to send alerts to. Required.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": f"A short label for this alert, up to {MAX_SEARCH_NAME_LEN} characters.",
+                },
+                "query": {"type": "string", "description": "Same boolean title search as search_jobs."},
+                "location": {"type": "string", "description": "Same free-text location substring as search_jobs."},
+                "location_group": {
+                    "type": "string",
+                    "enum": sorted(VALID_LOCATION_GROUPS),
+                    "description": "Same canonical remote-region filter as search_jobs.",
+                },
+                "department": {"type": "string", "description": "Same department substring as search_jobs."},
+                "commitment": {"type": "string", "description": "Same employment-type exact match as search_jobs."},
+            },
+            "required": ["email"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "list_my_searches",
+        "description": (
+            "List every search/alert saved under an email address, newest first, "
+            "including each one's id (needed for cancel_job_alert) and whether "
+            "alerts are currently on for it."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "email": {"type": "string", "description": "Email address to look up."},
+            },
+            "required": ["email"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "cancel_job_alert",
+        "description": (
+            "Turn off the daily email alert for one saved search (identified by "
+            "the id from list_my_searches), without deleting the saved search "
+            "itself. Ownership is just 'knows the email that created it' -- the "
+            "same lightweight trust model the site's own unsubscribe links use, "
+            "not real auth."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "search_id": {"type": "integer", "description": "The id from a list_my_searches result."},
+                "email": {"type": "string", "description": "The email address the search was saved under."},
+            },
+            "required": ["search_id", "email"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -312,10 +424,129 @@ def _tool_search_companies(args):
     return _tool_ok(text, structured)
 
 
+def _saved_search_url(search):
+    """A shareable link to re-run one saved search's filters on the site
+    itself -- included in list_my_searches results so a person (or the
+    agent, on their behalf) can open it in a browser rather than only
+    ever seeing it through the MCP tool."""
+    from urllib.parse import urlencode
+    params = {}
+    if search.get("query"):
+        params["q"] = search["query"]
+    if search.get("location"):
+        params["location"] = search["location"]
+    if search.get("department"):
+        params["department"] = search["department"]
+    if search.get("commitment"):
+        params["commitment"] = search["commitment"]
+    qs = urlencode(params)
+    return f"{SITE_URL}/?{qs}" if qs else SITE_URL
+
+
+def _saved_search_summary(search):
+    """Compact dict for one saved search/alert row -- what list_my_searches
+    returns per row, and what save_search/create_job_alert echo back."""
+    return {
+        "id": search.get("id"),
+        "name": search.get("name") or "",
+        "query": search.get("query") or "",
+        "location": search.get("location") or "",
+        "location_group": search.get("location_group") or "",
+        "department": search.get("department") or "",
+        "commitment": search.get("commitment") or "",
+        "alerts_enabled": bool(search.get("alerts_enabled")),
+        "created_at": search.get("created_at"),
+        "url": _saved_search_url(search),
+    }
+
+
+def _validate_save_search_args(args, require_filter=False):
+    """Shared arg-checking for save_search/create_job_alert -- returns
+    (error_message_or_None, cleaned_kwargs). `require_filter=True` (used
+    by create_job_alert only) additionally rejects a search with every
+    filter field empty, since that would otherwise alert on literally
+    every new job scraped anywhere."""
+    email = (args.get("email") or "").strip()
+    if not email or not _EMAIL_RE.match(email):
+        return "A valid email address is required.", None
+    name = (args.get("name") or "").strip()[:MAX_SEARCH_NAME_LEN]
+    query = (args.get("query") or "").strip()
+    location = (args.get("location") or "").strip()
+    location_group = (args.get("location_group") or "").strip()
+    department = (args.get("department") or "").strip()
+    commitment = (args.get("commitment") or "").strip()
+    if location_group and location_group not in VALID_LOCATION_GROUPS:
+        return f"Unknown location_group '{location_group}'. Valid values: {sorted(VALID_LOCATION_GROUPS)}", None
+    if require_filter and not (query or location or location_group or department or commitment):
+        return "An alert needs at least one filter set (query/location/location_group/department/commitment) -- otherwise it would email every new job scraped anywhere.", None
+    return None, {
+        "email": email, "name": name, "query": query, "location": location,
+        "location_group": location_group, "department": department, "commitment": commitment,
+    }
+
+
+def _tool_save_search(args):
+    error, cleaned = _validate_save_search_args(args, require_filter=False)
+    if error:
+        return _tool_error(error)
+    search_id = db.create_mcp_saved_search(**cleaned, alerts_enabled=False)
+    search = db.get_mcp_saved_search(search_id)
+    summary = _saved_search_summary(search)
+    return _tool_ok(f"Saved. id={summary['id']} -- {summary['url']}", summary)
+
+
+def _tool_create_job_alert(args):
+    error, cleaned = _validate_save_search_args(args, require_filter=True)
+    if error:
+        return _tool_error(error)
+    search_id = db.create_mcp_saved_search(**cleaned, alerts_enabled=True)
+    search = db.get_mcp_saved_search(search_id)
+    summary = _saved_search_summary(search)
+    return _tool_ok(
+        f"Alert created for {cleaned['email']}. "
+        f"id={summary['id']} -- checked once a day, emailing only newly-appeared matches.",
+        summary,
+    )
+
+
+def _tool_list_my_searches(args):
+    email = (args.get("email") or "").strip()
+    if not email or not _EMAIL_RE.match(email):
+        return _tool_error("A valid email address is required.")
+    searches = db.list_mcp_saved_searches_for_email(email)
+    summaries = [_saved_search_summary(s) for s in searches]
+    if not summaries:
+        text = f"No saved searches found for {email}."
+    else:
+        lines = [f"{len(summaries)} saved search(es) for {email}:"]
+        for s in summaries:
+            alert_tag = " [alert on]" if s["alerts_enabled"] else ""
+            lines.append(f"- id={s['id']} {s['name'] or '(unnamed)'}{alert_tag} -- {s['url']}")
+        text = "\n".join(lines)
+    return _tool_ok(text, summaries)
+
+
+def _tool_cancel_job_alert(args):
+    search_id = args.get("search_id")
+    email = (args.get("email") or "").strip()
+    if not search_id:
+        return _tool_error("search_id is required.")
+    if not email:
+        return _tool_error("email is required.")
+    ok = db.set_mcp_search_alerts(search_id, email, False)
+    if not ok:
+        return _tool_error(f"No saved search with id={search_id} found for {email}.")
+    return _tool_ok(f"Alert turned off for id={search_id}.", {"id": search_id, "alerts_enabled": False})
+
+
 TOOL_HANDLERS = {
     "search_jobs": _tool_search_jobs,
     "get_job_details": _tool_get_job_details,
     "search_companies": _tool_search_companies,
+    "save_search": _tool_save_search,
+    "create_job_alert": _tool_create_job_alert,
+    "list_my_searches": _tool_list_my_searches,
+    "cancel_job_alert": _tool_cancel_job_alert,
 }
 
 
@@ -352,7 +583,11 @@ def _handle_initialize(msg_id, params):
             "Search live job postings from ~4,300 companies' own Greenhouse/Lever/"
             "Ashby career pages. Use search_jobs to find roles, get_job_details for "
             "the full listing text, and search_companies to find a specific "
-            "employer's open roles."
+            "employer's open roles. To act on someone's behalf, save_search "
+            "bookmarks a search against their email, create_job_alert does the "
+            "same but also emails them once a day when new matches appear, "
+            "list_my_searches looks up everything saved under an email, and "
+            "cancel_job_alert turns an alert back off."
         ),
     })
 

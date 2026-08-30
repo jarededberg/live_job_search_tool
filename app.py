@@ -276,6 +276,8 @@ def start_scheduler():
     # emails/day per saved search, which is spam, not a digest.
     scheduler.add_job(run_saved_search_alerts_job, "interval", hours=24, id="search_alerts",
                        next_run_time=_compute_next_alert_time())
+    scheduler.add_job(run_mcp_search_alerts_job, "interval", hours=24, id="mcp_search_alerts",
+                       next_run_time=_compute_next_mcp_alert_time())
     scheduler.add_job(run_weekly_digest_job, "interval", days=7, id="weekly_digest",
                        next_run_time=_compute_next_digest_time())
     scheduler.start()
@@ -628,6 +630,93 @@ def run_saved_search_alerts_job():
         db_users.mark_search_checked(s["id"], now)
     db_users.record_alert_run(now, len(searches), emails_sent)
     print(f"[alerts] checked {len(searches)} saved searches, sent {emails_sent} emails")
+
+
+def run_mcp_search_alerts_job():
+    """The MCP-tool equivalent of run_saved_search_alerts_job() above --
+    same "new since last check, by first_seen" logic and the same
+    send_saved_search_alert_email() (that function only cares about
+    to_email/search_name/jobs, nothing about where the search itself was
+    stored, so it's reused as-is rather than duplicated) -- but reading
+    from db.py's mcp_saved_searches table (discrete columns, no JSON
+    blob, no login) instead of db_users.py's saved_searches. Kept as a
+    separate function/scheduled job rather than merged into the other
+    one specifically so a bug or slowdown in one alert path can never
+    affect the other, and so MCP-created alerts keep working even on a
+    deployment with no Postgres/DATABASE_URL configured at all (accounts
+    disabled) -- this path never touches db_users."""
+    if not (RESEND_API_KEY and RESEND_FROM_EMAIL):
+        return
+    searches = db.list_mcp_searches_for_alerts()
+    emails_sent = 0
+    now = datetime.now(timezone.utc)
+    for s in searches:
+        cutoff = s.get("last_checked_at") or s.get("created_at")
+        try:
+            cutoff = datetime.fromisoformat(cutoff) if isinstance(cutoff, str) else cutoff
+        except (TypeError, ValueError):
+            cutoff = None
+        if cutoff and cutoff.tzinfo is None:
+            cutoff = cutoff.replace(tzinfo=timezone.utc)
+        kwargs = {
+            "query": s.get("query") or "",
+            "location": s.get("location") or "",
+            "department": s.get("department") or "",
+            "commitment": s.get("commitment") or "",
+        }
+        if s.get("location_group"):
+            kwargs["location_groups"] = [s["location_group"]]
+        try:
+            rows, _total = db.search_jobs(**kwargs, page=1, per_page=SEARCH_ALERT_FETCH_LIMIT)
+        except Exception as e:
+            print(f"[mcp-alerts] search failed for mcp saved search {s['id']}: {e}")
+            continue
+        new_rows = []
+        for r in rows:
+            first_seen = r.get("first_seen")
+            if not first_seen:
+                continue
+            try:
+                fs = datetime.fromisoformat(first_seen)
+            except ValueError:
+                continue
+            if fs.tzinfo is None:
+                fs = fs.replace(tzinfo=timezone.utc)
+            if not cutoff or fs > cutoff:
+                new_rows.append(r)
+        if new_rows:
+            name = s.get("name") or "your MCP search"
+            if send_saved_search_alert_email(s["email"], name, new_rows):
+                emails_sent += 1
+        db.mark_mcp_search_checked(s["id"], now)
+    print(f"[mcp-alerts] checked {len(searches)} MCP-created alerts, sent {emails_sent} emails")
+
+
+def _compute_next_mcp_alert_time():
+    """Same reasoning as _compute_next_alert_time() -- schedule off the
+    last recorded activity instead of firing on every deploy. No
+    dedicated "run" record for this job (unlike the other three
+    scheduled jobs) since mcp_saved_searches rows themselves carry
+    last_checked_at -- this just looks at the single most-recently-
+    checked row as a stand-in for "when did this job last actually run."
+    """
+    try:
+        rows = db.list_mcp_searches_for_alerts()
+    except Exception:
+        return datetime.now() + timedelta(hours=1)
+    checked_ats = [r.get("last_checked_at") for r in rows if r.get("last_checked_at")]
+    if not checked_ats:
+        return datetime.now()
+    last = max(checked_ats)
+    try:
+        last = datetime.fromisoformat(last) if isinstance(last, str) else last
+    except (TypeError, ValueError):
+        return datetime.now()
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    due = last + timedelta(hours=24)
+    now = datetime.now(timezone.utc)
+    return due if due > now else now
 
 
 def run_weekly_digest_job():

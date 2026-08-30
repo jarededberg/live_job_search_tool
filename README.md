@@ -2143,8 +2143,9 @@ specifically so adding the newer stateless flow later, or supporting
 both per the spec's own backward-compatibility guidance, is additive
 rather than a rewrite.
 
-**Three tools, each a thin, read-only wrapper over an existing `db.py`
-function:**
+**Seven tools.** The first three are thin, read-only wrappers over an
+existing `db.py` function; the last four let an agent act on someone's
+behalf, not just search:
 
 - `search_jobs` -- same boolean title search, location/department/
   commitment/recency filters, and sort options the homepage search
@@ -2159,6 +2160,38 @@ function:**
   each with a link to that company's `/jobs/company/<slug>` hub page.
   Exists so "what's open at Acme" resolves without the agent having to
   guess a title-based search that happens to match.
+- `save_search` / `create_job_alert` -- the same filters `search_jobs`
+  accepts, saved against an email address rather than a logged-in
+  account (an MCP caller has no session cookie to attach a real account
+  to). `save_search` is a pure bookmark; `create_job_alert` is identical
+  but also turns on a once-a-day email digest of newly-appeared matches.
+  Storage is a new `db.py` table, `mcp_saved_searches` -- discrete filter
+  columns (not the browser UI's one JSON blob, since there's no legacy
+  singular/plural shape to stay compatible with here) in the same
+  no-account SQLite job-cache db as `company_requests`/`job_flags`/
+  `digest_subscribers`, for the same "has to work with zero
+  accounts/DATABASE_URL configured" reasoning. `create_job_alert` refuses
+  to create an alert with literally no filter set (it would otherwise
+  email every single new job scraped anywhere, every day) -- `save_search`
+  has no such restriction since a pure bookmark never sends anything on
+  its own.
+- `list_my_searches` / `cancel_job_alert` -- look up everything saved
+  under an email, and turn alerts off for one of them (ownership check is
+  just "knows the email that created it," the same lightweight trust
+  model the `/unsubscribe` links elsewhere on the site already use, not
+  real auth -- reasonable here since the worst case is someone toggling
+  email alerts on a search that's about as sensitive as a Google Alert).
+  Neither of these -- nor `save_search`/`create_job_alert` -- runs any
+  full-table scan; they're all indexed lookups/writes keyed by email or
+  id, so none of them are implicated in the salary-stats incident above.
+
+A new scheduled job, `run_mcp_search_alerts_job()`, runs once a day (same
+24-hour cadence as the browser-side saved-search alerts, registered
+separately in `start_scheduler()` so a bug in one alert path can never
+affect the other) and reuses the exact same `send_saved_search_alert_email()`
+function the account-based alerts already use -- that function only cares
+about `to_email`/`search_name`/a list of jobs, nothing about where the
+search itself came from, so there was no reason to duplicate it.
 
 **Deliberately excluded from `mcp_server.py`'s own request handling, kept
 in `app.py`'s route instead:** all HTTP mechanics -- JSON parsing, status
@@ -2180,5 +2213,7 @@ by any browser.
 custom/remote MCP server (in Claude.ai: Settings -> Connectors -> Add
 custom connector; Claude Desktop and other agent frameworks have
 similar "add a remote MCP server by URL" flows). No API key or auth
-required -- this is the same public, read-only job data the website
-itself serves with no account needed.
+required -- searching is the same public, read-only job data the website
+itself serves with no account needed, and the four action tools use the
+same "just an email address, no login" model the site's own digest
+subscription and company-request form already do.
