@@ -1188,7 +1188,7 @@ def unsubscribe_page():
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <title>Unsubscribe — Skip The Boards</title>
-<link rel="stylesheet" href="/style.css?v=23" />
+<link rel="stylesheet" href="/style.css?v=24" />
 </head>
 <body>
   <main class="content-page">
@@ -2218,14 +2218,34 @@ def render_job_page(job):
         <a class="job-detail-more-link" href="{esc(company_hub_path)}">See all {esc(company)} jobs →</a>
       </div>"""
 
+    # "More jobs like this" -- similar postings at OTHER companies (see
+    # db.similar_jobs()'s docstring for the query/performance reasoning
+    # and why it's capped and index-backed rather than a full scan).
+    # Complements "More at this company" above rather than duplicating
+    # it, and is real internal linking a crawler can follow between job
+    # pages, same benefit as the company block.
+    similar = db.similar_jobs(job, limit=5)
+    similar_jobs_html = ""
+    if similar:
+        items = "".join(
+            f'<li><a href="{esc(_job_path(j["job_id"], j["company"], j["title"]))}">{esc(j["title"])}</a>'
+            f' <span class="job-detail-more-company">— {esc(j["company"])}</span></li>'
+            for j in similar
+        )
+        similar_jobs_html = f"""
+      <div class="job-detail-more">
+        <h2>More jobs like this</h2>
+        <ul class="job-detail-more-list">{items}</ul>
+      </div>"""
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=23" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=23" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=23" />
+<link rel="icon" href="/favicon.svg?v=24" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=24" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=24" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -2246,7 +2266,7 @@ def render_job_page(job):
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=23" />
+<link rel="stylesheet" href="/style.css?v=24" />
 </head>
 <body>
   <nav class="topnav">
@@ -2299,7 +2319,7 @@ def render_job_page(job):
           </div>
         </form>
       </div>
-    </div>{more_jobs_html}
+    </div>{more_jobs_html}{similar_jobs_html}
   </main>
 
   <footer>
@@ -2391,7 +2411,7 @@ def job_page(segment):
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Role no longer available — Skip The Boards</title>
 <meta name="robots" content="noindex" />
-<link rel="stylesheet" href="/style.css?v=23" /></head>
+<link rel="stylesheet" href="/style.css?v=24" /></head>
 <body><main class="content-page"><h1>This role isn't available anymore</h1>
 <p class="content-page-intro">It's either been filled, taken down by the company, or the link's
 just wrong. <a href="/">Search current openings instead →</a></p></main></body></html>"""
@@ -2466,9 +2486,9 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=23" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=23" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=23" />
+<link rel="icon" href="/favicon.svg?v=24" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=24" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=24" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -2487,7 +2507,7 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=23" />
+<link rel="stylesheet" href="/style.css?v=24" />
 </head>
 <body>
   <nav class="topnav">

@@ -121,6 +121,17 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_department ON jobs(department)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_commitment ON jobs(commitment)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_job_id ON jobs(job_id)")
+        # Composite index backing similar_jobs()'s "same department,
+        # newest first" lookup on job detail pages -- one of the
+        # highest-traffic page types on the site (see the salary-stats
+        # incident in the README for why every query that can run on a
+        # page like this needs to be provably indexed, not just fast in
+        # a small test). Without the `posted` column included here,
+        # SQLite could use idx_jobs_department for the equality filter
+        # but would still need a separate sort step over every matching
+        # row before it could apply LIMIT; with it, the index itself is
+        # already in the right order.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_department_posted ON jobs(department, posted)")
 
         # One-time backfill: any row with no job_id yet (freshly-added
         # column, or a row upserted by an older deploy of scraper.py
@@ -1202,6 +1213,62 @@ def jobs_for_company(company, limit=300):
         except (TypeError, ValueError):
             d["tools"] = []
         result.append(d)
+    return result
+
+
+_SIMILAR_JOBS_CANDIDATE_POOL = 200  # see similar_jobs()'s performance note
+
+
+def similar_jobs(job, limit=5):
+    """A handful of OTHER companies' current postings similar to `job` --
+    same canonical role (role_groups.classify_role) preferred, falling
+    back to same raw department otherwise. Powers the "More jobs like
+    this" block on job detail pages (see render_job_page() in app.py).
+    Deliberately excludes `job`'s own company entirely -- the existing
+    "More at this company" block already covers that, so this is meant
+    to complement it, not duplicate it.
+
+    Performance note (see the salary-stats incident in this README):
+    job detail pages are some of the highest-traffic pages on the whole
+    site, so this can NEVER become an unbounded full-table scan. The
+    query below filters on the indexed `department` column (backed by
+    idx_jobs_department_posted, a composite index that also covers the
+    ORDER BY so SQLite doesn't need a separate sort step) and caps the
+    candidate set at _SIMILAR_JOBS_CANDIDATE_POOL BEFORE any Python-side
+    role classification runs -- classify_role() (a regex match) only
+    ever gets called on that bounded set, never on every job in the
+    department, let alone the whole table. Worst case, on a department
+    with more than the candidate-pool cap worth of live postings, this
+    can miss a same-role match further down the list than the pool
+    reaches -- an acceptable tradeoff for a "you might also like this"
+    block, which doesn't need to be exhaustive, over ever risking an
+    unbounded per-request scan on this page type again."""
+    department = job.get("department") or ""
+    company = job.get("company")
+    job_id = job.get("job_id")
+    if not department:
+        return []
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE department = ? AND company != ? "
+            "ORDER BY posted DESC LIMIT ?",
+            (department, company, _SIMILAR_JOBS_CANDIDATE_POOL),
+        ).fetchall()
+    candidates = [dict(r) for r in rows if r["job_id"] != job_id]
+
+    target_role = classify_role(job.get("title") or "")
+    same_role, other_dept = [], []
+    for c in candidates:
+        if target_role and classify_role(c["title"]) == target_role:
+            same_role.append(c)
+        else:
+            other_dept.append(c)
+    result = (same_role + other_dept)[:limit]
+    for d in result:
+        try:
+            d["tools"] = json.loads(d.get("tools") or "[]")
+        except (TypeError, ValueError):
+            d["tools"] = []
     return result
 
 

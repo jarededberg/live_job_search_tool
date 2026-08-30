@@ -2056,6 +2056,26 @@ add new pages; they get more out of the ones that already exist.
   plus a link to the full company hub. More real internal links for
   crawlers to follow, and a next click for a visitor who lands on one
   posting and finds it's not quite the fit.
+- **"More jobs like this" block** on job detail pages (`db.similar_jobs()`):
+  up to 5 similar postings at OTHER companies -- same canonical role
+  (`role_groups.classify_role()`) preferred, same raw department as a
+  fallback. Complements the "More at `<Company>`" block above rather than
+  duplicating it (that one stays within a company; this one deliberately
+  excludes it). Job detail pages are some of the highest-traffic pages on
+  the site, so this was built and load-tested with the salary-stats
+  incident (above) specifically in mind: it reads a bounded
+  (`_SIMILAR_JOBS_CANDIDATE_POOL = 200`) result set off a composite index
+  (`idx_jobs_department_posted`, which covers both the equality filter
+  and the `ORDER BY` so no separate sort step is needed), and only ever
+  runs `classify_role()` -- the one non-indexed, per-row part of this --
+  against that already-bounded candidate set, never against a whole
+  department or the whole table. Verified against a 150,000-row synthetic
+  dataset with a deliberately worst-case skew (92% of all rows in one
+  department, far more concentrated than real data): confirmed via
+  `EXPLAIN QUERY PLAN` to use the index rather than scan, averaged ~2.6ms
+  per call even in that worst-case department, and 30 simultaneous job-page
+  requests against that same hot department all completed within half a
+  second with no degradation.
 - **Company hub 404s now also carry `<meta name="robots" content="noindex">`**,
   matching the job-detail 404's existing behavior -- a small
   inconsistency from when hub pages first shipped, fixed while touching

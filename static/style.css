@@ -2025,3 +2025,7 @@ footer {
   text-decoration: none;
 }
 .job-detail-more-link:hover { text-decoration: underline; }
+.job-detail-more-company {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
