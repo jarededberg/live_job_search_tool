@@ -1224,6 +1224,25 @@ def jobs_for_company(company, limit=300):
     return result
 
 
+def list_newest_jobs(limit=50):
+    """The `limit` most-recently-posted live jobs site-wide, newest
+    first -- powers /feed.xml (see app.py's newest_jobs_feed()). A plain
+    `ORDER BY posted DESC LIMIT ?` with no WHERE clause, so it's served
+    entirely off the existing idx_jobs_posted index as an index scan in
+    reverse with no sort step and no full-table read -- same reasoning
+    as similar_jobs()'s composite index below, just without needing an
+    equality filter first. `limit` is capped small (an RSS reader has no
+    interest in thousands of items) rather than exposed as a paginated
+    feed."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT job_id, company, title, location, posted, last_seen "
+            "FROM jobs ORDER BY posted DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 _SIMILAR_JOBS_CANDIDATE_POOL = 200  # see similar_jobs()'s performance note
 
 

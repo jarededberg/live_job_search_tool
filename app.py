@@ -20,6 +20,7 @@ import threading
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from urllib.error import URLError
 
 from flask import Flask, Response, jsonify, request, send_from_directory, session
@@ -34,6 +35,7 @@ import resume_parser
 from location_groups import (
     US_WORD_RE, US_STATE_NAMES, US_STATE_ABBR_RE,
     CANADA_WORD_RE, CANADA_PROVINCE_NAMES, UK_WORD_RE,
+    is_remote,
 )
 from role_groups import ROLE_LABELS_BY_SLUG
 import mcp_server
@@ -1935,6 +1937,68 @@ def sitemap_companies_xml():
     return Response(xml, mimetype="application/xml")
 
 
+_FEED_ITEM_COUNT = 50  # see newest_jobs_feed()'s docstring
+
+
+@app.route("/feed.xml")
+def newest_jobs_feed():
+    """RSS 2.0 feed of the most-recently-posted live jobs site-wide --
+    linked from index.html's <link rel="alternate" type="application/
+    rss+xml">. Same motivation as the JobPosting JSON-LD work above:
+    another real, standard, machine-readable surface for something a
+    crawler or a job-alert aggregator can consume, on top of the human
+    site. Backed by db.list_newest_jobs(), a plain `ORDER BY posted DESC
+    LIMIT ?` served entirely off the existing idx_jobs_posted index -- no
+    new query shape, no full-table scan risk (see that function's own
+    docstring), so unlike the original salary-stats incident this route
+    doesn't need its own cache to stay cheap even under crawler load.
+    Capped at _FEED_ITEM_COUNT items: an RSS reader wants "what's new
+    since I last checked", not the whole dataset -- if the site posts
+    more than that many jobs between two consecutive fetches, some are
+    only ever visible via the site's own search, same tradeoff every
+    other paginated listing here already makes."""
+    jobs = db.list_newest_jobs(_FEED_ITEM_COUNT)
+    now = datetime.now(timezone.utc)
+    items = []
+    for j in jobs:
+        url = f"{SITE_URL}{_job_path(j['job_id'], j['company'], j['title'])}"
+        title = html.escape(f"{j['title']} at {j['company']}")
+        location = j.get("location") or "Location not listed"
+        description = html.escape(f"{j['company']} — {location}")
+        pub_date = now
+        posted = j.get("posted")
+        if posted:
+            try:
+                pub_date = datetime.fromisoformat(posted)
+                if pub_date.tzinfo is None:
+                    pub_date = pub_date.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                pub_date = now
+        items.append(
+            "  <item>\n"
+            f"    <title>{title}</title>\n"
+            f"    <link>{url}</link>\n"
+            f'    <guid isPermaLink="true">{url}</guid>\n'
+            f"    <pubDate>{format_datetime(pub_date)}</pubDate>\n"
+            f"    <description>{description}</description>\n"
+            "  </item>"
+        )
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<rss version="2.0">\n'
+        "<channel>\n"
+        "  <title>Skip The Boards — Newest Jobs</title>\n"
+        f"  <link>{SITE_URL}/</link>\n"
+        "  <description>The newest live job postings across Skip The "
+        "Boards' Greenhouse, Lever, and Ashby company boards.</description>\n"
+        "  <language>en-us</language>\n"
+        f"  <lastBuildDate>{format_datetime(now)}</lastBuildDate>\n"
+        + "\n".join(items) + ("\n" if items else "")
+        + "</channel>\n</rss>\n"
+    )
+    return Response(xml, mimetype="application/rss+xml")
+
+
 def _slugify(text):
     """Lowercase, hyphenated, URL-safe version of a string -- used to
     build the human-readable part of a job's URL. Purely cosmetic/for
@@ -2036,6 +2100,17 @@ _EUROPE_COUNTRY_ISO = {
     "czech republic": "CZ", "hungary": "HU", "romania": "RO",
 }
 
+# schema.org's PostalAddress.addressCountry wants an ISO 3166-1 alpha-2
+# code (what _detect_country_iso() returns), but Country.name -- used by
+# the JobPosting JSON-LD's applicantLocationRequirements for remote roles
+# -- is plain Text, so a raw code there ("GB") reads oddly next to
+# Google's own docs, which use full names. One small lookup, reusing the
+# same codes rather than a second parallel country list.
+_COUNTRY_ISO_TO_NAME = {
+    "US": "United States", "CA": "Canada", "GB": "United Kingdom",
+    **{iso: name.title() for name, iso in _EUROPE_COUNTRY_ISO.items()},
+}
+
 
 def _job_address(location):
     """Best-effort schema.org PostalAddress for a job's raw, free-text
@@ -2061,27 +2136,42 @@ def _job_address(location):
     city_part = location.rpartition(",")[0].strip() if "," in location else location.strip()
     addr["addressLocality"] = city_part or location.strip()
 
+    iso = _detect_country_iso(location)
+    if iso:
+        addr["addressCountry"] = iso
+        if iso == "US":
+            abbr = US_STATE_ABBR_RE.search(location)
+            if abbr:
+                addr["addressRegion"] = abbr.group(1)
+
+    return addr
+
+
+def _detect_country_iso(location):
+    """Best-effort ISO country code for a job's free-text location string.
+    Factored out of _job_address() so the same US/Canada/UK/Europe signal
+    detection can also back the JobPosting JSON-LD's
+    applicantLocationRequirements for remote roles (see render_job_page()),
+    without duplicating the regex/name-list checks in two places. Returns
+    None on no confident single-country signal -- same "don't guess wrong"
+    principle _job_address() already documents."""
+    if not location:
+        return None
     low = location.lower()
     if (
         US_WORD_RE.search(location)
         or US_STATE_ABBR_RE.search(location)
         or any(name in low for name in US_STATE_NAMES)
     ):
-        addr["addressCountry"] = "US"
-        abbr = US_STATE_ABBR_RE.search(location)
-        if abbr:
-            addr["addressRegion"] = abbr.group(1)
-    elif CANADA_WORD_RE.search(location) or any(name in low for name in CANADA_PROVINCE_NAMES):
-        addr["addressCountry"] = "CA"
-    elif UK_WORD_RE.search(location):
-        addr["addressCountry"] = "GB"
-    else:
-        for name, iso in _EUROPE_COUNTRY_ISO.items():
-            if name in low:
-                addr["addressCountry"] = iso
-                break
-
-    return addr
+        return "US"
+    if CANADA_WORD_RE.search(location) or any(name in low for name in CANADA_PROVINCE_NAMES):
+        return "CA"
+    if UK_WORD_RE.search(location):
+        return "GB"
+    for name, iso in _EUROPE_COUNTRY_ISO.items():
+        if name in low:
+            return iso
+    return None
 
 
 def _breadcrumb_jsonld(items):
@@ -2216,6 +2306,15 @@ def render_job_page(job):
         "hiringOrganization": {"@type": "Organization", "name": company},
         "url": canonical_url,
         "directApply": False,
+        # Google's JobPosting guidelines recommend a stable identifier for
+        # the listing as tracked by the site publishing it (us) -- distinct
+        # from hiringOrganization, since job_id is our own scrape-cache key,
+        # not necessarily the id the employer's own ATS would quote back.
+        "identifier": {
+            "@type": "PropertyValue",
+            "name": "Skip The Boards",
+            "value": job_id,
+        },
     }
     if posted:
         json_ld["datePosted"] = posted
@@ -2232,10 +2331,29 @@ def render_job_page(job):
             json_ld["validThrough"] = valid_through.date().isoformat()
         except (TypeError, ValueError):
             pass
+    # Remote roles get jobLocationType + applicantLocationRequirements
+    # instead of jobLocation -- Google's JobPosting guidance treats a
+    # PostalAddress whose addressLocality is literally the word "Remote"
+    # (what _job_address() used to produce for e.g. "Remote (US)") as a
+    # fake, non-physical place, which is worse than a correctly-typed
+    # telecommute posting. applicantLocationRequirements is only set when
+    # there's a single confident country signal in the free-text location
+    # (same "don't guess wrong" rule _detect_country_iso() documents) --
+    # an unqualified "Remote - Anywhere" posting omits it rather than
+    # guessing a country, same as it already omits addressCountry today.
     if location and location != "Location not listed":
-        address = _job_address(location)
-        if address:
-            json_ld["jobLocation"] = {"@type": "Place", "address": address}
+        if is_remote(location):
+            json_ld["jobLocationType"] = "TELECOMMUTE"
+            iso = _detect_country_iso(location)
+            if iso and iso in _COUNTRY_ISO_TO_NAME:
+                json_ld["applicantLocationRequirements"] = {
+                    "@type": "Country",
+                    "name": _COUNTRY_ISO_TO_NAME[iso],
+                }
+        else:
+            address = _job_address(location)
+            if address:
+                json_ld["jobLocation"] = {"@type": "Place", "address": address}
     employment_type = EMPLOYMENT_TYPE_MAP.get(commitment.strip().lower())
     if employment_type:
         json_ld["employmentType"] = employment_type

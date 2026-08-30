@@ -2114,6 +2114,44 @@ add new pages; they get more out of the ones that already exist.
   than guessing -- a wrong country claim is worse for a listing's
   credibility with Google than an absent optional one, same principle
   `db.py`'s salary/YOE filters already apply to missing data elsewhere.
+- **`JobPosting.identifier`** now included on every job page -- a
+  `PropertyValue` naming this site (`Skip The Boards`) and the job's own
+  `job_id`, per Google's JobPosting recommendation for a stable per-listing
+  identifier. Distinct from `hiringOrganization`: this identifies the
+  listing as tracked by the site publishing it (us), not by the employer's
+  own ATS, since `job_id` is our own scrape-cache key rather than something
+  guaranteed to match an id the employer's system would recognize.
+- **Remote jobs now get `jobLocationType: "TELECOMMUTE"` +
+  `applicantLocationRequirements` instead of a fake `jobLocation`.**
+  Previously, a location string like "Remote (US)" still went through
+  `_job_address()` and produced a `PostalAddress` with `addressLocality`
+  literally set to "Remote (US)" -- a non-physical place, which Google's
+  own JobPosting guidance treats as worse than correctly typing the
+  posting as a telecommute role. `render_job_page()` now checks
+  `location_groups.is_remote()` first: if remote, it sets
+  `jobLocationType` and (only when there's a single confident country
+  signal in the location string, via a new shared `_detect_country_iso()`
+  helper factored out of `_job_address()`) `applicantLocationRequirements`
+  as a `Country`. An unqualified "Remote - Anywhere" posting omits
+  `applicantLocationRequirements` entirely rather than guessing a country
+  -- same "don't guess wrong" principle as the `addressCountry` fix above.
+  Verified with a synthetic dataset covering a US-remote, a
+  fully-unqualified-remote, a non-US-remote (France), and a normal
+  on-site posting -- each produces the expected JSON-LD shape, and the
+  JSON-LD still parses correctly even when the underlying job's title/
+  company contain characters like `<`, `&`, and a literal `</script>`.
+- **New `GET /feed.xml`** -- an RSS 2.0 feed of the 50 most-recently-posted
+  live jobs site-wide, linked from the homepage via `<link rel="alternate"
+  type="application/rss+xml">`. Another standard, machine-readable surface
+  for a crawler or job-alert aggregator to consume, same motivation as the
+  JSON-LD work above. Backed by a new `db.list_newest_jobs()` -- a plain
+  `ORDER BY posted DESC LIMIT ?` with no `WHERE` clause, served entirely
+  off the existing `idx_jobs_posted` index (confirmed via `EXPLAIN QUERY
+  PLAN` at 150,000 rows: an index scan, no temp-b-tree sort step) -- so
+  unlike the salary-stats incident, this route needed no cache of its own
+  to stay cheap: a single request averaged ~2ms and 30 concurrent requests
+  against the 150k-row dataset all completed inside 50ms total with zero
+  errors.
 
 ## Scraper platform cache + scrape health alerts
 
