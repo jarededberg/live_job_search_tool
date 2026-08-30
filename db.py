@@ -602,6 +602,22 @@ def mark_mcp_search_checked(search_id, checked_at):
         conn.commit()
 
 
+def list_mcp_saved_searches(limit=200):
+    """Every MCP-created saved search/alert across ALL emails, newest
+    first -- unlike list_mcp_saved_searches_for_email() above (which is
+    scoped to one caller-supplied email, the MCP tools' own trust model),
+    this is for the admin dashboard's "MCP saved searches" table, where
+    the whole point is visibility across every agent that's used the
+    remote MCP server. `limit` is a sane ceiling for a page meant to be
+    skimmed by a human, not a full export -- same reasoning
+    jobs_for_company()'s own `limit` docstring gives."""
+    with conn_ctx() as conn:
+        rows = conn.execute(
+            "SELECT * FROM mcp_saved_searches ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 SORT_OPTIONS = {
     "newest": "(posted IS NULL), posted DESC, company ASC",
     "oldest": "(posted IS NULL), posted ASC, company ASC",

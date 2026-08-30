@@ -4,14 +4,14 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex, nofollow" />
-<link rel="icon" href="favicon.svg?v=25" type="image/svg+xml" />
-<link rel="alternate icon" href="favicon.ico?v=25" />
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=25" />
+<link rel="icon" href="favicon.svg?v=26" type="image/svg+xml" />
+<link rel="alternate icon" href="favicon.ico?v=26" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=26" />
 <title>Admin — Skip The Boards</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=25" />
+<link rel="stylesheet" href="style.css?v=26" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 </head>
 <body>
@@ -102,6 +102,38 @@
         </select>
       </div>
       <div id="job-flags-list">Loading…</div>
+
+      <div class="admin-chart-header">
+        <h2>Scrape health history</h2>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Started</th><th>Finished</th><th>Status</th>
+              <th>Scanned</th><th>With jobs</th><th>Scraped</th>
+              <th>In DB after</th><th>Not found</th><th>No openings</th>
+            </tr>
+          </thead>
+          <tbody id="scrape-runs-body"><tr><td colspan="9">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="admin-chart-header">
+        <h2>MCP saved searches</h2>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Email</th><th>Name</th><th>Query</th><th>Location</th>
+              <th>Department</th><th>Commitment</th><th>Alerts</th>
+              <th>Frequency</th><th>Last checked</th><th>Created</th>
+            </tr>
+          </thead>
+          <tbody id="mcp-searches-body"><tr><td colspan="10">Loading…</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </main>
 
@@ -183,6 +215,8 @@
       showOnly(contentEl);
       loadCompanyRequests(requestStatusSelect.value); // only once we know this visitor is an authorized admin
       loadJobFlags(flagStatusSelect.value);
+      loadScrapeRuns();
+      loadMcpSearches();
     }
 
     rangeSelect.addEventListener("change", () => loadStats(rangeSelect.value));
@@ -289,6 +323,82 @@
     }
 
     flagStatusSelect.addEventListener("change", () => loadJobFlags(flagStatusSelect.value));
+
+    function fmtDateTime(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+      if (isNaN(d.getTime())) return escapeHtml(iso);
+      return d.toLocaleString(undefined, {
+        year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+      });
+    }
+
+    const scrapeRunsBody = document.getElementById("scrape-runs-body");
+
+    async function loadScrapeRuns() {
+      let res;
+      try {
+        res = await fetch("/api/admin/scrape-runs?limit=20");
+      } catch (e) {
+        scrapeRunsBody.innerHTML = `<tr><td colspan="9">Couldn't load scrape history.</td></tr>`;
+        return;
+      }
+      if (!res.ok) { scrapeRunsBody.innerHTML = `<tr><td colspan="9">Couldn't load scrape history.</td></tr>`; return; }
+      const data = await res.json();
+      if (!data.ok || !data.runs.length) {
+        scrapeRunsBody.innerHTML = `<tr><td colspan="9">No scrape runs recorded yet.</td></tr>`;
+        return;
+      }
+      scrapeRunsBody.innerHTML = data.runs.map((r) => {
+        const ok = r.status === "ok";
+        const statusClass = ok ? "admin-table-status-ok" : "admin-table-status-error";
+        const statusLabel = ok ? "ok" : (r.status || "").slice(0, 60);
+        return `
+        <tr>
+          <td>${fmtDateTime(r.started_at)}</td>
+          <td>${fmtDateTime(r.finished_at)}</td>
+          <td class="${statusClass}">${escapeHtml(statusLabel)}</td>
+          <td>${(r.companies_scanned ?? 0).toLocaleString()}</td>
+          <td>${(r.companies_with_jobs ?? 0).toLocaleString()}</td>
+          <td>${(r.jobs_scraped ?? 0).toLocaleString()}</td>
+          <td>${(r.jobs_in_db_after ?? 0).toLocaleString()}</td>
+          <td>${(r.companies_not_found ?? 0).toLocaleString()}</td>
+          <td>${(r.companies_found_no_openings ?? 0).toLocaleString()}</td>
+        </tr>`;
+      }).join("");
+    }
+
+    const mcpSearchesBody = document.getElementById("mcp-searches-body");
+
+    async function loadMcpSearches() {
+      let res;
+      try {
+        res = await fetch("/api/admin/mcp-searches");
+      } catch (e) {
+        mcpSearchesBody.innerHTML = `<tr><td colspan="10">Couldn't load MCP saved searches.</td></tr>`;
+        return;
+      }
+      if (!res.ok) { mcpSearchesBody.innerHTML = `<tr><td colspan="10">Couldn't load MCP saved searches.</td></tr>`; return; }
+      const data = await res.json();
+      if (!data.ok || !data.searches.length) {
+        mcpSearchesBody.innerHTML = `<tr><td colspan="10">No MCP saved searches yet.</td></tr>`;
+        return;
+      }
+      mcpSearchesBody.innerHTML = data.searches.map((s) => `
+        <tr>
+          <td>${escapeHtml(s.email)}</td>
+          <td>${escapeHtml(s.name || "—")}</td>
+          <td>${escapeHtml(s.query || "—")}</td>
+          <td>${escapeHtml(s.location || s.location_group || "—")}</td>
+          <td>${escapeHtml(s.department || "—")}</td>
+          <td>${escapeHtml(s.commitment || "—")}</td>
+          <td>${s.alerts_enabled ? "on" : "off"}</td>
+          <td>${s.alerts_enabled ? escapeHtml(s.alert_frequency || "daily") : "—"}</td>
+          <td>${fmtDateTime(s.last_checked_at)}</td>
+          <td>${fmtDateTime(s.created_at)}</td>
+        </tr>
+      `).join("");
+    }
   </script>
 </body>
 </html>

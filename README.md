@@ -1412,6 +1412,40 @@ being absent, since a gap in the array reads as "no data" to Chart.js
 is adjustable (30/60/90/365 days) via a `?days=` query param on the same
 endpoint, clamped server-side to 7–365 to keep the query bounded.
 
+**Scrape health history** and **MCP saved searches** are two further
+read-only tables on `/admin`, added alongside the review tools for
+company requests and flagged listings below. Both sit behind the same
+`@accounts_required @login_required @admin_required` stack as the rest of
+the dashboard, even though the data itself lives in `db.py`'s no-account
+SQLite job cache rather than the Postgres accounts db those decorators
+normally guard -- there's still only one person who should see every MCP
+caller's saved-search email address, or the full scrape-run history, at
+once.
+
+- **`GET /api/admin/scrape-runs`** lists the most recent scrape cycles
+  (newest first, `?limit=` capped at 100) -- the same `db.recent_runs()`
+  data `_check_scrape_health()` already emails `CONTACT_EMAIL` about when
+  it spots a bad spike, now visible as a running table instead of only
+  showing up after something's already wrong enough to trigger an email.
+  Each row is `started_at`/`finished_at`/`status` (`"ok"` or
+  `"error: <message>"`, styled accordingly) plus the same
+  companies-scanned/with-jobs/not-found counters the health-check alert
+  itself compares against.
+- **`GET /api/admin/mcp-searches`** lists every saved search/alert created
+  through the remote MCP server (`mcp_server.py`'s `save_search`/
+  `create_job_alert` tools), across every caller-supplied email -- not
+  scoped to one email the way `list_my_searches` is for the MCP tool
+  itself (see "MCP server" below). Read-only: there's no admin "resolve"
+  action for a saved search the way there is for a company request or a
+  flagged listing, just visibility into whether the MCP surface is
+  actually being used and by whom.
+
+Both new tables reuse `admin.html`'s existing `escapeHtml()` (the same
+one already protecting the company-requests/job-flags tables from a
+malicious company name or note) since this data -- an MCP caller's
+self-reported email in particular -- is no more trusted than anything
+else on this page that ultimately came from outside the app.
+
 ## Request a company
 
 `/request-company` (`static/request-company.html`) is a public, structured

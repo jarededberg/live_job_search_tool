@@ -1577,6 +1577,29 @@ footer {
   box-shadow: var(--shadow-sm);
 }
 
+/* Scrape-runs / MCP-searches tables (admin.html) -- .admin-page caps at
+   760px, and scrape-runs has more columns than comfortably fit, so the
+   wrapper scrolls horizontally instead of the table squeezing/wrapping
+   its cells illegibly. */
+.admin-table-wrap {
+  overflow-x: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+}
+.admin-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.admin-table th, .admin-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  text-align: left;
+  white-space: nowrap;
+}
+.admin-table th { color: var(--muted); font-weight: 600; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.02em; }
+.admin-table tr:last-child td { border-bottom: none; }
+.admin-table td.admin-table-status-ok { color: var(--maroon); font-weight: 600; }
+.admin-table td.admin-table-status-error { color: #b3261e; font-weight: 600; }
+
 .faq-list { display: flex; flex-direction: column; gap: 8px; }
 
 .faq-page-list .faq-item {

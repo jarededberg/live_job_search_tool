@@ -1246,7 +1246,7 @@ def unsubscribe_page():
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <title>Unsubscribe — Skip The Boards</title>
-<link rel="stylesheet" href="/style.css?v=25" />
+<link rel="stylesheet" href="/style.css?v=26" />
 </head>
 <body>
   <main class="content-page">
@@ -1589,6 +1589,40 @@ def api_admin_update_company_request(request_id):
     if not updated:
         return jsonify({"ok": False, "message": "Not found."}), 404
     return jsonify({"ok": True})
+
+
+@app.route("/api/admin/mcp-searches", methods=["GET"])
+@accounts_required
+@login_required
+@admin_required
+def api_admin_list_mcp_searches():
+    """Read-only visibility into mcp_saved_searches (see db.py) -- every
+    saved search/alert created by an AI agent over the remote MCP server
+    (mcp_server.py), across every caller-supplied email, not just one.
+    Gated on the same admin_required as the other /api/admin/* routes
+    even though this data lives in the no-account SQLite db rather than
+    the Postgres accounts db those routes normally touch -- there's still
+    only one human who should see every MCP caller's saved-search email
+    address at once. Read-only, unlike company-requests/job-flags: there's
+    no admin "resolve" action for a saved search, just something to keep
+    an eye on (volume, whether alerts are actually being used, anything
+    that looks like abuse)."""
+    return jsonify({"ok": True, "searches": db.list_mcp_saved_searches()})
+
+
+@app.route("/api/admin/scrape-runs", methods=["GET"])
+@accounts_required
+@login_required
+@admin_required
+def api_admin_scrape_runs():
+    """Read-only scrape health history -- the same db.recent_runs() data
+    _check_scrape_health() already alerts on by email when it spots a bad
+    spike, surfaced here so the trend is visible at a glance without
+    waiting for an alert email (or to see history when nothing's actually
+    wrong enough to have triggered one)."""
+    limit = request.args.get("limit", default=20, type=int)
+    limit = max(1, min(limit, 100))
+    return jsonify({"ok": True, "runs": db.recent_runs(limit=limit)})
 
 
 # ---------------- accounts: saved searches ----------------
@@ -2431,9 +2465,9 @@ def render_job_page(job):
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=25" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=25" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=25" />
+<link rel="icon" href="/favicon.svg?v=26" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=26" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=26" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -2454,7 +2488,7 @@ def render_job_page(job):
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=25" />
+<link rel="stylesheet" href="/style.css?v=26" />
 </head>
 <body>
   <nav class="topnav">
@@ -2599,7 +2633,7 @@ def job_page(segment):
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Role no longer available — Skip The Boards</title>
 <meta name="robots" content="noindex" />
-<link rel="stylesheet" href="/style.css?v=25" /></head>
+<link rel="stylesheet" href="/style.css?v=26" /></head>
 <body><main class="content-page"><h1>This role isn't available anymore</h1>
 <p class="content-page-intro">It's either been filled, taken down by the company, or the link's
 just wrong. <a href="/">Search current openings instead →</a></p></main></body></html>"""
@@ -2674,9 +2708,9 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=25" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=25" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=25" />
+<link rel="icon" href="/favicon.svg?v=26" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=26" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=26" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -2695,7 +2729,7 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=25" />
+<link rel="stylesheet" href="/style.css?v=26" />
 </head>
 <body>
   <nav class="topnav">
