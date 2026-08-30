@@ -1147,18 +1147,51 @@ feature. `PATCH /api/applied-jobs/status` (`db_users.update_applied_status()`)
 moves one row to a new stage, validated against `APPLICATION_STATUSES`
 in `app.py` before it ever reaches the query, and returns 404 rather than
 a silent no-op if the `job_url` was never actually marked applied by
-that user. On the frontend, `appliedJobRow()` in `app.js` renders a
-color-coded `<select>` per row (`.status-select.status-<value>` in
-`style.css` — six status colors chosen to read clearly against the
-cream/white surfaces without competing with the maroon accent, which
-stays reserved for the site's own actions rather than a status value),
-and `openMyApplicationsModal()` now also renders a row of filter chips
-above the list (`.status-filter-chip`, one per stage plus "All", each
-showing a live count) so the whole pipeline reads at a glance — click a
-chip to narrow the list to just that stage. `myApplicationsFilter` is
-plain in-memory module state, reset to "All" each time the modal is
-reopened, not worth persisting anywhere heavier for a filter this cheap
-to reset.
+that user. On the frontend, each row renders a color-coded `<select>`
+(`.status-select.status-<value>` in `style.css` — six status colors
+chosen to read clearly against the cream/white surfaces without competing
+with the maroon accent, which stays reserved for the site's own actions
+rather than a status value), and the list renders a row of filter chips
+above it (`.status-filter-chip`, one per stage plus "All", each showing a
+live count) so the whole pipeline reads at a glance — click a chip to
+narrow the list to just that stage. The active filter is plain in-memory
+page state, reset to "All" on every reload, not worth persisting anywhere
+heavier for a filter this cheap to reset.
+
+**My Applications is now its own page (`GET /applications`,
+`static/applications.html`), not a modal.** The modal version (a plain
+flex-row list, one line per application) got cramped once each row had a
+role, company, status dropdown, and filter chips fighting for width in a
+box sized for "a short list of saved searches." Same shell-vs-data split
+as `/admin`: the route serves the static page with no server-side auth
+check, and the page's own script hits `/api/applied-jobs/full` on load,
+showing a "log in" state on a 401 or an "accounts aren't configured"
+state on a 503, same three-state pattern as everywhere else account data
+is shown. The list itself is now a real `<table>` (reusing `.admin-table`/
+`.admin-table-wrap` from the admin dashboard, so this is the second page
+to get that styling for free) with a column for each field actually
+useful for tracking an application, not just role and date: company,
+location, salary (`formatSalary()`, the same `~$150k–$190k` formatting
+job cards use), status, applied date, and a "last confirmed" freshness
+column (`timeAgo()`, the same "✓ 3 hours ago" trust signal job cards and
+detail pages already show) so a stale-looking application is visible at a
+glance without opening it. A still-live posting's role links to its
+original external apply URL (exactly as before) plus a second "Details"
+link to its own `/jobs/<id>-<slug>` page — the same `detail_path` field
+`/api/jobs` already adds for search results, now also computed in
+`api_list_applied_jobs_full()` for this page. A delisted posting (closed
+and pruned from the live dataset, see `db.prune_stale`) still shows up
+with its bare URL and a "(no longer listed)" tag rather than disappearing
+— this is application history, not "still-open postings" — same as the
+modal it replaced. `/applications` is added to `robots.txt`'s disallow
+list alongside `/admin`: a signed-in-only page with someone's private
+application history is exactly what shouldn't end up in a search result.
+The homepage's "My applications" button in the account menu is now a
+plain link to this page instead of a click handler that opened the
+modal; `app.js` no longer carries any of the modal's rendering code
+(`openMyApplicationsModal()`, `appliedJobRow()`, the filter-chip state),
+just the "Mark applied" toggle button on each job card, which is a
+separate per-card action untouched by this change.
 
 **Favicon**: `static/favicon.svg` is the same maroon diamond used as the
 `.brand-mark` "◆" next to the wordmark in the top nav, on a cream

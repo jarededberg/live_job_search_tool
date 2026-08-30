@@ -1246,7 +1246,7 @@ def unsubscribe_page():
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <title>Unsubscribe — Skip The Boards</title>
-<link rel="stylesheet" href="/style.css?v=26" />
+<link rel="stylesheet" href="/style.css?v=27" />
 </head>
 <body>
   <main class="content-page">
@@ -1777,6 +1777,11 @@ def api_list_applied_jobs_full():
             job["applied_at"] = applied_at
             job["applied"] = True
             job["status"] = status
+            # Same detail_path field /api/jobs adds (see _job_path() below)
+            # -- lets the My Applications page link a still-live posting to
+            # its own detail page, not just the original external apply URL.
+            if job.get("job_id"):
+                job["detail_path"] = _job_path(job["job_id"], job["company"], job["title"])
             results.append(job)
         else:
             # No longer in the live dataset -- still surface it, just
@@ -1830,13 +1835,30 @@ def about_page():
     return send_from_directory(STATIC_DIR, "about.html")
 
 
+@app.route("/applications")
+def applications_page():
+    # Same shell-vs-data split as /admin (see admin_page() below): no
+    # server-side auth check on the page itself, just the static shell.
+    # It fetches /api/applied-jobs/full on load and shows a "log in to see
+    # this" state if that 401s, or an "accounts aren't set up" state on a
+    # 503 -- same three-state pattern as the saved-searches/applied-jobs
+    # modals this replaced. Previously a modal opened over the homepage;
+    # now a real URL, so a signed-in user can bookmark/refresh/share it
+    # like any other page, and there's room for an actual table instead of
+    # a cramped modal box.
+    return send_from_directory(STATIC_DIR, "applications.html")
+
+
 @app.route("/robots.txt")
 def robots_txt():
     """A real robots.txt authored by this app -- until now there wasn't
     one at all, so Cloudflare was serving its own generic default
     "content signals" placeholder in front of it, which doesn't point
     crawlers at a sitemap or say anything about /admin or /api. Allows
-    everything except the admin dashboard, the raw JSON API (nothing
+    everything except the admin dashboard, the signed-in-only My
+    Applications page (a search result pointing at someone's private
+    application history behind a login wall is useless to a searcher and
+    a stray Google index entry to worry about), the raw JSON API (nothing
     there is meant to be indexed as a page -- see /sitemap.xml for what
     actually should be), and the password-reset link (single-use token in
     the URL, never something a search result should point at)."""
@@ -1844,6 +1866,7 @@ def robots_txt():
         "User-agent: *\n"
         "Allow: /\n"
         "Disallow: /admin\n"
+        "Disallow: /applications\n"
         "Disallow: /api/\n"
         "Disallow: /reset-password\n"
         "\n"
@@ -2465,9 +2488,9 @@ def render_job_page(job):
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=26" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=26" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=26" />
+<link rel="icon" href="/favicon.svg?v=27" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=27" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=27" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -2488,7 +2511,7 @@ def render_job_page(job):
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=26" />
+<link rel="stylesheet" href="/style.css?v=27" />
 </head>
 <body>
   <nav class="topnav">
@@ -2633,7 +2656,7 @@ def job_page(segment):
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Role no longer available — Skip The Boards</title>
 <meta name="robots" content="noindex" />
-<link rel="stylesheet" href="/style.css?v=26" /></head>
+<link rel="stylesheet" href="/style.css?v=27" /></head>
 <body><main class="content-page"><h1>This role isn't available anymore</h1>
 <p class="content-page-intro">It's either been filled, taken down by the company, or the link's
 just wrong. <a href="/">Search current openings instead →</a></p></main></body></html>"""
@@ -2708,9 +2731,9 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=26" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=26" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=26" />
+<link rel="icon" href="/favicon.svg?v=27" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=27" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=27" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -2729,7 +2752,7 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=26" />
+<link rel="stylesheet" href="/style.css?v=27" />
 </head>
 <body>
   <nav class="topnav">

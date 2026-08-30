@@ -112,6 +112,8 @@ code {
   font-weight: 600;
   color: var(--ink-soft);
   cursor: pointer;
+  text-decoration: none; /* .auth-btn is also used on an <a> (My applications, now a real page link) */
+  display: inline-block;
   transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
 .auth-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -1599,6 +1601,20 @@ footer {
 .admin-table tr:last-child td { border-bottom: none; }
 .admin-table td.admin-table-status-ok { color: var(--maroon); font-weight: 600; }
 .admin-table td.admin-table-status-error { color: #b3261e; font-weight: 600; }
+/* Role/company/location cells (My Applications, static/applications.html)
+   run much longer than the short admin.html columns .admin-table was
+   built for -- this opts a cell back into normal wrapping instead of the
+   base rule's single-line truncation-by-overflow. */
+.admin-table td.wrap-cell { white-space: normal; }
+.admin-table td.wrap-cell a { color: var(--ink); text-decoration: none; font-weight: 600; }
+.admin-table td.wrap-cell a:hover { color: var(--accent); }
+
+/* My Applications (static/applications.html) needs more width than the
+   760px .content-page/.admin-page pages for its 8-column table to read
+   comfortably -- the table itself still scrolls horizontally below that
+   via .admin-table-wrap on anything narrower. */
+.applications-page { max-width: 1100px; }
+.applications-page .status-filter-row { margin-bottom: 16px; }
 
 .faq-list { display: flex; flex-direction: column; gap: 8px; }
 

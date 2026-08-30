@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<link rel="icon" href="favicon.svg?v=27" type="image/svg+xml" />
+<link rel="alternate icon" href="favicon.ico?v=27" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=27" />
+<title>My Applications — Skip The Boards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=27" />
+</head>
+<body>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <div class="brand">
+        <a href="/" style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;">
+          <span class="brand-mark">◆</span>
+          <span class="brand-name">Skip The Boards</span>
+        </a>
+      </div>
+      <div class="topnav-right">
+        <nav class="nav-links">
+          <a href="/">Home</a>
+          <a href="/about">About</a>
+          <a href="/faq">FAQ</a>
+          <a href="/contact">Contact</a>
+          <a href="/request-company">Request a company</a>
+        </nav>
+        <a class="brand-link" href="/">← Back to search</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="content-page applications-page">
+    <h1>My Applications</h1>
+    <p class="content-page-intro">Every job you've marked applied, in one place — role, company, and where it stands.</p>
+
+    <div id="apps-loading" class="admin-state">Loading…</div>
+
+    <div id="apps-unauthorized" class="admin-state hidden">
+      <p>Log in to see your tracked applications.</p>
+      <p><a href="/">Go log in on the home page</a>, then come back to this page.</p>
+    </div>
+
+    <div id="apps-disabled" class="admin-state hidden">
+      <p>Accounts aren't configured on this deployment, so there's nothing to track here.</p>
+    </div>
+
+    <div id="apps-content" class="hidden">
+      <div class="status-filter-row" id="apps-filter-row"></div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Role</th><th>Company</th><th>Location</th><th>Salary</th>
+              <th>Status</th><th>Applied</th><th>Last confirmed</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="apps-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p class="footer-byline">
+        <strong>Jared Edberg</strong> · <a href="https://www.linkedin.com/in/jared-edberg" target="_blank" rel="noopener">LinkedIn ↗</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    const loadingEl = document.getElementById("apps-loading");
+    const unauthorizedEl = document.getElementById("apps-unauthorized");
+    const disabledEl = document.getElementById("apps-disabled");
+    const contentEl = document.getElementById("apps-content");
+    const filterRowEl = document.getElementById("apps-filter-row");
+    const bodyEl = document.getElementById("apps-body");
+
+    function showOnly(el) {
+      [loadingEl, unauthorizedEl, disabledEl, contentEl].forEach((e) => {
+        e.classList.toggle("hidden", e !== el);
+      });
+    }
+
+    function escapeHtml(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+    const escapeAttr = escapeHtml;
+
+    // Mirrors db_users.APPLICATION_STATUSES in order -- same hardcoded
+    // copy the old modal kept in app.js, moved here now that this page is
+    // the only place that needs it.
+    const APPLICATION_STATUSES = [
+      { value: "applied", label: "Applied" },
+      { value: "interviewing", label: "Interviewing" },
+      { value: "offer", label: "Offer" },
+      { value: "rejected", label: "Rejected" },
+      { value: "ghosted", label: "Ghosted" },
+      { value: "withdrawn", label: "Withdrawn" },
+    ];
+    const STATUS_LABELS = Object.fromEntries(APPLICATION_STATUSES.map((s) => [s.value, s.label]));
+
+    let currentFilter = "all";
+    let allJobs = [];
+
+    function formatSalary(job) {
+      if (!job.salary_min) return "";
+      const fmt = (n) => (n % 1000 === 0 ? `${n / 1000}k` : `${(n / 1000).toFixed(0)}k`);
+      return job.salary_min === job.salary_max
+        ? `~$${fmt(job.salary_min)}`
+        : `~$${fmt(job.salary_min)}–$${fmt(job.salary_max)}`;
+    }
+
+    // Same coarse "X ago" phrasing as job cards/detail pages (see app.js's
+    // timeAgo() and app.py's _time_ago()) -- kept as its own small copy
+    // rather than pulling in app.js, same reasoning admin.html's fmtDate
+    // duplication already gives: this page doesn't otherwise load app.js
+    // at all, so one small function is cheaper than a whole extra script.
+    function timeAgo(isoString) {
+      if (!isoString) return "";
+      const then = new Date(isoString.endsWith("Z") || isoString.includes("+") ? isoString : isoString + "Z");
+      const diffMs = Date.now() - then.getTime();
+      if (isNaN(diffMs)) return "";
+      const mins = Math.floor(diffMs / 60000);
+      if (mins < 1) return "just now";
+      if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+      const hours = Math.floor(mins / 60);
+      if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+      const days = Math.floor(hours / 24);
+      if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+      const weeks = Math.floor(days / 7);
+      if (weeks < 5) return `${weeks} week${weeks === 1 ? "" : "s"} ago`;
+      const months = Math.floor(days / 30);
+      return `${months} month${months === 1 ? "" : "s"} ago`;
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return "—";
+      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    }
+
+    function renderFilters() {
+      const counts = { all: allJobs.length };
+      APPLICATION_STATUSES.forEach((s) => { counts[s.value] = 0; });
+      allJobs.forEach((j) => {
+        const s = j.status || "applied";
+        counts[s] = (counts[s] || 0) + 1;
+      });
+      const chipDefs = [{ value: "all", label: "All" }, ...APPLICATION_STATUSES];
+      filterRowEl.innerHTML = chipDefs.map((s) => {
+        const active = s.value === currentFilter ? " active" : "";
+        return `<button type="button" class="status-filter-chip status-${s.value}${active}" data-filter="${s.value}">${s.label} <span class="status-filter-count">${counts[s.value] || 0}</span></button>`;
+      }).join("");
+      filterRowEl.querySelectorAll("[data-filter]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          currentFilter = btn.dataset.filter;
+          renderFilters();
+          renderRows();
+        });
+      });
+    }
+
+    function rowHtml(job) {
+      const status = job.status || "applied";
+      const appliedDate = fmtDate(job.applied_at);
+
+      // `delisted` jobs (see /api/applied-jobs/full in app.py) have no
+      // title/company/location/etc. anymore -- the posting closed and
+      // dropped out of the live dataset -- so they still show up here
+      // (this is the user's application HISTORY, not "still-open
+      // postings"), just with the bare URL and a tag instead of a link,
+      // same call the old modal made: a closed listing's original apply
+      // URL isn't worth linking to.
+      if (job.delisted) {
+        return `
+          <tr>
+            <td class="wrap-cell" colspan="3">${escapeHtml(job.url)} <span class="delisted-tag">(no longer listed)</span></td>
+            <td>—</td>
+            <td>${statusSelectHtml(job.url, status)}</td>
+            <td>${escapeHtml(appliedDate)}</td>
+            <td>—</td>
+            <td>${removeButtonHtml(job.url)}</td>
+          </tr>`;
+      }
+
+      const salaryText = formatSalary(job) || "—";
+      const location = job.location || "Location not listed";
+      const confirmedAgo = timeAgo(job.last_seen);
+      const confirmedHtml = confirmedAgo
+        ? `<span title="Our scraper last confirmed this listing was still live on the company's own career page ${escapeAttr(confirmedAgo)}">✓ ${escapeHtml(confirmedAgo)}</span>`
+        : "—";
+      const detailLink = job.detail_path
+        ? ` · <a href="${escapeAttr(job.detail_path)}">Details</a>`
+        : "";
+
+      return `
+        <tr>
+          <td class="wrap-cell"><a href="${escapeAttr(job.url)}" target="_blank" rel="noopener">${escapeHtml(job.title)}</a>${detailLink}</td>
+          <td class="wrap-cell">${escapeHtml(job.company)}</td>
+          <td class="wrap-cell">${escapeHtml(location)}</td>
+          <td>${escapeHtml(salaryText)}</td>
+          <td>${statusSelectHtml(job.url, status)}</td>
+          <td>${escapeHtml(appliedDate)}</td>
+          <td>${confirmedHtml}</td>
+          <td>${removeButtonHtml(job.url)}</td>
+        </tr>`;
+    }
+
+    function statusSelectHtml(url, status) {
+      const options = APPLICATION_STATUSES
+        .map((s) => `<option value="${s.value}"${s.value === status ? " selected" : ""}>${s.label}</option>`)
+        .join("");
+      return `<select class="status-select status-${status}" data-status-select="${escapeAttr(url)}" aria-label="Application status">${options}</select>`;
+    }
+
+    function removeButtonHtml(url) {
+      return `<button type="button" class="row-action-btn danger" data-unapply="${escapeAttr(url)}">Remove</button>`;
+    }
+
+    function renderRows() {
+      const visible = currentFilter === "all"
+        ? allJobs
+        : allJobs.filter((j) => (j.status || "applied") === currentFilter);
+      if (!visible.length) {
+        bodyEl.innerHTML = `<tr><td colspan="8"><div class="empty-modal-state">Nothing in "${escapeHtml(STATUS_LABELS[currentFilter] || "All")}" right now.</div></td></tr>`;
+        return;
+      }
+      bodyEl.innerHTML = visible.map(rowHtml).join("");
+
+      bodyEl.querySelectorAll("[data-unapply]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          try {
+            await fetch("/api/applied-jobs", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ job_url: btn.dataset.unapply }),
+            });
+            await loadApplications();
+          } catch (e) {
+            btn.disabled = false;
+          }
+        });
+      });
+      bodyEl.querySelectorAll("[data-status-select]").forEach((sel) => {
+        sel.dataset.prevStatus = sel.value;
+        sel.addEventListener("change", async () => {
+          const url = sel.dataset.statusSelect;
+          const status = sel.value;
+          sel.disabled = true;
+          try {
+            const res = await fetch("/api/applied-jobs/status", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ job_url: url, status }),
+            });
+            if (!res.ok) throw new Error("request failed");
+            await loadApplications(); // refetch -- keeps filter-chip counts and the visible row list in sync, not just the one dropdown touched
+          } catch (e) {
+            sel.value = sel.dataset.prevStatus;
+            sel.disabled = false;
+          }
+        });
+      });
+    }
+
+    async function loadApplications() {
+      let res;
+      try {
+        res = await fetch("/api/applied-jobs/full");
+      } catch (e) {
+        showOnly(unauthorizedEl);
+        return;
+      }
+      if (res.status === 503) { showOnly(disabledEl); return; }
+      if (res.status === 401 || res.status === 403) { showOnly(unauthorizedEl); return; }
+      if (!res.ok) { showOnly(unauthorizedEl); return; }
+
+      const data = await res.json();
+      allJobs = data.jobs || [];
+      showOnly(contentEl);
+      if (!allJobs.length) {
+        filterRowEl.innerHTML = "";
+        bodyEl.innerHTML = `<tr><td colspan="8"><div class="empty-modal-state">Nothing marked applied yet. Use "Mark applied" on any job card.</div></td></tr>`;
+        return;
+      }
+      renderFilters();
+      renderRows();
+    }
+
+    loadApplications();
+  </script>
+</body>
+</html>
