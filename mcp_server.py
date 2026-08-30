@@ -58,6 +58,8 @@ VALID_LOCATION_GROUPS = {
 # reaches the db.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 MAX_SEARCH_NAME_LEN = 80
+VALID_ALERT_FREQUENCIES = {"daily", "weekly"}
+DEFAULT_ALERT_FREQUENCY = "daily"
 
 
 def _slugify(text):
@@ -262,11 +264,12 @@ TOOLS = [
     {
         "name": "create_job_alert",
         "description": (
-            "Same as save_search, but also turns on a once-a-day email digest of "
-            "newly-appeared matches for this search. Refuses to create an alert "
-            "with no filter set at all (query/location/location_group/department/"
-            "commitment all empty), since that would otherwise email every single "
-            "new job scraped anywhere, every day."
+            "Same as save_search, but also turns on an email digest of "
+            "newly-appeared matches for this search, checked either daily or "
+            "weekly. Refuses to create an alert with no filter set at all "
+            "(query/location/location_group/department/commitment all empty), "
+            "since that would otherwise email every single new job scraped "
+            "anywhere, on every check."
         ),
         "inputSchema": {
             "type": "object",
@@ -288,6 +291,11 @@ TOOLS = [
                 },
                 "department": {"type": "string", "description": "Same department substring as search_jobs."},
                 "commitment": {"type": "string", "description": "Same employment-type exact match as search_jobs."},
+                "frequency": {
+                    "type": "string",
+                    "enum": sorted(VALID_ALERT_FREQUENCIES),
+                    "description": f"How often to check for new matches and email if any turned up. Defaults to '{DEFAULT_ALERT_FREQUENCY}'.",
+                },
             },
             "required": ["email"],
             "additionalProperties": False,
@@ -455,6 +463,7 @@ def _saved_search_summary(search):
         "department": search.get("department") or "",
         "commitment": search.get("commitment") or "",
         "alerts_enabled": bool(search.get("alerts_enabled")),
+        "alert_frequency": search.get("alert_frequency") or DEFAULT_ALERT_FREQUENCY,
         "created_at": search.get("created_at"),
         "url": _saved_search_url(search),
     }
@@ -475,13 +484,17 @@ def _validate_save_search_args(args, require_filter=False):
     location_group = (args.get("location_group") or "").strip()
     department = (args.get("department") or "").strip()
     commitment = (args.get("commitment") or "").strip()
+    frequency = (args.get("frequency") or DEFAULT_ALERT_FREQUENCY).strip().lower()
     if location_group and location_group not in VALID_LOCATION_GROUPS:
         return f"Unknown location_group '{location_group}'. Valid values: {sorted(VALID_LOCATION_GROUPS)}", None
+    if frequency not in VALID_ALERT_FREQUENCIES:
+        return f"Unknown frequency '{frequency}'. Valid values: {sorted(VALID_ALERT_FREQUENCIES)}", None
     if require_filter and not (query or location or location_group or department or commitment):
         return "An alert needs at least one filter set (query/location/location_group/department/commitment) -- otherwise it would email every new job scraped anywhere.", None
     return None, {
         "email": email, "name": name, "query": query, "location": location,
         "location_group": location_group, "department": department, "commitment": commitment,
+        "alert_frequency": frequency,
     }
 
 
@@ -504,7 +517,7 @@ def _tool_create_job_alert(args):
     summary = _saved_search_summary(search)
     return _tool_ok(
         f"Alert created for {cleaned['email']}. "
-        f"id={summary['id']} -- checked once a day, emailing only newly-appeared matches.",
+        f"id={summary['id']} -- checked {cleaned['alert_frequency']}, emailing only newly-appeared matches.",
         summary,
     )
 
@@ -520,7 +533,7 @@ def _tool_list_my_searches(args):
     else:
         lines = [f"{len(summaries)} saved search(es) for {email}:"]
         for s in summaries:
-            alert_tag = " [alert on]" if s["alerts_enabled"] else ""
+            alert_tag = f" [alert on, {s['alert_frequency']}]" if s["alerts_enabled"] else ""
             lines.append(f"- id={s['id']} {s['name'] or '(unnamed)'}{alert_tag} -- {s['url']}")
         text = "\n".join(lines)
     return _tool_ok(text, summaries)

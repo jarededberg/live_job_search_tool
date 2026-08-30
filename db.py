@@ -274,9 +274,13 @@ def init_db():
                 commitment TEXT NOT NULL DEFAULT '',
                 alerts_enabled INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
-                last_checked_at TEXT
+                last_checked_at TEXT,
+                alert_frequency TEXT NOT NULL DEFAULT 'daily'
             )
         """)
+        mcp_cols = {row["name"] for row in conn.execute("PRAGMA table_info(mcp_saved_searches)").fetchall()}
+        if "alert_frequency" not in mcp_cols:
+            conn.execute("ALTER TABLE mcp_saved_searches ADD COLUMN alert_frequency TEXT NOT NULL DEFAULT 'daily'")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_mcp_saved_searches_email ON mcp_saved_searches(email)")
 
         conn.commit()
@@ -519,20 +523,24 @@ def last_digest_run():
 
 
 def create_mcp_saved_search(email, name="", query="", location="", location_group="",
-                             department="", commitment="", alerts_enabled=False):
+                             department="", commitment="", alerts_enabled=False,
+                             alert_frequency="daily"):
     """Creates one row for mcp_server.py's save_search/create_job_alert
     tools. `alerts_enabled` is the only difference between the two tools
     at the storage layer -- save_search inserts with it False (a pure
     bookmark), create_job_alert inserts with it True (also gets picked up
     by the scheduled alert job, see app.py's run_mcp_search_alerts_job()).
-    Returns the new row's id."""
+    `alert_frequency` ('daily' or 'weekly') is only meaningful when
+    alerts_enabled is True -- see app.py's _alert_is_due(). Returns the
+    new row's id."""
     now = datetime.now(timezone.utc).isoformat()
     with _lock, conn_ctx() as conn:
         cur = conn.execute(
             "INSERT INTO mcp_saved_searches (email, name, query, location, location_group, "
-            "department, commitment, alerts_enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "department, commitment, alerts_enabled, created_at, alert_frequency) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (email, name, query, location, location_group, department, commitment,
-             1 if alerts_enabled else 0, now),
+             1 if alerts_enabled else 0, now, alert_frequency),
         )
         conn.commit()
         return cur.lastrowid

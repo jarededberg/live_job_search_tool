@@ -1405,6 +1405,11 @@ async function openSavedSearchesModal() {
           <input type="checkbox" data-alert-toggle="${s.id}" ${s.alerts_enabled ? "checked" : ""} />
           Email alerts
         </label>
+        <select class="saved-search-frequency" data-frequency-select="${s.id}"
+          title="How often to check for new matches" ${s.alerts_enabled ? "" : "disabled"}>
+          <option value="daily" ${s.alert_frequency === "daily" ? "selected" : ""}>Daily</option>
+          <option value="weekly" ${s.alert_frequency === "weekly" ? "selected" : ""}>Weekly</option>
+        </select>
         <button type="button" class="row-action-btn" data-run="${s.id}">Run</button>
         <button type="button" class="row-action-btn danger" data-delete="${s.id}">Delete</button>
       </div>
@@ -1424,11 +1429,26 @@ async function openSavedSearchesModal() {
       cb.addEventListener("change", async () => {
         // No redraw needed here (unlike delete) -- the checkbox's own
         // state already reflects the intended value, and re-fetching
-        // would just flash the list for no visible change.
+        // would just flash the list for no visible change. The frequency
+        // select next to it just gets enabled/disabled in place to match
+        // (it's meaningless while alerts are off, but there's no reason
+        // to lose the choice -- re-enabling the checkbox should bring
+        // back whatever frequency was already selected).
         await fetch(`/api/saved-searches/${cb.dataset.alertToggle}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ alerts_enabled: cb.checked }),
+        });
+        const freqSelect = list.querySelector(`[data-frequency-select="${cb.dataset.alertToggle}"]`);
+        if (freqSelect) freqSelect.disabled = !cb.checked;
+      });
+    });
+    list.querySelectorAll("[data-frequency-select]").forEach((sel) => {
+      sel.addEventListener("change", async () => {
+        await fetch(`/api/saved-searches/${sel.dataset.frequencySelect}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ alert_frequency: sel.value }),
         });
       });
     });

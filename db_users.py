@@ -114,6 +114,14 @@ def init_db():
             # appears.
             cur.execute("ALTER TABLE saved_searches ADD COLUMN IF NOT EXISTS alerts_enabled BOOLEAN NOT NULL DEFAULT TRUE")
             cur.execute("ALTER TABLE saved_searches ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ")
+            # alert_frequency: 'daily' (default, matches the original
+            # behavior before this column existed -- every alerts-enabled
+            # search got checked on every run of the once-a-day job) or
+            # 'weekly'. Not enforced by a CHECK constraint -- app.py's
+            # ALERT_FREQUENCIES set is the single source of truth for
+            # valid values, same division of responsibility as
+            # APPLICATION_STATUSES for applied_jobs.status.
+            cur.execute("ALTER TABLE saved_searches ADD COLUMN IF NOT EXISTS alert_frequency TEXT NOT NULL DEFAULT 'daily'")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS alert_runs (
                     id SERIAL PRIMARY KEY,
@@ -298,21 +306,21 @@ def list_saved_searches(user_id):
     with conn_ctx() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, name, params_json, created_at, alerts_enabled, last_checked_at "
+                "SELECT id, name, params_json, created_at, alerts_enabled, last_checked_at, alert_frequency "
                 "FROM saved_searches WHERE user_id = %s ORDER BY created_at DESC",
                 (user_id,),
             )
             return [dict(r) for r in cur.fetchall()]
 
 
-def create_saved_search(user_id, name, params_json, alerts_enabled=True):
+def create_saved_search(user_id, name, params_json, alerts_enabled=True, alert_frequency="daily"):
     with conn_ctx() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "INSERT INTO saved_searches (user_id, name, params_json, alerts_enabled) "
-                "VALUES (%s, %s, %s, %s) "
-                "RETURNING id, name, params_json, created_at, alerts_enabled, last_checked_at",
-                (user_id, name, params_json, alerts_enabled),
+                "INSERT INTO saved_searches (user_id, name, params_json, alerts_enabled, alert_frequency) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "RETURNING id, name, params_json, created_at, alerts_enabled, last_checked_at, alert_frequency",
+                (user_id, name, params_json, alerts_enabled, alert_frequency),
             )
             return dict(cur.fetchone())
 
@@ -342,16 +350,35 @@ def set_saved_search_alerts(user_id, search_id, enabled):
             return cur.rowcount > 0
 
 
+def set_saved_search_frequency(user_id, search_id, frequency):
+    """Returns True if a row was actually updated -- scoped to user_id,
+    same guessable-id protection as delete_saved_search. `frequency`
+    isn't validated against ALERT_FREQUENCIES here -- app.py's route
+    does that, same division of responsibility as set_saved_search_alerts
+    trusting its caller for the boolean."""
+    with conn_ctx() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE saved_searches SET alert_frequency = %s WHERE id = %s AND user_id = %s",
+                (frequency, search_id, user_id),
+            )
+            return cur.rowcount > 0
+
+
 def list_searches_for_alerts():
     """Every saved search with alerts turned on, joined to its owner's
-    email -- the full set the alert job needs to check on each run.
-    Ordered by id purely for deterministic test output; the alert job
-    processes all of them regardless of order."""
+    email -- the full set the alert job needs to check on each run
+    (further filtered per-search by app.py's _alert_is_due() against
+    alert_frequency, since this returns daily AND weekly searches alike
+    -- the job runs once a day regardless, and it's up to that check to
+    skip a weekly search that isn't due yet). Ordered by id purely for
+    deterministic test output; the alert job processes all of them
+    regardless of order."""
     with conn_ctx() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 "SELECT s.id, s.user_id, s.name, s.params_json, s.created_at, s.last_checked_at, "
-                "u.email FROM saved_searches s JOIN users u ON u.id = s.user_id "
+                "s.alert_frequency, u.email FROM saved_searches s JOIN users u ON u.id = s.user_id "
                 "WHERE s.alerts_enabled = TRUE ORDER BY s.id"
             )
             return [dict(r) for r in cur.fetchall()]

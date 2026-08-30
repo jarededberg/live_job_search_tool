@@ -582,22 +582,74 @@ def send_saved_search_alert_email(to_email, search_name, jobs):
     return _post_to_resend(payload)
 
 
+# Richer alert customization: a saved/MCP search's alerts_enabled=True
+# can additionally choose how OFTEN it gets checked, not just on/off.
+# Deliberately implemented as a filter INSIDE the existing once-a-day
+# scheduled jobs (run_saved_search_alerts_job/run_mcp_search_alerts_job)
+# rather than a second scheduled job on a different interval -- one job
+# per storage backend, unconditionally, keeps "how many scheduled jobs
+# exist" independent of "how many frequency options exist," and a bug or
+# slowdown in the daily cadence can't get compounded by a second job
+# racing it. ALERT_FREQUENCY_INTERVALS' values are intentionally a bit
+# short of the nominal interval (23h for "daily", 6.5 days for "weekly")
+# as a buffer against ordinary scheduler jitter -- a weekly alert
+# shouldn't get silently skipped for a full extra cycle just because the
+# daily job happened to run a few minutes earlier than exactly 7*24h
+# after the last check.
+ALERT_FREQUENCIES = {"daily", "weekly"}
+DEFAULT_ALERT_FREQUENCY = "daily"
+ALERT_FREQUENCY_INTERVALS = {
+    "daily": timedelta(hours=23),
+    "weekly": timedelta(days=6, hours=12),
+}
+
+
+def _alert_is_due(search, now):
+    """True if enough time has passed since `search`'s last_checked_at
+    for its alert_frequency -- or if it's never been checked at all
+    (a brand-new alert should fire on the very next run, same as today's
+    behavior, not wait out a full interval first). Unrecognized/missing
+    frequency values fall back to 'daily' rather than erroring, so an
+    older saved search from before this column existed (or a raw value
+    someone hand-edited) still gets checked at the old cadence instead of
+    silently never firing."""
+    frequency = (search.get("alert_frequency") or DEFAULT_ALERT_FREQUENCY).strip().lower()
+    interval = ALERT_FREQUENCY_INTERVALS.get(frequency, ALERT_FREQUENCY_INTERVALS[DEFAULT_ALERT_FREQUENCY])
+    last_checked = search.get("last_checked_at")
+    if not last_checked:
+        return True
+    if isinstance(last_checked, str):
+        try:
+            last_checked = datetime.fromisoformat(last_checked)
+        except ValueError:
+            return True
+    if last_checked.tzinfo is None:
+        last_checked = last_checked.replace(tzinfo=timezone.utc)
+    return (now - last_checked) >= interval
+
+
 def run_saved_search_alerts_job():
     """Runs once a day (see start_scheduler()): checks every saved search
-    with alerts_enabled, finds jobs newly discovered (by first_seen --
-    when THIS site first scraped it, not the ATS's own `posted` date,
-    which is sometimes backdated or missing) since that search was last
-    checked, and emails a digest if there are any. Applies the search's
-    own saved filters as-is on top of that (so a search saved with
-    `days=3` still only alerts on jobs matching that filter too)."""
+    with alerts_enabled AND currently due (see _alert_is_due() -- a
+    'weekly' search is skipped on most of these daily runs), finds jobs
+    newly discovered (by first_seen -- when THIS site first scraped it,
+    not the ATS's own `posted` date, which is sometimes backdated or
+    missing) since that search was last checked, and emails a digest if
+    there are any. Applies the search's own saved filters as-is on top of
+    that (so a search saved with `days=3` still only alerts on jobs
+    matching that filter too)."""
     if not db_users.accounts_enabled():
         return
     if not (RESEND_API_KEY and RESEND_FROM_EMAIL):
         return
     searches = db_users.list_searches_for_alerts()
     emails_sent = 0
+    checked_count = 0
     now = datetime.now(timezone.utc)
     for s in searches:
+        if not _alert_is_due(s, now):
+            continue
+        checked_count += 1
         try:
             params = json.loads(s["params_json"])
         except (TypeError, ValueError):
@@ -628,8 +680,8 @@ def run_saved_search_alerts_job():
             if send_saved_search_alert_email(s["email"], s["name"], new_rows):
                 emails_sent += 1
         db_users.mark_search_checked(s["id"], now)
-    db_users.record_alert_run(now, len(searches), emails_sent)
-    print(f"[alerts] checked {len(searches)} saved searches, sent {emails_sent} emails")
+    db_users.record_alert_run(now, checked_count, emails_sent)
+    print(f"[alerts] checked {checked_count} of {len(searches)} enabled saved searches (rest not due yet), sent {emails_sent} emails")
 
 
 def run_mcp_search_alerts_job():
@@ -649,8 +701,12 @@ def run_mcp_search_alerts_job():
         return
     searches = db.list_mcp_searches_for_alerts()
     emails_sent = 0
+    checked_count = 0
     now = datetime.now(timezone.utc)
     for s in searches:
+        if not _alert_is_due(s, now):
+            continue
+        checked_count += 1
         cutoff = s.get("last_checked_at") or s.get("created_at")
         try:
             cutoff = datetime.fromisoformat(cutoff) if isinstance(cutoff, str) else cutoff
@@ -689,7 +745,7 @@ def run_mcp_search_alerts_job():
             if send_saved_search_alert_email(s["email"], name, new_rows):
                 emails_sent += 1
         db.mark_mcp_search_checked(s["id"], now)
-    print(f"[mcp-alerts] checked {len(searches)} MCP-created alerts, sent {emails_sent} emails")
+    print(f"[mcp-alerts] checked {checked_count} of {len(searches)} enabled MCP alerts (rest not due yet), sent {emails_sent} emails")
 
 
 def _compute_next_mcp_alert_time():
@@ -1188,7 +1244,7 @@ def unsubscribe_page():
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <title>Unsubscribe — Skip The Boards</title>
-<link rel="stylesheet" href="/style.css?v=24" />
+<link rel="stylesheet" href="/style.css?v=25" />
 </head>
 <body>
   <main class="content-page">
@@ -1560,12 +1616,16 @@ def api_create_saved_search():
     # "don't email me about this one" checkbox at save time without another
     # backend change.
     alerts_enabled = data.get("alerts_enabled", True)
+    alert_frequency = (data.get("alert_frequency") or DEFAULT_ALERT_FREQUENCY).strip().lower()
+    if alert_frequency not in ALERT_FREQUENCIES:
+        alert_frequency = DEFAULT_ALERT_FREQUENCY
     if not name:
         return jsonify({"ok": False, "message": "Give this search a name."}), 400
     if not isinstance(params, dict):
         return jsonify({"ok": False, "message": "Missing search parameters."}), 400
     search = db_users.create_saved_search(session["user_id"], name, json.dumps(params),
-                                           alerts_enabled=bool(alerts_enabled))
+                                           alerts_enabled=bool(alerts_enabled),
+                                           alert_frequency=alert_frequency)
     search["params"] = json.loads(search.pop("params_json"))
     return jsonify({"ok": True, "search": search})
 
@@ -1584,15 +1644,25 @@ def api_delete_saved_search(search_id):
 @accounts_required
 @login_required
 def api_update_saved_search(search_id):
-    """Currently only toggles alerts_enabled -- the one setting per saved
-    search that's meant to be flipped after the fact without deleting and
-    re-creating it. Extend here if saved searches ever get other editable
-    fields (e.g. renaming)."""
+    """Toggles alerts_enabled and/or changes alert_frequency -- the two
+    settings per saved search meant to be flipped after the fact without
+    deleting and re-creating it. Extend here if saved searches ever get
+    other editable fields (e.g. renaming). Accepts either field alone or
+    both together in one request (the frontend sends them independently,
+    from two different controls in the same row, so either shape needs
+    to work)."""
     data = request.get_json(silent=True) or {}
-    if "alerts_enabled" not in data:
+    if "alerts_enabled" not in data and "alert_frequency" not in data:
         return jsonify({"ok": False, "message": "Nothing to update."}), 400
-    updated = db_users.set_saved_search_alerts(session["user_id"], search_id, bool(data["alerts_enabled"]))
-    if not updated:
+    ok = True
+    if "alerts_enabled" in data:
+        ok = db_users.set_saved_search_alerts(session["user_id"], search_id, bool(data["alerts_enabled"])) and ok
+    if "alert_frequency" in data:
+        frequency = (data.get("alert_frequency") or "").strip().lower()
+        if frequency not in ALERT_FREQUENCIES:
+            return jsonify({"ok": False, "message": f"Invalid frequency. Valid values: {sorted(ALERT_FREQUENCIES)}"}), 400
+        ok = db_users.set_saved_search_frequency(session["user_id"], search_id, frequency) and ok
+    if not ok:
         return jsonify({"ok": False, "message": "Not found."}), 404
     return jsonify({"ok": True})
 
@@ -2243,9 +2313,9 @@ def render_job_page(job):
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=24" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=24" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=24" />
+<link rel="icon" href="/favicon.svg?v=25" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=25" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=25" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -2266,7 +2336,7 @@ def render_job_page(job):
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=24" />
+<link rel="stylesheet" href="/style.css?v=25" />
 </head>
 <body>
   <nav class="topnav">
@@ -2411,7 +2481,7 @@ def job_page(segment):
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Role no longer available — Skip The Boards</title>
 <meta name="robots" content="noindex" />
-<link rel="stylesheet" href="/style.css?v=24" /></head>
+<link rel="stylesheet" href="/style.css?v=25" /></head>
 <body><main class="content-page"><h1>This role isn't available anymore</h1>
 <p class="content-page-intro">It's either been filled, taken down by the company, or the link's
 just wrong. <a href="/">Search current openings instead →</a></p></main></body></html>"""
@@ -2486,9 +2556,9 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="/favicon.svg?v=24" type="image/svg+xml" />
-<link rel="alternate icon" href="/favicon.ico?v=24" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=24" />
+<link rel="icon" href="/favicon.svg?v=25" type="image/svg+xml" />
+<link rel="alternate icon" href="/favicon.ico?v=25" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=25" />
 <title>{esc(page_title)}</title>
 <meta name="description" content="{esc(description)}" />
 <link rel="canonical" href="{esc(canonical_url)}" />
@@ -2507,7 +2577,7 @@ def render_hub_page(page_title, description, canonical_path, h1, intro_text, job
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=24" />
+<link rel="stylesheet" href="/style.css?v=25" />
 </head>
 <body>
   <nav class="topnav">

@@ -906,6 +906,26 @@ Toggle state lives on the saved search itself (`PATCH
 a single global per-user preference, so a user can get alerts for one
 search and not another.
 
+**Alert frequency (daily/weekly):** each alerts-enabled search also has
+an `alert_frequency` column (`daily`, the default, or `weekly`), editable
+via the same PATCH route (`{"alert_frequency": "weekly"}`) and via a
+second `<select>` next to the "Email alerts" checkbox in the frontend.
+Deliberately NOT a second scheduled job on a different interval --
+`run_saved_search_alerts_job()` still runs once a day exactly as before,
+and a new helper, `_alert_is_due()`, decides per-search whether enough
+time has actually passed since `last_checked_at` to check it THIS run.
+A `daily` search is due on every run (same as the original, pre-frequency
+behavior); a `weekly` search gets skipped on most daily runs and only
+processed roughly once every 7 days. Skipped searches don't have their
+`last_checked_at` touched at all, so the "new since" cutoff stays
+correct for whenever they're eventually due again -- a weekly search
+checked every 7 days still only alerts on genuinely new-since-last-check
+postings, not a week's worth of stale re-alerts. The same
+`alert_frequency` column and `_alert_is_due()` check apply identically to
+the MCP server's `create_job_alert` tool (see "MCP server" below) via its
+own `run_mcp_search_alerts_job()` -- one shared frequency concept across
+both alert paths, not two separate implementations.
+
 ### Why this is a separate database from the job cache
 
 `db.py`'s SQLite `jobs.db` is disposable by design — if it's ever lost,
@@ -2184,17 +2204,21 @@ behalf, not just search:
   accepts, saved against an email address rather than a logged-in
   account (an MCP caller has no session cookie to attach a real account
   to). `save_search` is a pure bookmark; `create_job_alert` is identical
-  but also turns on a once-a-day email digest of newly-appeared matches.
-  Storage is a new `db.py` table, `mcp_saved_searches` -- discrete filter
-  columns (not the browser UI's one JSON blob, since there's no legacy
-  singular/plural shape to stay compatible with here) in the same
-  no-account SQLite job-cache db as `company_requests`/`job_flags`/
-  `digest_subscribers`, for the same "has to work with zero
+  but also turns on an email digest of newly-appeared matches, checked
+  either `daily` (default) or `weekly` via an optional `frequency` arg --
+  same `alert_frequency`/`_alert_is_due()` mechanism the browser-side
+  saved-search alerts use (see "Saved-search email alerts" above), so
+  both alert paths share one frequency concept rather than two separate
+  implementations. Storage is a new `db.py` table, `mcp_saved_searches`
+  -- discrete filter columns (not the browser UI's one JSON blob, since
+  there's no legacy singular/plural shape to stay compatible with here)
+  in the same no-account SQLite job-cache db as `company_requests`/
+  `job_flags`/`digest_subscribers`, for the same "has to work with zero
   accounts/DATABASE_URL configured" reasoning. `create_job_alert` refuses
   to create an alert with literally no filter set (it would otherwise
-  email every single new job scraped anywhere, every day) -- `save_search`
-  has no such restriction since a pure bookmark never sends anything on
-  its own.
+  email every single new job scraped anywhere, on every check) --
+  `save_search` has no such restriction since a pure bookmark never
+  sends anything on its own.
 - `list_my_searches` / `cancel_job_alert` -- look up everything saved
   under an email, and turn alerts off for one of them (ownership check is
   just "knows the email that created it," the same lightweight trust
