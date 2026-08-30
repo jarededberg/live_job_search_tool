@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<link rel="icon" href="favicon.svg?v=28" type="image/svg+xml" />
+<link rel="alternate icon" href="favicon.ico?v=28" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=28" />
+<title>Saved Searches — Skip The Boards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=28" />
+</head>
+<body>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <div class="brand">
+        <a href="/" style="display:flex;align-items:center;gap:8px;text-decoration:none;color:inherit;">
+          <span class="brand-mark">◆</span>
+          <span class="brand-name">Skip The Boards</span>
+        </a>
+      </div>
+      <div class="topnav-right">
+        <nav class="nav-links">
+          <a href="/">Home</a>
+          <a href="/about">About</a>
+          <a href="/faq">FAQ</a>
+          <a href="/contact">Contact</a>
+          <a href="/request-company">Request a company</a>
+        </nav>
+        <a class="brand-link" href="/">← Back to search</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="content-page applications-page">
+    <h1>Saved Searches</h1>
+    <p class="content-page-intro">Every search you've saved, what it actually filters on, and whether it's emailing you about new matches.</p>
+
+    <div id="ss-loading" class="admin-state">Loading…</div>
+
+    <div id="ss-unauthorized" class="admin-state hidden">
+      <p>Log in to see your saved searches.</p>
+      <p><a href="/">Go log in on the home page</a>, then come back to this page.</p>
+    </div>
+
+    <div id="ss-disabled" class="admin-state hidden">
+      <p>Accounts aren't configured on this deployment, so there's nothing to save here.</p>
+    </div>
+
+    <div id="ss-content" class="hidden">
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Name</th><th>Query</th><th>Location</th><th>Department</th>
+              <th>Commitment</th><th>Other filters</th><th>Alerts</th>
+              <th>Frequency</th><th>Last checked</th><th>Created</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="ss-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <p class="footer-byline">
+        <strong>Jared Edberg</strong> · <a href="https://www.linkedin.com/in/jared-edberg" target="_blank" rel="noopener">LinkedIn ↗</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    const loadingEl = document.getElementById("ss-loading");
+    const unauthorizedEl = document.getElementById("ss-unauthorized");
+    const disabledEl = document.getElementById("ss-disabled");
+    const contentEl = document.getElementById("ss-content");
+    const bodyEl = document.getElementById("ss-body");
+
+    function showOnly(el) {
+      [loadingEl, unauthorizedEl, disabledEl, contentEl].forEach((e) => {
+        e.classList.toggle("hidden", e !== el);
+      });
+    }
+
+    function escapeHtml(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+    const escapeAttr = escapeHtml;
+
+    function fmtDate(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return "—";
+      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    }
+
+    // Matches index.html's own <select id="days"> option labels exactly,
+    // so a search saved with days=1 reads as "Last 24 hours" here too,
+    // not a bare "1".
+    const DAYS_LABELS = {
+      "1": "Last 24 hours", "3": "Last 3 days", "7": "Last 7 days",
+      "14": "Last 14 days", "30": "Last 30 days", "90": "Last 90 days",
+    };
+
+    function fmtSalaryK(n) {
+      return n % 1000 === 0 ? `${n / 1000}k` : `${(n / 1000).toFixed(0)}k`;
+    }
+
+    // Everything currentSearchParams() (app.js) can put in a saved
+    // search's params blob EXCEPT query/location/department/commitment,
+    // which get their own table columns -- days plus the salary/YOE
+    // sliders, only ever present when actually touched (see that
+    // function's own comment), folded into one column so the table
+    // doesn't grow a column for something usually unset.
+    function otherFiltersHtml(params) {
+      const bits = [];
+      if (params.days && DAYS_LABELS[params.days]) bits.push(DAYS_LABELS[params.days]);
+      if (params.salary_min !== undefined && params.salary_max !== undefined) {
+        bits.push(`$${fmtSalaryK(params.salary_min)}–$${fmtSalaryK(params.salary_max)}`);
+      }
+      if (params.yoe_min !== undefined && params.yoe_max !== undefined) {
+        bits.push(`${params.yoe_min}–${params.yoe_max} YOE`);
+      }
+      return bits.length ? escapeHtml(bits.join(" · ")) : "—";
+    }
+
+    function fmtList(arr) {
+      return arr && arr.length ? escapeHtml(arr.join(", ")) : "—";
+    }
+
+    function rowHtml(s) {
+      const p = s.params || {};
+      // `departments` (array) is the current shape; `department` (a
+      // singular string) is what searches saved before it became
+      // multi-select still carry -- same fallback loadSavedSearch() in
+      // app.js already applies when restoring one of these onto the
+      // homepage's filters.
+      const departments = p.departments || (p.department ? [p.department] : []);
+      const restoreUrl = `/?restore=${encodeURIComponent(JSON.stringify(p))}`;
+      return `
+        <tr>
+          <td class="wrap-cell">${escapeHtml(s.name)}</td>
+          <td class="wrap-cell">${p.q ? escapeHtml(p.q) : "—"}</td>
+          <td class="wrap-cell">${fmtList(p.locations)}</td>
+          <td>${fmtList(departments)}</td>
+          <td>${p.commitment ? escapeHtml(p.commitment) : "—"}</td>
+          <td class="wrap-cell">${otherFiltersHtml(p)}</td>
+          <td>
+            <label class="saved-search-alert-toggle" title="Email me when new jobs match this search">
+              <input type="checkbox" data-alert-toggle="${s.id}" ${s.alerts_enabled ? "checked" : ""} />
+              ${s.alerts_enabled ? "On" : "Off"}
+            </label>
+          </td>
+          <td>
+            <select class="saved-search-frequency" data-frequency-select="${s.id}"
+              title="How often to check for new matches" ${s.alerts_enabled ? "" : "disabled"}>
+              <option value="daily" ${s.alert_frequency === "daily" ? "selected" : ""}>Daily</option>
+              <option value="weekly" ${s.alert_frequency === "weekly" ? "selected" : ""}>Weekly</option>
+            </select>
+          </td>
+          <td>${fmtDate(s.last_checked_at)}</td>
+          <td>${fmtDate(s.created_at)}</td>
+          <td style="white-space:nowrap;">
+            <a class="row-action-btn" href="${escapeAttr(restoreUrl)}">Run</a>
+            <button type="button" class="row-action-btn danger" data-delete="${s.id}">Delete</button>
+          </td>
+        </tr>`;
+    }
+
+    async function loadSavedSearches() {
+      let res;
+      try {
+        res = await fetch("/api/saved-searches");
+      } catch (e) {
+        showOnly(unauthorizedEl);
+        return;
+      }
+      if (res.status === 503) { showOnly(disabledEl); return; }
+      if (res.status === 401 || res.status === 403) { showOnly(unauthorizedEl); return; }
+      if (!res.ok) { showOnly(unauthorizedEl); return; }
+
+      const data = await res.json();
+      const searches = data.searches || [];
+      showOnly(contentEl);
+
+      if (!searches.length) {
+        bodyEl.innerHTML = `<tr><td colspan="11"><div class="empty-modal-state">No saved searches yet. Run a search on the home page, then click "Save this search."</div></td></tr>`;
+        return;
+      }
+
+      bodyEl.innerHTML = searches.map(rowHtml).join("");
+
+      bodyEl.querySelectorAll("[data-delete]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          try {
+            await fetch(`/api/saved-searches/${btn.dataset.delete}`, { method: "DELETE" });
+            await loadSavedSearches();
+          } catch (e) {
+            btn.disabled = false;
+          }
+        });
+      });
+      bodyEl.querySelectorAll("[data-alert-toggle]").forEach((cb) => {
+        cb.addEventListener("change", async () => {
+          cb.disabled = true;
+          try {
+            await fetch(`/api/saved-searches/${cb.dataset.alertToggle}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ alerts_enabled: cb.checked }),
+            });
+            await loadSavedSearches(); // refetch -- keeps the frequency select's enabled state and the "On"/"Off" label in sync, not just the checkbox itself
+          } catch (e) {
+            cb.checked = !cb.checked;
+            cb.disabled = false;
+          }
+        });
+      });
+      bodyEl.querySelectorAll("[data-frequency-select]").forEach((sel) => {
+        sel.dataset.prevValue = sel.value;
+        sel.addEventListener("change", async () => {
+          sel.disabled = true;
+          try {
+            const res = await fetch(`/api/saved-searches/${sel.dataset.frequencySelect}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ alert_frequency: sel.value }),
+            });
+            if (!res.ok) throw new Error("request failed");
+          } catch (e) {
+            sel.value = sel.dataset.prevValue;
+          } finally {
+            sel.disabled = false;
+          }
+        });
+      });
+    }
+
+    loadSavedSearches();
+  </script>
+</body>
+</html>

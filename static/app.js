@@ -1044,12 +1044,11 @@ document.addEventListener("keydown", (e) => {
 function renderAuthArea() {
   if (currentUser) {
     authArea.innerHTML = `
-      <button type="button" class="auth-btn" id="btn-saved-searches">Saved searches</button>
+      <a class="auth-btn" href="/saved-searches">Saved searches</a>
       <a class="auth-btn" href="/applications">My applications</a>
       <span class="auth-email">${escapeHtml(currentUser.email)}</span>
       <button type="button" class="auth-btn" id="btn-logout">Log out</button>
     `;
-    document.getElementById("btn-saved-searches").addEventListener("click", openSavedSearchesModal);
     document.getElementById("btn-logout").addEventListener("click", logout);
     saveSearchBtn.classList.remove("hidden");
   } else {
@@ -1389,74 +1388,17 @@ async function submitSaveSearch() {
   }
 }
 
-async function openSavedSearchesModal() {
-  openModal(`<h2 class="modal-title">Saved searches</h2><div id="saved-searches-list">Loading…</div>`);
-  try {
-    const res = await fetch("/api/saved-searches");
-    const data = await res.json();
-    const list = document.getElementById("saved-searches-list");
-    if (!data.searches || !data.searches.length) {
-      list.innerHTML = `<div class="empty-modal-state">No saved searches yet. Run a search, then click "Save this search."</div>`;
-      return;
-    }
-    list.innerHTML = data.searches.map((s) => `
-      <div class="saved-search-row">
-        <span class="saved-search-name">${escapeHtml(s.name)}</span>
-        <label class="saved-search-alert-toggle" title="Email me when new jobs match this search">
-          <input type="checkbox" data-alert-toggle="${s.id}" ${s.alerts_enabled ? "checked" : ""} />
-          Email alerts
-        </label>
-        <select class="saved-search-frequency" data-frequency-select="${s.id}"
-          title="How often to check for new matches" ${s.alerts_enabled ? "" : "disabled"}>
-          <option value="daily" ${s.alert_frequency === "daily" ? "selected" : ""}>Daily</option>
-          <option value="weekly" ${s.alert_frequency === "weekly" ? "selected" : ""}>Weekly</option>
-        </select>
-        <button type="button" class="row-action-btn" data-run="${s.id}">Run</button>
-        <button type="button" class="row-action-btn danger" data-delete="${s.id}">Delete</button>
-      </div>
-    `).join("");
-    const byId = {};
-    data.searches.forEach((s) => { byId[s.id] = s; });
-    list.querySelectorAll("[data-run]").forEach((btn) => {
-      btn.addEventListener("click", () => loadSavedSearch(byId[btn.dataset.run].params));
-    });
-    list.querySelectorAll("[data-delete]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        await fetch(`/api/saved-searches/${btn.dataset.delete}`, { method: "DELETE" });
-        openSavedSearchesModal(); // simplest correct redraw -- just refetch rather than hand-patch the DOM
-      });
-    });
-    list.querySelectorAll("[data-alert-toggle]").forEach((cb) => {
-      cb.addEventListener("change", async () => {
-        // No redraw needed here (unlike delete) -- the checkbox's own
-        // state already reflects the intended value, and re-fetching
-        // would just flash the list for no visible change. The frequency
-        // select next to it just gets enabled/disabled in place to match
-        // (it's meaningless while alerts are off, but there's no reason
-        // to lose the choice -- re-enabling the checkbox should bring
-        // back whatever frequency was already selected).
-        await fetch(`/api/saved-searches/${cb.dataset.alertToggle}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ alerts_enabled: cb.checked }),
-        });
-        const freqSelect = list.querySelector(`[data-frequency-select="${cb.dataset.alertToggle}"]`);
-        if (freqSelect) freqSelect.disabled = !cb.checked;
-      });
-    });
-    list.querySelectorAll("[data-frequency-select]").forEach((sel) => {
-      sel.addEventListener("change", async () => {
-        await fetch(`/api/saved-searches/${sel.dataset.frequencySelect}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ alert_frequency: sel.value }),
-        });
-      });
-    });
-  } catch (e) {
-    document.getElementById("saved-searches-list").innerHTML = `<div class="empty-modal-state">Couldn't load saved searches.</div>`;
-  }
-}
+// The saved-searches LIST itself moved to its own page
+// (static/saved-searches.html, served at /saved-searches) -- same reason
+// My Applications did (see the comment above toggleApplied()): a table
+// with what each search actually filters on, plus alerts/frequency/last-
+// checked/created, doesn't fit in a modal box. currentSearchParams(),
+// submitSaveSearch(), and loadSavedSearch() below all stay here, since
+// they're homepage-only concerns (building the params blob to save, and
+// restoring one back onto these same filter controls when the saved-
+// searches page's "Run" link sends the user back here with a
+// ?restore=<params> query param -- see the restoreFromQueryParam() call
+// near the bottom of this file).
 
 // ---- accounts: applied-job tracking ----
 //
@@ -2290,6 +2232,29 @@ function clearSearch() {
   search(1);
 }
 
+// The saved-searches page's (static/saved-searches.html) "Run" link sends
+// the user back here as `/?restore=<JSON-encoded params>` rather than
+// calling loadSavedSearch() directly -- it's a different page, with no
+// access to this file's in-memory state. Reads that param once on load,
+// hands it to the existing loadSavedSearch() (which already knows how to
+// populate every filter control and re-run the search), then strips the
+// param via replaceState so refreshing this same URL later doesn't
+// silently re-apply a saved search someone's since changed their mind
+// about. Returns true if a restore actually happened, so the caller below
+// knows not to also fire its own default search(1).
+function restoreFromQueryParam() {
+  const qs = new URLSearchParams(window.location.search);
+  const restore = qs.get("restore");
+  if (!restore) return false;
+  window.history.replaceState({}, "", window.location.pathname);
+  try {
+    loadSavedSearch(JSON.parse(restore));
+    return true;
+  } catch (e) {
+    return false; // malformed/tampered query param -- fall back to a normal search instead of a blank page
+  }
+}
+
 clearSearchBtn.addEventListener("click", clearSearch);
 
 // Sort is a "how do you want to look at what you already have" control,
@@ -2310,4 +2275,6 @@ setInterval(loadStatus, 30000);
 // immediate no-op if accounts aren't configured) so the very first
 // render already knows whether to show "Mark applied" toggles, instead
 // of a flash where they appear only after the next search.
-checkAuth().then(() => search(1));
+checkAuth().then(() => {
+  if (!restoreFromQueryParam()) search(1);
+});

@@ -1193,6 +1193,37 @@ modal; `app.js` no longer carries any of the modal's rendering code
 just the "Mark applied" toggle button on each job card, which is a
 separate per-card action untouched by this change.
 
+**Saved Searches got the same treatment (`GET /saved-searches`,
+`static/saved-searches.html`).** The old modal only ever showed a
+search's *name* -- to know what a saved search actually filtered on, the
+only option was clicking "Run" and looking at the homepage's own filter
+controls afterward. The new page's table adds real columns for query,
+location(s), department(s), commitment, and an "other filters" column
+folding in posted-within/salary/YOE range whenever any of those were
+actually touched (most saved searches won't have set them, so they don't
+get their own mostly-empty columns) -- reusing `.admin-table`/
+`.admin-table-wrap` a second time, plus `last_checked_at` and
+`created_at` columns already returned by the API but never previously
+shown anywhere. Alerts on/off and frequency are still inline-editable
+right in the table, same `PATCH /api/saved-searches/<id>` endpoint as
+before.
+
+The one real wrinkle: "Run" used to just call `loadSavedSearch(params)`
+directly, since the modal and the search filters lived in the same page.
+Now they're different pages, so `saved-searches.html`'s "Run" is a plain
+link to `/?restore=<JSON.stringify(params), URL-encoded>`, and a new
+`restoreFromQueryParam()` in `app.js` (called once, from the homepage's
+own bootstrap, before the default `search(1)`) reads that param, hands
+the parsed object to the *same* `loadSavedSearch()` used before (no
+duplicated restore logic), and strips the param via `history.replaceState`
+so reloading or bookmarking that exact URL later doesn't silently
+re-apply an old search someone's since moved on from. A malformed or
+tampered `restore` value (bad JSON) falls back to a normal default
+search rather than throwing or showing a blank page. `/saved-searches`
+is added to `robots.txt`'s disallow list alongside `/applications` and
+`/admin` for the same reason: private, signed-in-only data a search
+result should never point at.
+
 **Favicon**: `static/favicon.svg` is the same maroon diamond used as the
 `.brand-mark` "◆" next to the wordmark in the top nav, on a cream
 rounded-square field (colors copied straight from `style.css`'s
