@@ -3135,7 +3135,7 @@ COMPANIES = [
 
     # ══ COMMUNITY / EVENTS PLATFORMS ═════════════════════════════════════════
     ("Bevy",                    "bevy"),            # virtual community events
-    ("Vanilla Forums",          "vanilla"),         # community platform
+    ("Vanilla",                 "vanilla"),         # Ashby; AI estate-advisory platform (justvanilla.com) — was "Vanilla Forums" here, but that board 404s on both Greenhouse and Lever (defunct/renamed), so this slug was free; repointed to the live Ashby board instead of left dead, per a user request for "Vanilla" (Aug 2026 batch 5)
     ("Orbit",                   "orbit"),           # community growth platform
 
     # ══ REVENUE CYCLE / BILLING ═══════════════════════════════════════════════
@@ -3723,7 +3723,7 @@ COMPANIES = [
 
     # ══ DOCUMENT AI / IDP (intelligent document processing)
     ("Hyperscience", "hyperscience"),     # Enterprise IDP, $100M+ raised, GH
-    ("Ocrolus", "ocrolus"),               # Doc AI for fintech, $100M raised, GH
+    ("Ocrolus", "ocrolusinc"),            # Doc AI for fintech, $100M raised, GH — slug fixed to "ocrolusinc" (plain "ocrolus" 404s), caught while verifying an Aug 2026 batch 5 request
     ("Nanonets", "nanonets"),             # AI document processing, GH
     ("Rossum", "rossum"),                 # Document AI, GH/Lever
     ("Sensible", "sensible"),             # Data extraction API, Ashby
@@ -4541,6 +4541,36 @@ COMPANIES = [
     ("Rifa AI",                 "rifa"),              # Ashby; AI agents for contact centers — requested as "Rifa Ai", slug is just "rifa"
     ("Bidgely",                 "bidgely-inc"),       # Ashby; AI energy analytics for utilities — slug is "bidgely-inc", not "bidgely"
     ("Black Cloak",             "BlackCloak"),        # Lever; digital executive protection — slug is case-sensitive, lowercase 404s
+
+    # ── User-requested additions (Aug 2026 batch 5) ────────────────────────────
+    # Every slug below was hit directly against its live boards-api/
+    # posting-api/postings endpoint (curl) before being added, and for the
+    # non-obvious slugs, cross-checked against a live job's title/content
+    # to confirm it's actually the requested company. Four of the eleven
+    # Greenhouse requests were already present under matching slugs and are
+    # NOT re-added here (would just duplicate a scrape every cycle):
+    # Elite Technology ("elitetechnology", line ~1383), AssemblyAI
+    # ("assemblyai", line ~1470), Censys ("censys", line ~1884), and Copia
+    # ("copia", as "Copia Automation", line ~2198).
+    #
+    # Two pre-existing entries turned out to be dead/wrong and were fixed
+    # in place rather than duplicated: "Vanilla Forums" (slug "vanilla",
+    # community-platforms section) 404s on Greenhouse and Lever -- that
+    # slug is now repointed to the live Ashby board for "Vanilla" the
+    # estate-advisory company, which is what was actually requested here.
+    # "Ocrolus" (document-AI section) was on slug "ocrolus", which 404s;
+    # fixed to "ocrolusinc", the real live board.
+    ("PayNearMe",               "paynearmeinc"),      # Greenhouse; requested as "Paynearme" — slug is "paynearmeinc"
+    ("Scorpion Enterprises",    "scorpionenterprisesllc"), # Greenhouse; local-business marketing/SEO platform — slug is the full legal name
+    ("Niche",                   "nichecom"),          # Greenhouse; school search (niche.com) — slug is "nichecom", not "niche"
+    ("Feastables",              "feastables"),        # Greenhouse; MrBeast's chocolate/snack brand
+    ("Voltera Power",           "volterapower"),      # Greenhouse; EV charging infrastructure (goes by "Voltera")
+    ("Vera Therapeutics",       "veratherapeuticsinc"), # Greenhouse; biotech (kidney disease) — slug is "veratherapeuticsinc"
+    ("Kard Financial",          "kardfinancialinc"),  # Greenhouse; card-issuing/rewards fintech infra — slug is "kardfinancialinc"
+    ("Assured",                 "assured"),           # Ashby; claims/insurance automation
+    ("Monarch Money",           "monarchmoney"),      # Ashby; personal finance/budgeting app
+    ("GiveButter",              "givebutter"),        # Ashby; nonprofit fundraising platform
+    ("Ketch",                   "ketch"),             # Greenhouse; data privacy/consent platform — requested as Lever (jobs.lever.co/Ketch is real and live too), but Ketch actually dual-posts on both; using the Greenhouse slug since search_company() tries GH first anyway
 
 ]
 
