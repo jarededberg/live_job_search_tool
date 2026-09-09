@@ -3074,12 +3074,14 @@ def _refresh_salary_cache_if_stale():
         if computed_at is not None and (datetime.now(timezone.utc) - computed_at) < _SALARY_CACHE_TTL:
             return
         by_role = db.salary_stats_by_role()
-        # No `limit` here (a very high one instead) -- this cache holds
-        # the FULL company list once; each caller slices whatever prefix
-        # it needs (40 for the index page, 1000 for the sitemap) out of
-        # the same cached list rather than the cache holding multiple
-        # differently-limited copies.
-        by_company = db.salary_stats_by_company(limit=1_000_000)
+        # Capped at 1000 -- the highest prefix any caller actually slices
+        # off this cache (the sitemap takes [:1000], the index page just
+        # [:40]) rather than the cache holding multiple differently-
+        # limited copies. Previously limit=1_000_000 (effectively
+        # unbounded), which grows this cache's memory footprint in
+        # lockstep with the scraped dataset for no benefit, since nothing
+        # ever reads past row 1000.
+        by_company = db.salary_stats_by_company(limit=1000)
         jobs_by_role = db.salary_confirmed_jobs_by_role(limit_per_role=50)
         _salary_cache["by_role"] = by_role
         _salary_cache["by_role_dict"] = {s["label"]: s for s in by_role}
