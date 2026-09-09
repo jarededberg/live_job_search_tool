@@ -8,6 +8,7 @@ Run locally:
 Then open http://localhost:8000
 """
 
+import fcntl
 import functools
 import hashlib
 import hmac
@@ -284,6 +285,63 @@ def start_scheduler():
                        next_run_time=_compute_next_digest_time())
     scheduler.start()
     return scheduler
+
+
+# SQLite (JOBS_DB_PATH) lives on Render's persistent disk, which can only be
+# attached to a single service -- there's no separate "scraper" service or
+# Cron Job that could share it without moving off SQLite entirely (Cron Jobs
+# on Render can't attach a disk at all). So the scrape has to keep running
+# inside this same web service. The actual fix for it starving web requests
+# is to give the web service more than one gunicorn WORKER PROCESS, so a
+# scrape running in one process's threads doesn't hold the GIL that every
+# request-handling thread in that same process needs -- other worker
+# processes keep serving requests unaffected.
+#
+# That alone isn't safe by itself, though: db.init_db()/start_scheduler()
+# below run at module import time, which happens once per worker process,
+# not once per app. With N gunicorn workers that means N separate
+# BackgroundSchedulers all trying to run the same scrape/alert jobs on the
+# same schedule -- _scrape_lock above is a threading.Lock, which only
+# blocks concurrent scrapes WITHIN one process, so it does nothing across
+# separate worker processes. Left unguarded, more workers would mean
+# multiple simultaneous scrapes hammering the same SQLite file -- worse
+# write contention ("database is locked" errors -- see conn_ctx()'s
+# docstring in db.py for the last time that bit) than today's single-
+# scraper setup, not better.
+#
+# _acquire_scheduler_lock() fixes that with an OS-level advisory file lock
+# (flock) on the persistent disk, right next to jobs.db: whichever worker
+# process starts first wins the lock and runs the scheduler; every other
+# worker's non-blocking flock attempt fails immediately and that worker
+# just serves requests. The lock releases automatically the instant the
+# winning process exits or restarts (the OS drops it on file-descriptor
+# close), so a redeploy or crash-restart re-elects a scheduler-owning
+# worker on its own -- no stale-lock cleanup logic needed.
+_SCHEDULER_LOCK_PATH = os.path.join(os.path.dirname(db.DB_PATH), ".scheduler.lock")
+_scheduler_lock_file = None  # module-level ref kept alive for the process's lifetime -- closing it would release the lock early
+
+
+def _acquire_scheduler_lock():
+    """True if this worker process should own the background scheduler
+    (scrape + saved-search-alert + digest jobs); False if another worker
+    process already claimed it. See the block comment above for why this
+    exists. Fails open to True (run the scheduler) if the lock file can't
+    even be opened -- e.g. local dev without a persistent disk mounted --
+    same graceful-degradation pattern as the rest of this file; the only
+    real risk of duplicate scheduling is on Render with multiple workers,
+    where the disk (and this file) always exists."""
+    global _scheduler_lock_file
+    try:
+        f = open(_SCHEDULER_LOCK_PATH, "w")
+    except OSError:
+        return True
+    try:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return False
+    _scheduler_lock_file = f
+    return True
 
 
 # ---------------- accounts: helpers ----------------
@@ -3074,14 +3132,12 @@ def _refresh_salary_cache_if_stale():
         if computed_at is not None and (datetime.now(timezone.utc) - computed_at) < _SALARY_CACHE_TTL:
             return
         by_role = db.salary_stats_by_role()
-        # Capped at 1000 -- the highest prefix any caller actually slices
-        # off this cache (the sitemap takes [:1000], the index page just
-        # [:40]) rather than the cache holding multiple differently-
-        # limited copies. Previously limit=1_000_000 (effectively
-        # unbounded), which grows this cache's memory footprint in
-        # lockstep with the scraped dataset for no benefit, since nothing
-        # ever reads past row 1000.
-        by_company = db.salary_stats_by_company(limit=1000)
+        # No `limit` here (a very high one instead) -- this cache holds
+        # the FULL company list once; each caller slices whatever prefix
+        # it needs (40 for the index page, 1000 for the sitemap) out of
+        # the same cached list rather than the cache holding multiple
+        # differently-limited copies.
+        by_company = db.salary_stats_by_company(limit=1_000_000)
         jobs_by_role = db.salary_confirmed_jobs_by_role(limit_per_role=50)
         _salary_cache["by_role"] = by_role
         _salary_cache["by_role_dict"] = {s["label"]: s for s in by_role}
@@ -3297,7 +3353,14 @@ if not contact_enabled():
           "form is disabled on this deployment; the contact page shows a "
           "plain 'not available right now' message instead (no mailto: "
           "fallback -- see README's 'Contact form' section for why).")
-_scheduler = start_scheduler()
+if _acquire_scheduler_lock():
+    _scheduler = start_scheduler()
+    print("[app] this worker process owns the background scheduler "
+          "(scrape/alerts/digest)")
+else:
+    _scheduler = None
+    print("[app] background scheduler already owned by another worker "
+          "process on this service -- this one only serves requests")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
