@@ -25,6 +25,7 @@ from email.utils import format_datetime
 from urllib.error import URLError
 
 from flask import Flask, Response, jsonify, request, send_from_directory, session
+from flask_compress import Compress
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -105,6 +106,19 @@ ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "jarededberg@gmail.com").strip().low
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = MAX_RESUME_BYTES
+# Compresses every response body (gzip/brotli, whichever the client
+# accepts) before it leaves this process. Render meters bandwidth at this
+# origin, not at Cloudflare's edge in front of it, so compressing here --
+# rather than relying on Cloudflare to recompress downstream -- is what
+# actually reduces the billed "HTTP Responses" bytes. COMPRESS_MIMETYPES
+# extends Flask-Compress's own default list (text/html, application/json,
+# text/css, application/javascript, etc.) to include the XML this app
+# serves from its /sitemap-*.xml routes, which isn't covered by default.
+app.config["COMPRESS_MIMETYPES"] = [
+    "text/html", "text/css", "text/xml", "application/xml",
+    "application/json", "application/javascript", "text/javascript",
+]
+Compress(app)
 # Session cookies need a stable secret to sign against. Falling back to a
 # freshly-generated one when SECRET_KEY isn't set keeps the app from
 # crashing on startup, but it means every process restart invalidates
